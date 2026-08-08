@@ -25,7 +25,9 @@ export default defineConfig(
     },
     rules: {
       ...eslintPluginReactHooks.configs.recommended.rules,
-      ...eslintPluginReactRefresh.configs.vite.rules
+      ...eslintPluginReactRefresh.configs.vite.rules,
+      // TypeScript props 已由类型系统校验，prop-types 在 TS 组件上只会误报
+      'react/prop-types': 'off'
     }
   },
   eslintConfigPrettier

@@ -1,15 +1,29 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+const isMac = process.platform === 'darwin'
+
 function createWindow(): void {
-  // Create the browser window.
+  // 尺寸依据 prototype/1.html 的绝对定位反推：
+  // 卡片区底边 433+104=537，输入框顶边 = 视口高-141 → 视口高需 ≥678
+  // 卡片 714px + 左右 48px 边距，侧边栏 299px+1px 边框 → 窗口宽需 ≥1062
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1200,
+    height: 800,
+    minWidth: 1080,
+    minHeight: 700,
     show: false,
     autoHideMenuBar: true,
+    // 1.html 的顶栏是 fixed 横跨全宽 + 侧边栏 padding-top:44px 让位，
+    // 本就是在模拟无边框窗口
+    ...(isMac
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 15 } }
+      : {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: { color: '#f4f4f5', symbolColor: '#6f6f74', height: 44 }
+        }),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -48,9 +62,6 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
-
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
 
   createWindow()
 

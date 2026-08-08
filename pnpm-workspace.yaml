@@ -1,0 +1,5 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  # 仅 Windows 安装包构建时需要，日常开发不用跑它的脚本
+  electron-winstaller: false
