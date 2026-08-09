@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { registerFileIpc } from './fileIpc'
 import icon from '../../resources/icon.png?asset'
 
 const isMac = process.platform === 'darwin'
@@ -27,7 +28,9 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // BrowserTab 内嵌浏览器（<webview>），页面内默认 nodeIntegration=false
+      webviewTag: true
     }
   })
 
@@ -55,6 +58,9 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
+
+  // 文件服务 IPC（file:listDir / file:readFile）
+  registerFileIpc()
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.

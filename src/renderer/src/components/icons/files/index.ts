@@ -1,0 +1,8 @@
+export { DockerIcon } from './DockerIcon'
+export { DocLinesIcon } from './DocLinesIcon'
+export { DocIcon } from './DocIcon'
+export { GitIcon } from './GitIcon'
+export { PreCommitIcon } from './PreCommitIcon'
+export { StarIcon } from './StarIcon'
+export { FileTreeIcon } from './FileTreeIcon'
+export { VsCodeIcon } from './VsCodeIcon'
