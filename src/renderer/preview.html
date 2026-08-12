@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>chat preview</title>
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        height: 100%;
+      }
+    </style>
+    <script>
+      /*
+       * preload 桥接的 stub，必须在业务模块之前执行。
+       *
+       * InlineAnchor 会经 WorkspaceContext 拉到 rpc/client.ts，那个模块在
+       * **导入时**就构造 RpcPeer。浏览器里没有 preload，不 stub 会直接报
+       * `Cannot read properties of undefined (reading 'subscribe')`。
+       *
+       * 写在这里而不是 preview.tsx 里：ESM 的 import 会被提升，
+       * 放在 tsx 顶部的赋值语句其实晚于所有 import 执行。
+       */
+      window.rpcBridge = { send() {}, subscribe: () => () => {} }
+      window.api = {
+        openExternal(url) {
+          console.log('[preview] openExternal', url)
+        }
+      }
+      /*
+       * WorkspaceProvider 首帧会读 window.bootstrap.get().workspace。
+       * 给一个最小快照，让真实 Provider 能跑起来（InlineAnchor 依赖它）。
+       */
+      window.bootstrap = {
+        get() {
+          return {
+            workspace: { projects: [], selection: { projectId: null }, pinnedChatIds: [] }
+          }
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/preview.tsx"></script>
+  </body>
+</html>

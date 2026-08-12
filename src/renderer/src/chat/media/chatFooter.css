@@ -1,0 +1,118 @@
+/*
+ * 回复底部工具栏 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/media/chat.css
+ *
+ * 上游的可见性判定分散在 `.chat-response-loading` / `.chat-most-recent-response`
+ * / `.group-hovered` 几个由 JS 挂的类上。这里把 hover 交还给 CSS 的 `:hover`
+ * （React 里再维护一份 hover 状态是多余的），只保留 JS 必须参与的两个：
+ * 是否完成（决定要不要渲染）、是否最新一条。
+ */
+
+.chat-footer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  padding-top: 6px;
+  height: 22px;
+
+  /* 平时透明而不是 display:none：留住高度，出现时不会把下面的内容顶一下 */
+  opacity: 0;
+  transition: opacity 0.1s ease-in-out;
+}
+
+/* 最新一条常驻；其余 hover 或键盘焦点进入时出现 */
+.interactive-response.chat-most-recent-response .chat-footer-toolbar,
+.interactive-response:hover .chat-footer-toolbar,
+.interactive-response:focus-within .chat-footer-toolbar {
+  opacity: 1;
+}
+
+.chat-footer-action {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: var(--vscode-cornerRadius-medium);
+  cursor: pointer;
+  color: var(--vscode-icon-foreground);
+  background: none;
+}
+
+.chat-footer-action:hover {
+  background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.chat-footer-action:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+/* ── 耗时 ──────────────────────────────────────────────────────────── */
+
+.chat-footer-details {
+  display: flex;
+  align-items: center;
+  gap: var(--vscode-spacing-size40);
+
+  /* 推到最右：左边是操作，右边是元信息 */
+  margin-left: auto;
+  min-width: 0;
+
+  padding: 0;
+  font-size: var(--vscode-chat-font-size-body-xs);
+  opacity: 0.7;
+  color: var(--vscode-descriptionForeground);
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-footer-details:focus-visible {
+  outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+  outline-offset: var(--vscode-spacing-size20);
+}
+
+/*
+ * 翻转：两行文字叠在同一个 grid 格里，默认显示"完成时间"，
+ * hover / 键盘聚焦时上移换成"耗时"。
+ */
+.chat-response-timing {
+  display: inline-grid;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.chat-response-timing > * {
+  grid-area: 1 / 1;
+  justify-self: end;
+  text-align: right;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.chat-response-timing .chat-response-alternate {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+.chat-footer-details:hover .chat-response-timing.has-alternate .chat-response-completed-at,
+.chat-footer-details:focus-visible .chat-response-timing.has-alternate .chat-response-completed-at {
+  opacity: 0;
+  transform: translateY(-100%);
+}
+
+.chat-footer-details:hover .chat-response-timing.has-alternate .chat-response-alternate,
+.chat-footer-details:focus-visible .chat-response-timing.has-alternate .chat-response-alternate {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-response-timing > * {
+    transition: none;
+  }
+}

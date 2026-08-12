@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { useOverlay, type MenuId } from '../../state/OverlayContext'
 import { ChevronIcon } from '../icons'
 
 /** sider/2.html .icon-btn（第 380-404 行）：24px 方钮，svg 14px */
@@ -24,6 +25,11 @@ interface SectionHeaderProps {
   onToggle(): void
   /** hover 时淡入的右侧控制按钮组 */
   controls?: ReactNode
+  /**
+   * 由本区控制按钮打开的菜单 id。
+   * 该菜单打开期间保持控制按钮组可见（鼠标已在菜单上，:hover 会丢失）。
+   */
+  menuId?: MenuId
 }
 
 /**
@@ -34,8 +40,12 @@ export function SectionHeader({
   title,
   collapsed,
   onToggle,
-  controls
+  controls,
+  menuId
 }: SectionHeaderProps): React.JSX.Element {
+  const { menu } = useOverlay()
+  const controlsOpen = menuId !== undefined && menu?.id === menuId
+
   return (
     <div className="group flex items-center justify-between gap-2 pl-2 pr-0.5">
       <div className="min-w-0 flex-1 text-sm font-medium text-desc opacity-75">
@@ -48,9 +58,9 @@ export function SectionHeader({
           >
             <span className="min-w-0 truncate">{title}</span>
             <span
-              className={`flex size-3 shrink-0 items-center justify-center opacity-0 transition-[transform,opacity] duration-150 group-hover:opacity-100 ${
-                collapsed ? '-rotate-90' : ''
-              }`}
+              className={`flex size-3 shrink-0 items-center justify-center transition-[transform,opacity] duration-150 ${
+                controlsOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              } ${collapsed ? '-rotate-90' : ''}`}
             >
               <ChevronIcon className="size-3" />
             </span>
@@ -58,7 +68,13 @@ export function SectionHeader({
         </div>
       </div>
       {controls && (
-        <div className="pointer-events-none flex items-center gap-1 opacity-0 transition-opacity duration-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+        <div
+          className={`flex items-center gap-1 transition-opacity duration-100 ${
+            controlsOpen
+              ? 'opacity-100'
+              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+          }`}
+        >
           {controls}
         </div>
       )}

@@ -1,4 +1,6 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { RpcMessage } from '@shared/rpc/messages'
+import type { BootstrapPayload } from '@shared/workspace/types'
 
 interface DirEntryPayload {
   name: string
@@ -13,6 +15,14 @@ interface FileApi {
 
 interface Api {
   openExternal(url: string): Promise<void>
+  openProjectPath(projectId: string): Promise<void>
+  homeDir: string
+}
+
+/** JSON-RPC 报文桥，语义由渲染层的 RpcPeer 解释 */
+interface RpcBridge {
+  send(message: RpcMessage): void
+  subscribe(handler: (message: RpcMessage) => void): () => void
 }
 
 declare global {
@@ -20,6 +30,9 @@ declare global {
     electron: ElectronAPI
     api: Api
     fileApi: FileApi
+    rpcBridge: RpcBridge
+    /** 首屏同步快照，preload 阶段已取好 */
+    bootstrap: { get(): BootstrapPayload }
   }
 }
 

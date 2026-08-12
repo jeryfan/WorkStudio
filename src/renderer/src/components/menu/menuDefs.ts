@@ -1,5 +1,6 @@
 import type { MenuId } from '../../state/OverlayContext'
 import {
+  AddReviewIcon,
   ApiKeyIcon,
   ArchiveAllIcon,
   ArchiveTasksIcon,
@@ -28,7 +29,7 @@ export const menuDefs: Record<MenuId, { entries: MenuEntry[]; minWidth?: number;
     'project-options': {
       minWidth: 172,
       entries: [
-        { id: 'archive-all', label: 'Archive all tasks', icon: ArchiveAllIcon },
+        { id: 'archive-all', label: 'Archive all chats', icon: ArchiveAllIcon },
         { separator: 'normal' },
         { id: 'organize', label: 'Organize sidebar', icon: OrganizeIcon, submenu: true },
         { id: 'sort-by', label: 'Sort by', icon: SortIcon, submenu: true }
@@ -41,7 +42,7 @@ export const menuDefs: Record<MenuId, { entries: MenuEntry[]; minWidth?: number;
         { id: 'reveal', label: 'Reveal in Finder', icon: RevealIcon },
         { id: 'worktree', label: 'Create permanent worktree', icon: WorktreeIcon },
         { id: 'rename', label: 'Rename project', icon: RenameIcon },
-        { id: 'archive-tasks', label: 'Archive tasks', icon: ArchiveTasksIcon },
+        { id: 'archive-chats', label: 'Archive chats', icon: ArchiveTasksIcon },
         { id: 'remove', label: 'Remove', icon: RemoveIcon }
       ]
     },
@@ -63,6 +64,15 @@ export const menuDefs: Record<MenuId, { entries: MenuEntry[]; minWidth?: number;
         { id: 'whats-new', label: "What's new", icon: WhatsNewIcon },
         { id: 'shortcuts', label: 'Keyboard shortcuts', icon: KeyboardIcon },
         { id: 'help', label: 'Help', icon: HelpIcon }
+      ]
+    },
+    // panel/1.html #menu-add-tab（设计文件在第 359 行截断，仅 Review 一项可考，
+    // Browser 项为保持现有新建标签能力所加；Review tab 类型未实现，暂置灰）
+    'add-tab': {
+      width: 280,
+      entries: [
+        { id: 'review', label: 'Review', icon: AddReviewIcon, shortcut: '⌃⇧G', disabled: true },
+        { id: 'browser', label: 'Browser', icon: ChromeIcon }
       ]
     }
   }

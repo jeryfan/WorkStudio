@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { Group, Panel } from 'react-resizable-panels'
 import { WorkspaceProvider } from '../../state/WorkspaceContext'
+import { SessionProvider } from '../../state/SessionContext'
+import { ChatRuntimeProvider, useChatRuntime } from '../../state/ChatRuntimeContext'
 import { OverlayProvider, useOverlay } from '../../state/OverlayContext'
 import { PanelProvider, usePanels } from '../../state/PanelContext'
 import { Sidebar } from '../sidebar/Sidebar'
@@ -9,6 +11,7 @@ import { ContentArea } from './ContentArea'
 import { PanelShell } from '../panel/PanelShell'
 import { OverlayLayer } from '../overlay/OverlayLayer'
 import { HomeView } from '../../views/HomeView'
+import { ChatView } from '../../chat/ChatView'
 import { HorizontalSeparator, VerticalSeparator } from './separators'
 
 function Shell(): React.JSX.Element {
@@ -66,7 +69,7 @@ function Shell(): React.JSX.Element {
                   <>
                     <Panel id="content" minSize="320px" className="min-h-0">
                       <ContentArea>
-                        <HomeView />
+                        <MainView />
                       </ContentArea>
                     </Panel>
                     <VerticalSeparator />
@@ -111,6 +114,12 @@ function Shell(): React.JSX.Element {
   )
 }
 
+/** 主区域路由：没有打开的会话就是首页 */
+function MainView(): React.JSX.Element {
+  const { activeChatId } = useChatRuntime()
+  return activeChatId ? <ChatView /> : <HomeView />
+}
+
 /**
  * .app (100vh 纵向) → 三向面板骨架（react-resizable-panels）：
  * 所有面板常驻挂载 + collapsible，开关走命令式 collapse/expand，
@@ -119,11 +128,15 @@ function Shell(): React.JSX.Element {
 export function AppShell(): React.JSX.Element {
   return (
     <WorkspaceProvider>
-      <OverlayProvider>
-        <PanelProvider>
-          <Shell />
-        </PanelProvider>
-      </OverlayProvider>
+      <SessionProvider>
+        <ChatRuntimeProvider>
+          <OverlayProvider>
+            <PanelProvider>
+              <Shell />
+            </PanelProvider>
+          </OverlayProvider>
+        </ChatRuntimeProvider>
+      </SessionProvider>
     </WorkspaceProvider>
   )
 }

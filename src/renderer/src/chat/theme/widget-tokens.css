@@ -1,0 +1,38 @@
+/*
+ * widget 级 token —— 手写，与生成的 tokens.css 互补。
+ *
+ * 这三个变量在 VSCode 里不属于主题注册表，而是 ChatWidget 在运行时按宿主传入的
+ * styles 用 `element.style.setProperty` 注入的（chatWidget.ts:2301-2303）。
+ * 同一个 ChatWidget 嵌在侧栏、编辑器、Agent Window 里会拿到不同的底色，所以上游
+ * 才把它做成"宿主注入"而不是"主题常量"。
+ *
+ * 本项目只有 Agent Window 这一种宿主，于是直接把 Agent Window 的绑定固化成别名
+ * （取自 sessions/contrib/chat/browser/chatView.ts:_buildStyles）：
+ *
+ *   listBackground        → activeSessionView.background
+ *   listForeground        → activeSessionView.foreground
+ *   resultEditorBackground → agentsPanel.background
+ *
+ * 用 active 而非 inactive 的那一档：inactive 是 Agent Window 里非当前会话卡片的
+ * 弱化配色，我们的窗口同时只显示一个会话。
+ *
+ * 每一条都带 `var()` 兜底，不能直接指过去：高对比度主题里这几个 id 大多没有
+ * 定义（生成的 tokens.css 会写成 `initial`，即"保证无效"），此时 var() 会退到
+ * 兜底值。少了兜底，颜色会继承到外层 Tailwind 的默认值——表现就是高对比度下
+ * 正文变成一片灰。VSCode 那边等价的行为是继承 workbench 的前景/背景色。
+ */
+
+.interactive-session {
+  --vscode-chat-list-background: var(
+    --vscode-activeSessionView-background,
+    var(--vscode-editor-background)
+  );
+  --vscode-interactive-session-foreground: var(
+    --vscode-activeSessionView-foreground,
+    var(--vscode-foreground)
+  );
+  --vscode-interactive-result-editor-background-color: var(
+    --vscode-agentsPanel-background,
+    var(--vscode-editor-background)
+  );
+}

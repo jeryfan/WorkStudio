@@ -1,0 +1,144 @@
+/*
+ * 可折叠块 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatCollapsibleContentPart.css
+ *   workbench/contrib/chat/browser/widget/media/chat.css（.chat-used-context* 段）
+ *
+ * 上游的标题按钮是 monaco 的 ButtonWithIcon，样式挂在 `.monaco-button` 上；
+ * 这里是原生 <button>，选择器相应改写。
+ */
+
+.chat-used-context {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.5em;
+}
+
+/* ── 标题行 ────────────────────────────────────────────────────────── */
+
+.chat-used-context-label {
+  font-size: 13px;
+  font-family: var(--vscode-chat-font-family, inherit);
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+  position: relative;
+}
+
+.chat-used-context-label > button {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+
+  border: none;
+  border-radius: 4px;
+  gap: 0;
+  text-align: initial;
+  justify-content: initial;
+  cursor: pointer;
+
+  padding: 2px 6px 2px 2px;
+  margin-left: -2px;
+  font-size: var(--vscode-chat-font-size-body-s);
+  line-height: unset;
+
+  color: inherit;
+  background: none;
+  font-family: inherit;
+}
+
+/* 展开时或 hover 时标题转成正文色：弱视觉是给"没在看它"的状态用的 */
+.chat-used-context:not(.chat-used-context-collapsed) .chat-used-context-label > button,
+.chat-used-context-label > button:hover {
+  color: var(--vscode-foreground);
+}
+
+.chat-used-context-label > button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.chat-used-context-label > button .codicon {
+  font-size: 12px;
+  color: var(--vscode-icon-foreground);
+}
+
+.chat-used-context-label .collapsible-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── chevron ───────────────────────────────────────────────────────── */
+
+/*
+ * 平时透明只占位。一列常驻的小箭头会让回复看起来像树控件，
+ * 而这些块大多数时候只是给人扫一眼的流水。
+ */
+.chat-collapsible-hover-chevron {
+  font-size: 12px;
+  opacity: 0;
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition:
+    opacity 100ms ease-in-out,
+    transform 180ms cubic-bezier(0.2, 0, 0, 1);
+  color: var(--vscode-descriptionForeground);
+}
+
+.chat-collapsible-hover-chevron.expanded {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+.chat-used-context-label > button:hover .chat-collapsible-hover-chevron {
+  opacity: 1;
+}
+
+/* ── 展开动画 ──────────────────────────────────────────────────────── */
+
+/*
+ * 用 `grid-template-rows: 0fr → 1fr` 而不是 max-height。
+ * max-height 要猜一个上限：猜小了内容被截断，猜大了收起时前半段时间是空等。
+ * fr 过渡对任意高度都精确。
+ */
+.chat-used-context.chat-collapsible-content-animatable > .chat-collapsible-content-animation {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+
+.chat-used-context.chat-collapsible-content-animatable
+  > .chat-collapsible-content-animation
+  > .chat-collapsible-content-animation-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-used-context.chat-collapsible-content-animated.chat-used-context-collapsed
+  > .chat-collapsible-content-animation {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* 延迟到动画结束再隐藏，否则收起过程会瞬间消失而不是收拢 */
+  visibility: hidden;
+  transition:
+    grid-template-rows 180ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 140ms cubic-bezier(0.2, 0, 0, 1),
+    visibility 0s linear 180ms;
+}
+
+.chat-used-context.chat-collapsible-content-animated > .chat-collapsible-content-animation {
+  transition:
+    grid-template-rows 180ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 140ms cubic-bezier(0.2, 0, 0, 1),
+    visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-collapsible-content-animation,
+  .chat-collapsible-hover-chevron {
+    transition: none !important;
+  }
+}

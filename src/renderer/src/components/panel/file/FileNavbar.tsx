@@ -74,7 +74,7 @@ export function FileNavbar({
           type="button"
           aria-label="Toggle file tree"
           onClick={onToggleTree}
-          className={`flex size-7 items-center justify-center rounded-lg [&_svg]:size-4 ${
+          className={`flex size-7 items-center justify-center rounded-lg [&_svg]:size-5 ${
             treeVisible
               ? 'bg-[#f2f3f4] text-ink hover:bg-ink-10'
               : 'text-[#71767d] hover:bg-[#f2f3f5]'

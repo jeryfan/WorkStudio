@@ -9,10 +9,16 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # agent 二进制按平台经 extraResources 单独投放，不能进 asar，
+  # 否则每个安装包都会塞进全部平台的副本。
+  - '!resources/agent'
 asarUnpack:
   - resources/**
 win:
   executableName: work-studio
+  extraResources:
+    - from: resources/agent/win32-${arch}
+      to: agent
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -26,6 +32,9 @@ mac:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
+  extraResources:
+    - from: resources/agent/darwin-${arch}
+      to: agent
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
@@ -35,6 +44,9 @@ linux:
     - deb
   maintainer: electronjs.org
   category: Utility
+  extraResources:
+    - from: resources/agent/linux-${arch}
+      to: agent
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false

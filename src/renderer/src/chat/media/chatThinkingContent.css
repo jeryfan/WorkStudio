@@ -1,0 +1,190 @@
+/*
+ * 推理块 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatThinkingContent.css
+ *
+ * 上游的选择器嵌在 `.interactive-session .interactive-response .value` 之下，
+ * 这里去掉了对 DOM 层级的依赖。工具调用嵌入思考框、固定模式滚动动画等
+ * 未实现的部分对应的规则没有移植。
+ */
+
+.chat-thinking-box {
+  outline: none;
+  position: relative;
+  color: var(--vscode-descriptionForeground);
+  /* 思维链的竖线与图标是绝对定位的，限制在自己的层里避免影响相邻块 */
+  contain: layout style;
+}
+
+.chat-thinking-box .chat-used-context-label {
+  position: relative;
+}
+
+/*
+ * 流式期间的固定高度滚动窗 —— 上游 `chat.agent.thinkingStyle` 的默认模式
+ * `fixedScrolling`："a fixed-height streaming panel that auto-scrolls;
+ * click header to expand to full height"。
+ *
+ * 高度上限（200px）和自动滚动在 ThinkingPart 里用内联样式与 ref 控制，因为
+ * 它们要跟着内容变；这里只放跟着滚动位置切换的上下渐隐遮罩。
+ *
+ * 遮罩用 mask-image 而不是覆一层渐变 div：被截断的那一行要淡出到**背景**，
+ * 而思考块的背景是透明的，盖一层纯色会在深浅主题下都露馅。
+ */
+.chat-thinking-box.chat-thinking-fade-top
+  > .chat-collapsible-content-animation
+  > .chat-collapsible-content-animation-inner {
+  mask-image: linear-gradient(to bottom, transparent 0px, black 20px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 20px);
+}
+
+.chat-thinking-box.chat-thinking-fade-bottom
+  > .chat-collapsible-content-animation
+  > .chat-collapsible-content-animation-inner {
+  mask-image: linear-gradient(to top, transparent 0px, black 20px);
+  -webkit-mask-image: linear-gradient(to top, transparent 0px, black 20px);
+}
+
+.chat-thinking-box.chat-thinking-fade-top.chat-thinking-fade-bottom
+  > .chat-collapsible-content-animation
+  > .chat-collapsible-content-animation-inner {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 20px,
+    black calc(100% - 20px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 20px,
+    black calc(100% - 20px),
+    transparent 100%
+  );
+}
+
+/* 滚动条细一点，不然 200px 的窗口里一条粗滚动条很抢眼 */
+.chat-thinking-box.chat-thinking-streaming
+  > .chat-collapsible-content-animation
+  > .chat-collapsible-content-animation-inner {
+  scrollbar-width: thin;
+}
+
+/* 标题里的正文段落是行内的，不该像段落那样另起一行 */
+.chat-thinking-box .chat-used-context-label > button {
+  line-height: 1.5em;
+  font-size: 13px;
+}
+
+/*
+ * 展开时从标题拉一条圆角折线连到第一个条目。
+ * 没有它，标题和下面的思维链看起来是两块不相干的东西。
+ */
+.chat-thinking-box:not(.chat-used-context-collapsed) > .chat-used-context-label::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 100%;
+  height: 16px;
+  width: 5px;
+  border-left: 1px solid var(--vscode-chat-requestBorder);
+  border-bottom: 1px solid var(--vscode-chat-requestBorder);
+  border-bottom-left-radius: 5px;
+}
+
+/* ── 思维链容器 ────────────────────────────────────────────────────── */
+
+.chat-thinking-box .chat-used-context-list.chat-thinking-collapsible {
+  border: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  position: relative;
+  overflow: hidden;
+  padding-top: 0;
+  margin-left: 5px;
+}
+
+.chat-thinking-box .chat-thinking-item {
+  position: relative;
+  padding: 6px 12px 6px 24px;
+  font-size: var(--vscode-chat-font-size-body-s);
+}
+
+/*
+ * 竖线用 mask 在图标位置开一个缺口，而不是把线拆成上下两段。
+ * 拆两段需要知道图标的确切垂直位置，图标一换尺寸就会错位。
+ */
+.chat-thinking-box .chat-thinking-item::before {
+  content: '';
+  position: absolute;
+  left: 10.5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--vscode-chat-requestBorder);
+  mask-image: linear-gradient(to bottom, #000 0 5px, transparent 5px 25px, #000 24px 100%);
+}
+
+/* 首尾两项只画一半，链子不该在两端支出去 */
+.chat-thinking-box .chat-thinking-item:first-child::before {
+  mask-image: linear-gradient(to bottom, transparent 0 25px, #000 25px 100%);
+}
+
+.chat-thinking-box .chat-thinking-item:last-child::before {
+  mask-image: linear-gradient(to bottom, #000 0 5px, transparent 5px 100%);
+}
+
+/* 只有一项时没有"链"可言 */
+.chat-thinking-box .chat-thinking-item:only-child::before {
+  background: none;
+  mask-image: none;
+}
+
+.chat-thinking-box .chat-thinking-item > .chat-thinking-icon {
+  position: absolute;
+  left: 5px;
+  top: 9px;
+  width: 12px;
+  height: 12px;
+  font-size: 12px;
+  line-height: 12px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* book 图标底部多出一像素空白，单独下压对齐 */
+.chat-thinking-box .chat-thinking-item > .chat-thinking-icon .codicon-book {
+  position: relative;
+  top: 1px;
+}
+
+/* ── 正文 ──────────────────────────────────────────────────────────── */
+
+.chat-thinking-box .rendered-markdown > p {
+  margin: 0;
+}
+
+.chat-thinking-box .rendered-markdown > p + p {
+  margin-top: 5px;
+}
+
+/* ── 进行中占位 ────────────────────────────────────────────────────── */
+
+.chat-thinking-box .chat-thinking-spinner-item .chat-thinking-spinner-label {
+  color: var(--vscode-descriptionForeground);
+}
+
+/*
+ * 标题流光只在"收起 + 进行中"时出现。
+ * 展开后正文自己在动，标题再闪是噪音；结束后再闪则是在说一件不成立的事。
+ */
+.chat-thinking-box:not(.chat-thinking-active) .chat-thinking-title-shimmer,
+.chat-thinking-box.chat-thinking-active:not(.chat-used-context-collapsed)
+  .chat-thinking-title-shimmer {
+  animation: none;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: inherit;
+}

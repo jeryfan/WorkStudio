@@ -1,0 +1,138 @@
+/*
+ * 待办清单 / 钩子 / 重连 / 审阅模式 —— 部分移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/media/chat.css（.chat-todo-list-widget 段）
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatHookContentPart.css
+ *
+ * 上游的待办清单选择器一律以 `.interactive-input-part >` 开头（它挂在输入框
+ * 上方），这里的 DOM 也是挂在输入区里的，所以那段前缀只是噪音，去掉。
+ * 上游用 monaco-list 虚拟化清单，这里是普通 <ul>：计划一般十来条，为它引一套
+ * 虚拟列表不划算。
+ */
+
+/* ── 待办清单 ──────────────────────────────────────────────────────── */
+
+.chat-todo-list-widget {
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-radius: var(--vscode-cornerRadius-medium);
+  padding: 6px 8px;
+  margin-bottom: 14px;
+}
+
+.chat-todo-list-widget .todo-list-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.chat-todo-list-widget .todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-todo-list-widget .todo-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  font-size: var(--vscode-chat-font-size-body-m);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.chat-todo-list-widget .todo-item > .todo-status-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+/* 状态色与上游 getStatusIconColor 一致 */
+.todo-status-completed {
+  color: var(--vscode-charts-green);
+}
+
+.todo-status-in-progress {
+  color: var(--vscode-charts-blue);
+}
+
+.todo-status-not-started {
+  color: var(--vscode-foreground);
+}
+
+/* 做完的条目压暗：清单越长，"还剩哪些"越是唯一想看的信息 */
+.chat-todo-list-widget .todo-item:has(.todo-status-completed) .todo-content {
+  color: var(--vscode-descriptionForeground);
+}
+
+.chat-todo-list-widget .todo-content {
+  flex-grow: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ── 钩子 ──────────────────────────────────────────────────────────── */
+
+.chat-hook-content-part {
+  margin-bottom: 14px;
+}
+
+/*
+ * 折叠标题的按钮默认 `gap: 0`（上游把前置图标藏起来了，只在 show-checkmarks
+ * 时才显示，所以不需要间距）。这里的钩子块是**带图标**的，不给间距图标会
+ * 贴着文字。上游对同样带图标的 hook part 也是单独补这一条。
+ */
+.chat-hook-content-part .chat-used-context-label > button {
+  gap: 4px;
+}
+
+.chat-hook-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+}
+
+.chat-hook-message {
+  font-size: var(--vscode-chat-font-size-body-s);
+  padding: 4px 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+}
+
+/* ── 重连 ──────────────────────────────────────────────────────────── */
+
+.chat-reconnect-part {
+  margin-bottom: 14px;
+  font-size: var(--vscode-chat-font-size-body-s);
+}
+
+.chat-reconnect-detail {
+  padding: 4px 10px;
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── 审阅模式 ──────────────────────────────────────────────────────── */
+
+/* 题目比标签次要，压暗一档，同时允许它被截断而标签不会 */
+.chat-review-mode-target {
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

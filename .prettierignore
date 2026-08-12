@@ -5,3 +5,7 @@ pnpm-lock.yaml
 LICENSE.md
 tsconfig.json
 tsconfig.*.json
+src/shared/protocol/generated
+src/renderer/src/chat/theme/tokens.css
+src/renderer/src/chat/theme/vscode-themes
+resources/agent

@@ -8,6 +8,12 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
+    "sync:agent": "node scripts/sync-agent.mjs",
+    "protocol:gen": "node scripts/gen-protocol.mjs",
+    "tokens:gen": "node scripts/gen-vscode-tokens.mjs",
+    "tokens:verify": "node scripts/verify-vscode-theme.mjs",
+    "chat:verify": "node scripts/verify-chat-adapter.mjs",
+    "chat:preview": "vite --config vite.preview.config.ts",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -23,9 +29,13 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@shikijs/monaco": "^4.4.3",
+    "@vscode/codicons": "^0.0.46-24",
     "electron-updater": "^6.3.9",
+    "monaco-editor": "^0.56.0",
     "react-arborist": "^3.16.0",
     "react-resizable-panels": "^4.12.2",
+    "react-virtuoso": "^4.18.11",
     "shiki": "^4.4.2"
   },
   "devDependencies": {

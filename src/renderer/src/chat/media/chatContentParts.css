@@ -1,0 +1,143 @@
+/*
+ * 内容块的通用样式 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/media/chat.css
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/*.css
+ *
+ * 各 part 专属的样式随 part 一起加文件；这里只放共用的三样：
+ * 流光动画、进度行、通知（错误/警告/提示）卡片。
+ */
+
+/* ── 流光 ──────────────────────────────────────────────────────────── */
+
+/*
+ * 上游用 `background-clip: text` 把渐变裁进字形里，再平移背景位置。
+ * 不是叠一层半透明遮罩扫过去——那样在低对比度文字上会把字糊掉。
+ */
+@keyframes chat-thinking-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+.chat-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--vscode-descriptionForeground) 0%,
+    var(--vscode-descriptionForeground) 30%,
+    var(--vscode-chat-thinkingShimmer) 50%,
+    var(--vscode-descriptionForeground) 70%,
+    var(--vscode-descriptionForeground) 100%
+  );
+  background-size: 400% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: chat-thinking-shimmer 2s linear infinite;
+  will-change: background-position;
+}
+
+/* 尊重系统的"减少动态效果"：静止渲染成实心文字，而不是留一段没动画的透明字 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-shimmer-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--vscode-descriptionForeground);
+  }
+}
+
+/* ── 进度行 ────────────────────────────────────────────────────────── */
+
+.progress-container {
+  display: flex;
+  align-items: start;
+  gap: 6px;
+}
+
+.progress-container .codicon {
+  color: var(--vscode-icon-foreground);
+  margin: 0 0.2em;
+}
+
+/* 走流光时藏掉转圈图标：两个动画同时说同一件事是噪音 */
+.progress-container.shimmer-progress > .codicon {
+  display: none;
+}
+
+.progress-container .progress-step {
+  white-space: normal;
+}
+
+.progress-container .progress-step > p {
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-s);
+  margin: 0;
+  /* 等宽数字：流式变化的计数（"84 lines"）不会左右抖 */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+.progress-container .progress-step > p code {
+  font-size: var(--vscode-chat-font-size-body-xs);
+}
+
+/* ── 通知卡片（错误 / 警告 / 提示）────────────────────────────────── */
+
+.chat-notification-widget {
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+}
+
+.chat-notification-widget .chat-info-codicon,
+.chat-notification-widget .chat-error-codicon,
+.chat-notification-widget .chat-warning-codicon {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+
+.chat-notification-widget .rendered-markdown p {
+  margin: 0;
+}
+
+.chat-notification-widget .chat-warning-codicon .codicon-warning {
+  color: var(--vscode-notificationsWarningIcon-foreground);
+}
+
+.chat-notification-widget .chat-error-codicon .codicon-error {
+  color: var(--vscode-errorForeground);
+}
+
+.chat-notification-widget .chat-info-codicon .codicon-info {
+  color: var(--vscode-notificationsInfoIcon-foreground);
+}
+
+/* ── 上下文压缩分隔线 ──────────────────────────────────────────────── */
+
+/*
+ * 上游没有这个 part（它的上下文管理不暴露给用户）。按 VSCode 的视觉语言自造：
+ * 一条带居中标签的细线，与 checkpoint 分隔线同级。
+ */
+.chat-context-compaction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-xs);
+}
+
+.chat-context-compaction::before,
+.chat-context-compaction::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--vscode-chat-requestBorder);
+}

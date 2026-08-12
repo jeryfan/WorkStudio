@@ -55,6 +55,120 @@
   --color-focus: rgb(51 156 255); /* --token-focus-border / 未读点 */
   --color-surface: #ffffff; /* --token-main-surface-primary，内容区白底 */
   --color-toolbar-hover: rgb(26 28 31 / 0.08);
+
+  /* ==========================================================================
+     chat2.html :root tokens（第 8-23 行）——会话页
+     ========================================================================== */
+  --color-conv-fg: #0d0d0d; /* --token-foreground */
+  --color-conv-body: rgb(13 13 13 / 0.6); /* --token-conversation-body，活动行/分隔标签 */
+  --color-conv-secondary: #5d5d5d; /* --token-text-secondary */
+  --color-conv-tertiary: #8f8f8f; /* --token-text-tertiary */
+  --color-conv-border: #e6e6e6; /* --token-border */
+  --color-conv-border-strong: #d9d9d9; /* --token-border-default */
+  --color-conv-hover: rgb(13 13 13 / 0.06); /* --token-list-hover-background */
+  --color-conv-bubble: rgb(13 13 13 / 0.05); /* 用户气泡底色 */
+  --color-conv-code: #ebebeb; /* 行内代码底色 */
+  --color-conv-mention: #1f66cc; /* 文件提及 */
+  --color-conv-warning: #ea580c; /* --token-editor-warning-foreground */
+
+  /* 内容列宽与左右留白：正文列固定 826px，两侧各 48px */
+  --spacing-conv-gutter: 48px;
+  --container-conv: 826px;
+}
+
+/* ==========================================================================
+   会话内的提示卡片（轮次失败等）
+   白底 + 0.5px 发丝描边 + 一层极浅投影，逆向自上游的 callout。
+   刻意不用红底红字：断流、限流这类错误绝大多数重试一次就好了。
+   ========================================================================== */
+.conv-card {
+  box-shadow:
+    0 0 0 0.5px rgb(26 28 31 / 0.118),
+    0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+/* ==========================================================================
+   Shimmer — 逆向自上游会话页的 cadencedShimmer
+   文字始终实心可读；在其上叠一层更深的同文副本，用 mask 开一条窄缝横扫。
+   steps(48,end) 是刻意的：连续位移在低对比度文字上糊成一片，
+   分级步进反而让"正在进行"看得清。
+   ========================================================================== */
+@keyframes conv-shimmer-sweep {
+  0% {
+    transform: translateX(-50%);
+  }
+  100% {
+    transform: translateX(125%);
+  }
+}
+
+@keyframes conv-shimmer-highlight {
+  0% {
+    transform: translateX(50%);
+  }
+  100% {
+    transform: translateX(-125%);
+  }
+}
+
+.conv-shimmer {
+  position: relative;
+  display: block;
+  color: var(--color-conv-secondary);
+}
+
+.conv-shimmer-sweep {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateX(-50%);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 20%,
+    #000 30%,
+    transparent 50%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 20%,
+    #000 30%,
+    transparent 50%,
+    transparent 100%
+  );
+}
+
+.conv-shimmer-highlight {
+  display: block;
+  width: 100%;
+  transform: translateX(50%);
+  color: var(--color-conv-fg);
+}
+
+.conv-shimmer-active .conv-shimmer-sweep,
+.conv-shimmer-active .conv-shimmer-highlight {
+  animation-duration: 1s;
+  animation-timing-function: steps(48, end);
+  animation-iteration-count: 1;
+}
+
+.conv-shimmer-active .conv-shimmer-sweep {
+  animation-name: conv-shimmer-sweep;
+}
+
+.conv-shimmer-active .conv-shimmer-highlight {
+  animation-name: conv-shimmer-highlight;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv-shimmer-active .conv-shimmer-sweep,
+  .conv-shimmer-active .conv-shimmer-highlight {
+    animation: none;
+  }
 }
 
 /* ==========================================================================
@@ -85,11 +199,6 @@
   /* 挂载点必须撑满，否则内部 h-full 链条断掉 */
   #root {
     height: 100%;
-  }
-
-  /* v4 preflight 不给 button 设 pointer，1.html 显式设了 */
-  button {
-    cursor: pointer;
   }
 
   /* 无边框窗口拖拽区：TopBar 整体可拖，按钮组恢复交互 */

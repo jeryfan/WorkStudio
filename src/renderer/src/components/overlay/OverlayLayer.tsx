@@ -1,4 +1,5 @@
 import { useOverlay } from '../../state/OverlayContext'
+import { usePanels } from '../../state/PanelContext'
 import { CommandPalette } from '../command/CommandPalette'
 import { CreateProjectDialog } from '../dialog/CreateProjectDialog'
 import { DropdownMenu } from '../menu/DropdownMenu'
@@ -11,6 +12,7 @@ import { menuDefs } from '../menu/menuDefs'
 export function OverlayLayer(): React.JSX.Element {
   const { menu, commandOpen, createProjectOpen, closeMenu, setCommandOpen, setCreateProjectOpen } =
     useOverlay()
+  const { openTab } = usePanels()
 
   return (
     <>
@@ -21,6 +23,19 @@ export function OverlayLayer(): React.JSX.Element {
           minWidth={menuDefs[menu.id].minWidth}
           width={menuDefs[menu.id].width}
           onClose={closeMenu}
+          onSelect={
+            menu.id === 'add-tab'
+              ? (id) => {
+                  if (id === 'browser') {
+                    openTab(menu.dock ?? 'right', {
+                      kind: 'browser',
+                      title: 'New tab',
+                      payload: { url: '' }
+                    })
+                  }
+                }
+              : undefined
+          }
         />
       )}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} />}

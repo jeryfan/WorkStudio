@@ -4,15 +4,22 @@
     "src/renderer/src/env.d.ts",
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
-    "src/preload/*.d.ts"
+    "src/preload/*.d.ts",
+    "src/shared/**/*"
   ],
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",
+    // adapter 里有一处写全 `.ts` 后缀的导入，为的是让
+    // scripts/verify-chat-adapter.mjs 能用 Node 的类型剥离直接跑源码
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
       "@renderer/*": [
         "src/renderer/src/*"
+      ],
+      "@shared/*": [
+        "src/shared/*"
       ]
     }
   }

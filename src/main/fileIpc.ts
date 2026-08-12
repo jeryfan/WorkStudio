@@ -1,22 +1,29 @@
 import { ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
 import { join, resolve, sep } from 'path'
+import type { ProjectRegistry } from './workspace/ProjectRegistry'
 
 /**
  * 文件服务 IPC —— 渲染进程经 preload 的 fileApi 调用。
  * 安全约束：所有路径都限制在项目根目录内。
  *
- * mock 阶段：所有 projectId 都映射到应用工程根目录（process.cwd()）。
- * 接入真实项目管理后，这里改为查询项目注册表。
+ * 根目录来自项目注册表。多根项目当前取第一个根作为文件树根，
+ * 多根并列展示留待文件树支持多根后再接。
  */
 const MAX_FILE_SIZE = 2 * 1024 * 1024 // 2MB 以上拒绝预览
 
 /** 目录列表忽略项（prototype 文件树中也不出现这些） */
 const IGNORED = new Set(['node_modules', 'out', 'dist', '.next', '.turbo'])
 
+let registry: ProjectRegistry | null = null
+
 function rootOf(projectId: string): string {
-  void projectId
-  return process.cwd()
+  const roots = registry?.rootPathsOf(projectId) ?? []
+  const root = roots[0]
+  if (!root) {
+    throw new Error(`Project has no directory: ${projectId}`)
+  }
+  return root
 }
 
 /** 将 (root, relPath) 解析为绝对路径并校验未逃逸根目录 */
@@ -35,12 +42,20 @@ export interface DirEntryPayload {
   kind: 'file' | 'dir'
 }
 
-export function registerFileIpc(): void {
+export function registerFileIpc(projectRegistry: ProjectRegistry): void {
+  registry = projectRegistry
   // 外部浏览器打开链接（BrowserTab 的 new-window / 外链跳转走这里）
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
       await shell.openExternal(url)
     }
+  })
+
+  // 在系统文件管理器中打开项目根目录（侧栏项目悬浮卡片的路径行）。
+  // 只接受 projectId，路径在主进程侧解析，渲染进程无法传任意路径。
+  ipcMain.handle('shell:openProjectPath', async (_e, projectId: string) => {
+    if (typeof projectId !== 'string') return
+    await shell.openPath(rootOf(projectId))
   })
 
   ipcMain.handle(

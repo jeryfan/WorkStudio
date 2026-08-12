@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkspace } from '../../state/WorkspaceContext'
-import { NewTaskIcon, OpenFolderIcon, SettingsIcon, type IconProps } from '../icons'
+import { NewChatIcon, OpenFolderIcon, SettingsIcon, type IconProps } from '../icons'
 import type { ComponentType } from 'react'
 
 interface CmdItem {
@@ -16,11 +16,11 @@ interface CmdItem {
 
 /**
  * sider/2.html Command Menu（第 3415-3722 行，CSS 第 966-1153 行）：
- * 520px 居中对话框，分组列表（Tasks / Unread / Suggested / Switch project），
+ * 520px 居中对话框，分组列表（Chats / Unread / Suggested / Switch project），
  * 输入过滤 + ↑↓ 选择 + Enter 确认 + Esc 关闭。
  */
 export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Element {
-  const { projects } = useWorkspace()
+  const { projects, chats } = useWorkspace()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -28,28 +28,24 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
   useEffect(() => inputRef.current?.focus(), [])
 
   const groups = useMemo(() => {
-    const allTasks = projects.flatMap((p) => p.tasks.map((t) => ({ ...t, projectName: p.name })))
+    const projectNames = new Map(projects.map((p) => [p.id, p.name]))
+    const allChats = chats.map((t) => ({
+      ...t,
+      projectName: t.projectId ? (projectNames.get(t.projectId) ?? '') : ''
+    }))
     const items: CmdItem[] = [
-      // Tasks：前 9 个任务带 ⌘1-9 快捷键
-      ...allTasks.slice(0, 9).map((t, i) => ({
-        id: `task-${t.id}`,
+      // Chats：前 9 个会话带 ⌘1-9 快捷键
+      ...allChats.slice(0, 9).map((t, i) => ({
+        id: `chat-${t.id}`,
         label: t.title,
-        group: 'Tasks',
+        group: 'Chats',
         project: t.projectName,
         kbd: `⌘${i + 1}`
       })),
-      // Unread tasks
-      ...allTasks
-        .filter((t) => t.unread)
-        .map((t) => ({
-          id: `unread-${t.id}`,
-          label: t.title,
-          group: 'Unread tasks',
-          unreadDot: true,
-          project: t.projectName
-        })),
+      // 未读分组待接入：协议不提供未读标记，上游用的是客户端侧维护的
+      // attention state，本项目尚未实现，先不展示空分组。
       // Suggested
-      { id: 'new-task', label: 'New task', group: 'Suggested', icon: NewTaskIcon, kbd: '⌘N' },
+      { id: 'new-chat', label: 'New chat', group: 'Suggested', icon: NewChatIcon, kbd: '⌘N' },
       {
         id: 'open-folder',
         label: 'Open folder',
@@ -74,7 +70,7 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
       byGroup.set(it.group, list)
     }
     return [...byGroup.entries()].map(([name, list]) => ({ name, list }))
-  }, [projects, query])
+  }, [projects, chats, query])
 
   const flat = groups.flatMap((g) => g.list)
 
@@ -99,7 +95,7 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
       <div
         className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-32px)] w-[520px] -translate-x-1/2 -translate-y-1/2"
         role="dialog"
-        aria-label="Search tasks or run a command"
+        aria-label="Search chats or run a command"
       >
         <div className="flex max-h-[504px] min-w-full flex-col gap-1 overflow-hidden rounded-[20px] border border-transparent bg-white p-1 text-sm leading-[21px] shadow-[0_16px_32px_-8px_rgb(0_0_0/0.19)]">
           <input
@@ -111,7 +107,7 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
               setActive(0)
             }}
             onKeyDown={onKeyDown}
-            placeholder="Search tasks or run a command"
+            placeholder="Search chats or run a command"
             className="block h-[33px] w-full border-none bg-transparent px-2.5 py-1.5 text-sm leading-[21px] text-ink outline-none placeholder:text-desc"
           />
           <div className="flex max-h-[440px] flex-col gap-1 overflow-y-auto transition-[max-height] duration-150">

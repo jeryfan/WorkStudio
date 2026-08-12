@@ -5,9 +5,11 @@ import {
   type PanelTab,
   type PanelTabKind
 } from '../../state/PanelContext'
-import { CloseIcon, PlusIcon } from '../icons'
+import { CloseIcon, ChromeIcon, PlusIcon } from '../icons'
 import { FileTab } from './file/FileTab'
 import { BrowserTab } from './BrowserTab'
+import { FileGlyph } from './file/FileGlyph'
+import { useOverlay } from '../../state/OverlayContext'
 
 /* ================= Tab 渲染注册表 =================
  * 新增 tab 类型 = 在此注册一行，PanelShell 无需改动。
@@ -31,7 +33,8 @@ interface PanelShellProps {
  * 结构 = PanelTabStrip（标签条）+ PanelContent（registry 渲染）。
  */
 export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
-  const { docks, activateTab, closeTab, openTab } = usePanels()
+  const { docks, activateTab, closeTab } = usePanels()
+  const { openMenu } = useOverlay()
   const { tabs, activeTabId } = docks[docked]
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const ActiveRenderer = activeTab ? TAB_RENDERERS[activeTab.kind] : null
@@ -43,7 +46,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
     // 底部面板在窗口中部、不接触 TopBar，无需让位。
     <div className={`flex h-full w-full flex-col bg-surface ${docked === 'right' ? 'pt-11' : ''}`}>
       {/* tab strip */}
-      <div className="flex h-11 shrink-0 items-center gap-1 px-2">
+      <div className="flex h-11 shrink-0 items-center gap-[3px] px-2">
         {tabs.map((tab) => {
           const active = tab.id === activeTabId
           return (
@@ -55,9 +58,17 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
               onClick={() => activateTab(docked, tab.id)}
               onKeyDown={(e) => e.key === 'Enter' && activateTab(docked, tab.id)}
               className={`group relative flex h-7 min-w-[90px] max-w-40 flex-1 cursor-default items-center gap-2 overflow-hidden rounded-lg px-2 text-[13px] ${
-                active ? 'bg-row-hover text-ink' : 'text-desc hover:bg-row-hover'
+                active ? 'bg-[#f2f3f4] text-ink' : 'text-[#54585f] hover:bg-[#f2f3f4]'
               }`}
             >
+              {/* t-icon（panel/1.html）：文件 glyph，激活时颜色加深 */}
+              <span
+                className={`flex shrink-0 items-center justify-center [&_svg]:size-4 ${
+                  active ? 'text-ink' : 'text-[#71767d]'
+                }`}
+              >
+                {tab.kind === 'browser' ? <ChromeIcon /> : <FileGlyph name={tab.title} />}
+              </span>
               <span className="min-w-0 flex-1 truncate text-left">{tab.title}</span>
               <button
                 type="button"
@@ -66,7 +77,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
                   e.stopPropagation()
                   closeTab(docked, tab.id)
                 }}
-                className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-desc opacity-0 hover:bg-toolbar-hover group-hover:opacity-100 [&_svg]:size-3.5"
+                className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-desc opacity-0 hover:bg-[#f2f3f5] group-hover:opacity-100 [&_svg]:size-3.5"
               >
                 <CloseIcon />
               </button>
@@ -75,11 +86,16 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
         })}
         <button
           type="button"
-          title="Open browser tab"
-          onClick={() =>
-            openTab(docked, { kind: 'browser', title: 'New tab', payload: { url: '' } })
+          title="Open side panel tab"
+          aria-haspopup="menu"
+          onClick={(e) =>
+            openMenu({
+              id: 'add-tab',
+              anchor: e.currentTarget.getBoundingClientRect(),
+              dock: docked
+            })
           }
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-desc hover:bg-row-hover [&_svg]:size-4"
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-desc hover:bg-row-hover"
         >
           <PlusIcon />
         </button>

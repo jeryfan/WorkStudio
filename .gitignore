@@ -4,3 +4,9 @@ out
 .DS_Store
 .eslintcache
 *.log*
+
+# Agent 运行时二进制：体积大且按平台/架构区分，由 scripts/fetch-agent.mjs 获取
+resources/agent/
+
+# 浏览器自动化（对话区视觉核对）留下的截图与日志
+.playwright-mcp/

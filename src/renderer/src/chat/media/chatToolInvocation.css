@@ -1,0 +1,257 @@
+/*
+ * 工具调用 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/media/chat.css（.chat-tool-invocation-part 段）
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatTerminalToolProgressPart.css
+ *
+ * 上游终端输出走 xterm（为了 ANSI 与光标控制），这里走它自带的 <pre> 降级路径：
+ * 对话里的输出是回看而不是可交互终端，为它引一个终端模拟器不划算。
+ */
+
+.chat-tool-invocation-part:not(:last-child) {
+  margin-bottom: 14px;
+}
+
+/* ── 标题行 ────────────────────────────────────────────────────────── */
+
+.chat-tool-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-tool-title .chat-tool-icon {
+  flex: 0 0 auto;
+}
+
+/*
+ * 完成后的对勾默认不显示。
+ *
+ * 照搬上游 chat.css：
+ *   .chat-used-context-label .monaco-icon-button > .codicon:first-child
+ *     :not(.chat-collapsible-hover-chevron):not(.codicon-error):not(.codicon-warning)
+ *     { display: none }
+ *
+ * 它由可访问性设置 `chat.showChatCheckmarks` 打开，默认关。理由是一列工具调用
+ * 每行都挂一个对勾并不增加信息——文案已经是过去时（"Ran …"）。失败的 error
+ * 图标不在此列，那是真正需要一眼看见的。
+ *
+ * 想要对勾回来：给 .interactive-session 加 .show-checkmarks 类即可（同上游）。
+ *
+ * 选择器带上 `.codicon` 是必须的：codicon.css 里的 `.codicon[class*="codicon-"]`
+ * 带一个属性选择器（0,2,0），单靠一个类名压不过它。
+ */
+.chat-tool-title .codicon.chat-tool-check-collapsible {
+  display: none;
+}
+
+.show-checkmarks .chat-tool-title .codicon.chat-tool-check-collapsible {
+  display: inline-block;
+}
+
+.chat-tool-icon-error {
+  color: var(--vscode-errorForeground);
+}
+
+/* 单行进度型（检索）的对勾一直显示，对应上游的 .progress-container */
+.chat-tool-check-progress {
+  color: var(--vscode-icon-foreground);
+}
+
+.chat-tool-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 后缀是次要信息（耗时、增删行数、退出码），不参与截断竞争 */
+.chat-tool-suffix {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-tool-exit-code {
+  color: var(--vscode-errorForeground);
+}
+
+/* 增删行数：与上游 chat.linesAdded/RemovedForeground 一致 */
+.chat-thinking-title-diff {
+  display: inline-flex;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-thinking-title-diff .label-added {
+  color: var(--vscode-chat-linesAddedForeground);
+}
+
+.chat-thinking-title-diff .label-removed {
+  color: var(--vscode-chat-linesRemovedForeground);
+}
+
+/* 只有一行标题、不可展开的工具（检索） */
+.chat-tool-simple {
+  padding: 2px 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-s);
+}
+
+/* ── 检索结果 ──────────────────────────────────────────────────────── */
+
+.chat-search-results {
+  margin: 0;
+  padding: 4px 0 4px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--vscode-chat-font-size-body-s);
+}
+
+.chat-search-results li {
+  /* 一条结果一行，超长的标题截断而不是换行——列表是用来扫的 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-search-results a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+.chat-search-results a:hover {
+  text-decoration: underline;
+}
+
+/* ── 终端 ──────────────────────────────────────────────────────────── */
+
+.chat-terminal-output-container {
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-radius: var(--vscode-cornerRadius-medium);
+  max-height: 300px;
+  box-sizing: border-box;
+  overflow: auto;
+  position: relative;
+  max-width: 100%;
+}
+
+.chat-terminal-output-body {
+  padding: 5px 10px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/*
+ * 命令行也放进展开区：标题可能是"Searched for foo"这类人话概括，
+ * 看不到实际跑了什么。排查问题时需要原始命令。
+ */
+.chat-terminal-command-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.chat-terminal-command-line .chat-terminal-prompt {
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+}
+
+.chat-terminal-command-line code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-terminal-cwd,
+.chat-terminal-truncated,
+.chat-terminal-no-output {
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-xs);
+  margin-bottom: 4px;
+}
+
+.chat-terminal-output {
+  margin: 0;
+  /* pre 而不是 pre-wrap：命令输出常有对齐的表格，换行会把列对齐打散 */
+  white-space: pre;
+  overflow-x: auto;
+  font-size: 12px;
+  font-family: var(--monaco-monospace-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--vscode-foreground);
+}
+
+/* ── 入参 / 出参 ───────────────────────────────────────────────────── */
+
+.chat-tool-io {
+  padding: 4px 0;
+}
+
+.chat-tool-io-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: var(--vscode-chat-font-size-body-xs);
+  margin-bottom: 4px;
+}
+
+/* ── 文件改动 ──────────────────────────────────────────────────────── */
+
+.chat-file-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.chat-file-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: var(--vscode-chat-font-size-body-xs);
+}
+
+.chat-file-edit-op {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-chat-requestBorder);
+}
+
+.chat-file-edit-op-add {
+  color: var(--vscode-chat-linesAddedForeground);
+}
+
+.chat-file-edit-op-delete {
+  color: var(--vscode-chat-linesRemovedForeground);
+}
+
+.chat-file-edit-arrow {
+  color: var(--vscode-descriptionForeground);
+}
+
+.chat-diff-editor {
+  width: 100%;
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-radius: var(--vscode-cornerRadius-medium);
+  overflow: hidden;
+}
+
+/*
+ * 内联模式（renderSideBySide: false）下 original 编辑器仍在 DOM 里，
+ * 只是宽度被压到 0。不显式隐藏的话它的首字符会从左边缘透出来，
+ * 表现为每行行首多一个字（"eexport"、"}}"）。
+ */
+.chat-diff-editor .editor.original {
+  display: none;
+}

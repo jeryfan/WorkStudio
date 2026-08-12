@@ -1,0 +1,195 @@
+/*
+ * Markdown 正文 —— 移植自 VSCode。
+ *
+ * 来源（MIT, Copyright (c) Microsoft Corporation）：
+ *   workbench/contrib/chat/browser/widget/media/chat.css
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatMarkdownPart.css
+ *   workbench/contrib/chat/browser/widget/chatContentParts/media/chatInlineAnchorWidget.css
+ *
+ * 选择器统一去掉了 `.interactive-item-container .value` 前缀里对上游
+ * DOM 层级的依赖，改成挂在 `.rendered-markdown` 自身上——本项目的 DOM
+ * 结构更浅，多余的祖先选择器只会在层级微调时静默失效。
+ */
+
+.rendered-markdown h1,
+.rendered-markdown h2,
+.rendered-markdown h3 {
+  font-weight: 600;
+  margin: 1.5em 0 0.875em 0;
+  line-height: normal;
+  font-family: var(--vscode-chat-font-family, inherit);
+}
+
+.rendered-markdown h1 {
+  font-size: var(--vscode-chat-font-size-body-xxl);
+}
+
+.rendered-markdown h2 {
+  font-size: var(--vscode-chat-font-size-body-xl);
+}
+
+.rendered-markdown h3 {
+  font-size: var(--vscode-chat-font-size-body-l);
+}
+
+.rendered-markdown > p {
+  margin: 0 0 16px 0;
+}
+
+.rendered-markdown strong {
+  font-weight: 600;
+}
+
+/*
+ * 显式写出 list-style-type。
+ *
+ * 不能依赖浏览器默认值：应用全局加载了 Tailwind，它的 preflight 会把
+ * `ul/ol` 的 list-style 重置成 none。上游 VSCode 没有这层 reset，所以它的
+ * CSS 里不写这两行——照抄就会得到一片没有项目符号的列表。
+ */
+.rendered-markdown ul {
+  padding-inline-start: 24px;
+  list-style-type: disc;
+}
+
+.rendered-markdown ol {
+  padding-inline-start: 28px;
+  list-style-type: decimal;
+}
+
+.rendered-markdown li::marker {
+  color: var(--vscode-descriptionForeground);
+}
+
+.rendered-markdown li {
+  margin: 4px 0;
+}
+
+/* 列表项里的段落不再另加下边距，否则每一项都被撑开一截 */
+.rendered-markdown li > p {
+  margin: 0;
+}
+
+.rendered-markdown img {
+  max-width: 100%;
+}
+
+/* ── 行内代码 ──────────────────────────────────────────────────────── */
+
+.rendered-markdown code {
+  font-family: var(--monaco-monospace-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--vscode-chat-font-size-body-xs);
+  color: var(--vscode-textPreformat-foreground);
+  background-color: var(--vscode-textPreformat-background);
+  padding: 1px 3px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-textPreformat-border);
+  white-space: pre-wrap;
+}
+
+/* ── 表格 ──────────────────────────────────────────────────────────── */
+
+/*
+ * 外面套一层滚动壳：宽表格会撑破 950px 的正文列，
+ * 让整行出现横向滚动条比让表格自己滚糟糕得多。
+ */
+.rendered-markdown-table-scroll-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.rendered-markdown table {
+  text-align: left;
+  border-radius: var(--vscode-cornerRadius-medium);
+  overflow: hidden;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--vscode-chat-requestBorder);
+}
+
+.rendered-markdown table td,
+.rendered-markdown table th {
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-top: none;
+  border-left: none;
+  padding: 4px 6px;
+}
+
+.rendered-markdown table th {
+  white-space: normal;
+  overflow-wrap: break-word;
+  font-weight: 600;
+}
+
+.rendered-markdown table td:last-child,
+.rendered-markdown table th:last-child {
+  border-right: none;
+}
+
+.rendered-markdown table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 复制按钮浮在右上角，hover 才出现——常驻会盖住表头第一格 */
+.rendered-markdown-table-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  color: var(--vscode-icon-foreground);
+  background-color: var(--vscode-editorWidget-background);
+}
+
+.rendered-markdown-table-scroll-wrapper:hover .rendered-markdown-table-copy,
+.rendered-markdown-table-copy:focus-visible {
+  opacity: 1;
+}
+
+/* ── 行内文件引用 ──────────────────────────────────────────────────── */
+
+.chat-inline-anchor-widget {
+  display: inline;
+  border: 0.5px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+  border-radius: 4px;
+  margin: 0 1px;
+  padding: 1px 3px;
+  text-wrap: nowrap;
+  width: fit-content;
+  font-weight: normal;
+  text-decoration: none;
+  font-size: var(--vscode-chat-font-size-body-s);
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.chat-inline-anchor-widget:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+.chat-inline-anchor-widget .icon-label {
+  padding: 0 3px;
+}
+
+/* 行号后缀更浅：路径本身才是主体信息，hover 时才拉回正常 */
+.chat-inline-anchor-widget .icon-label .label-suffix {
+  color: var(--vscode-peekViewTitleDescription-foreground);
+}
+
+.chat-inline-anchor-widget:hover .icon-label .label-suffix {
+  color: currentColor;
+}
+
+.chat-inline-anchor-widget .icon {
+  vertical-align: middle;
+  line-height: 1em;
+  font-size: 90%;
+  overflow: hidden;
+}

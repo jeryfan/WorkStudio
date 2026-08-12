@@ -1,10 +1,21 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerFileIpc } from './fileIpc'
+import { AgentRuntime } from './agent/AgentRuntime'
+import { ProjectRegistry } from './workspace/ProjectRegistry'
+import { registerProjectMethods } from './workspace/projectMethods'
+import { registerChatMethods } from './workspace/chatMethods'
+import { registerBootstrap } from './workspace/bootstrap'
 import icon from '../../resources/icon.png?asset'
 
 const isMac = process.platform === 'darwin'
+
+/** agent 运行时：全应用一个实例，窗口关闭不影响进行中的任务 */
+const agentRuntime = new AgentRuntime()
+
+/** 项目注册表在 app ready 后创建：构造时要读 userData 路径 */
+let projectRegistry: ProjectRegistry | null = null
 
 function createWindow(): void {
   // 尺寸依据 prototype/1.html 的绝对定位反推：
@@ -38,6 +49,9 @@ function createWindow(): void {
     mainWindow.show()
   })
 
+  // 事件与反向请求需要有窗口可送达
+  agentRuntime.attachWindow(mainWindow)
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -59,8 +73,20 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
+  // 项目注册表：文件服务与 RPC 都依赖它，且必须在窗口创建前就位
+  //（preload 会同步取首屏快照）
+  projectRegistry = new ProjectRegistry(app.getPath('userData'))
+
   // 文件服务 IPC（file:listDir / file:readFile）
-  registerFileIpc()
+  registerFileIpc(projectRegistry)
+
+  // agent 运行时先于窗口启动：路由要在渲染层首次发消息前就位。
+  // 二进制不可用时不阻塞界面，状态经 app/agent/status 暴露给渲染层。
+  void agentRuntime.start()
+
+  registerProjectMethods(agentRuntime.router, projectRegistry)
+  registerChatMethods(agentRuntime.router, projectRegistry)
+  registerBootstrap(ipcMain, projectRegistry)
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -85,6 +111,15 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// 退出前收回 agent 子进程，避免留下孤儿进程占用会话锁
+app.on('before-quit', (event) => {
+  // 未落盘的项目变更在这里强制写出，防抖窗口内退出不应丢失
+  projectRegistry?.persistNow()
+  if (!agentRuntime.host.isRunning) return
+  event.preventDefault()
+  void agentRuntime.stop().finally(() => app.exit(0))
 })
 
 // In this file you can include the rest of your app's specific main process
