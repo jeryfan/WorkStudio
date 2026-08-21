@@ -39,7 +39,7 @@ const ACTION_BTN =
  * - 选中态由 data 属性驱动样式,不是 JS 拼 className。
  * - 标题外层带 data-thread-title-trigger —— Codex 的内联改名就挂在这个触发器上。
  */
-export function ChatRow({ chat }: ChatRowProps): React.JSX.Element {
+export function SidebarThreadRow({ chat }: ChatRowProps): React.JSX.Element {
   const { setChatPinned, archiveChat } = useWorkspace()
   const { openChat, activeChatId } = useChatRuntime()
   const { menu } = useOverlay()

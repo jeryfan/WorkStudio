@@ -7,7 +7,7 @@ import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { useWorkspace } from '../../state/WorkspaceContext'
 import { DotsIcon, NewChatIcon, OpenFolderIcon } from '../icons'
 import { IconButtonSm } from './SectionHeader'
-import { ChatRow } from './ChatRow'
+import { SidebarThreadRow } from './SidebarThreadRow'
 import { ProjectHoverCard } from './ProjectHoverCard'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -28,7 +28,7 @@ const HOVER_CLOSE_DELAY = 200
  * - hover：右侧操作按钮（项目菜单 / 新建任务）淡入
  * - 展开时下方渲染 .project-tasks 嵌套会话列表
  */
-export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
+export function SidebarProjectRow({ project }: ProjectRowProps): React.JSX.Element {
   const { projectExpanded, toggleProject, chatsOfProject, selectProject } = useWorkspace()
   const { menu, openMenu } = useOverlay()
   const { openTab } = usePanels()
@@ -295,7 +295,7 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
             {chats.length === 0 ? (
               <div className="px-2 py-1 text-sm text-[#a6a6ab]">No chats</div>
             ) : (
-              chats.map((c) => <ChatRow key={c.id} chat={c} />)
+              chats.map((c) => <SidebarThreadRow key={c.id} chat={c} />)
             )}
           </div>
         </div>

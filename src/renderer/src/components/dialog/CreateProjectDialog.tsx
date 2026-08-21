@@ -136,7 +136,9 @@ export function CreateProjectDialog({ onClose }: { onClose(): void }): React.JSX
                       </button>
                     </div>
                   ))}
-                  <span className="px-2 pt-1 text-[12px] text-token-description-foreground">Click to add more</span>
+                  <span className="px-2 pt-1 text-[12px] text-token-description-foreground">
+                    Click to add more
+                  </span>
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import type { ChatRow } from './model/rows'
+import type { SidebarThreadRow } from './model/rows'
 import { rowKey } from './model/rows'
 import { ChatRequestRow } from './rows/ChatRequestRow'
 import { ChatResponseRow } from './rows/ChatResponseRow'
@@ -39,7 +39,7 @@ export function ChatList({
   footer,
   placeholder
 }: {
-  rows: ChatRow[]
+  rows: SidebarThreadRow[]
   /** 输入区 */
   footer?: ReactNode
   /** 列表为空时显示（加载中 / 新会话） */

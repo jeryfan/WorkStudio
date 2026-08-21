@@ -9,7 +9,7 @@ import { useTheme } from './chat/theme/themeContext'
 import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
 import { WorkspaceProvider } from './state/WorkspaceContext'
 import { PanelProvider } from './state/PanelContext'
-import type { ChatRow } from './chat/model/rows'
+import type { SidebarThreadRow } from './chat/model/rows'
 
 /** 临时预览页：在浏览器里核对对话区的视觉，不进产物 */
 
@@ -43,7 +43,7 @@ npm run tokens:gen && npm run tokens:verify
 \`\`\`
 `
 
-const rows: ChatRow[] = [
+const rows: SidebarThreadRow[] = [
   {
     kind: 'request',
     id: 't1',
@@ -390,7 +390,7 @@ function Preview(): React.JSX.Element {
         {empty ? '填充行' : '清空行'}
       </button>
       {/*
-       * 外层用与 ContentArea / ChatView 完全一致的类名。
+       * 外层用与 MainContentLayout / ChatView 完全一致的类名。
        * 这不是装饰：`.interactive-session` 带 `margin: auto`，父级是块级还是
        * flex 容器会得到完全不同的宽度（flex 下 auto 外边距会关掉 stretch）。
        * 预览页若用一个普通 div 撑高，就测不出应用里真实的布局。

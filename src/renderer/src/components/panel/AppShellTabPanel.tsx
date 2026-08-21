@@ -12,7 +12,7 @@ import { FileGlyph } from './file/FileGlyph'
 import { useOverlay } from '../../state/OverlayContext'
 
 /* ================= Tab 渲染注册表 =================
- * 新增 tab 类型 = 在此注册一行，PanelShell 无需改动。
+ * 新增 tab 类型 = 在此注册一行，AppShellTabPanel 无需改动。
  * FileTab（panel/1.html）与 BrowserTab（webview）均为完整实现。 */
 interface TabRendererProps {
   tab: PanelTab
@@ -32,7 +32,7 @@ interface PanelShellProps {
  * 右侧 / 底部共用面板 —— docked 只是展示属性，tab 数据与停靠无关。
  * 结构 = PanelTabStrip（标签条）+ PanelContent（registry 渲染）。
  */
-export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
+export function AppShellTabPanel({ docked }: PanelShellProps): React.JSX.Element {
   const { docks, activateTab, closeTab } = usePanels()
   const { openMenu } = useOverlay()
   const { tabs, activeTabId } = docks[docked]
@@ -40,11 +40,13 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
   const ActiveRenderer = activeTab ? TAB_RENDERERS[activeTab.kind] : null
 
   return (
-    // 面板边界的 1px 线由 Separator 统一绘制，PanelShell 不再自带边框。
-    // 右侧面板顶部 44px 与 TopBar 的窗口拖拽区（app-region: drag）重叠，
+    // 面板边界的 1px 线由 Separator 统一绘制，AppShellTabPanel 不再自带边框。
+    // 右侧面板顶部 44px 与 AppShellHeader 的窗口拖拽区（app-region: drag）重叠，
     // 需要像侧栏一样 pt-11 让位，否则标签条按钮会被拖拽区吃掉点击；
-    // 底部面板在窗口中部、不接触 TopBar，无需让位。
-    <div className={`flex h-full w-full flex-col bg-token-main-surface-primary ${docked === 'right' ? 'pt-11' : ''}`}>
+    // 底部面板在窗口中部、不接触 AppShellHeader，无需让位。
+    <div
+      className={`flex h-full w-full flex-col bg-token-main-surface-primary ${docked === 'right' ? 'pt-11' : ''}`}
+    >
       {/* tab strip */}
       <div className="flex h-11 shrink-0 items-center gap-[3px] px-2">
         {tabs.map((tab) => {
@@ -106,7 +108,9 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
         {activeTab && ActiveRenderer ? (
           <ActiveRenderer tab={activeTab} dock={docked} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-token-description-foreground">No tabs</div>
+          <div className="flex h-full items-center justify-center text-sm text-token-description-foreground">
+            No tabs
+          </div>
         )}
       </div>
     </div>

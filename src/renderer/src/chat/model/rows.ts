@@ -36,7 +36,7 @@ export interface ChatResponseRow {
   completedAtMs: number | null
 }
 
-export type ChatRow = ChatRequestRow | ChatResponseRow
+export type SidebarThreadRow = ChatRequestRow | ChatResponseRow
 
 /**
  * 行的 React key。
@@ -45,6 +45,6 @@ export type ChatRow = ChatRequestRow | ChatResponseRow
  * shimmer、已展开的折叠、Monaco 编辑器实例全部重来。所以用协议给的稳定 id，
  * 不用数组下标。
  */
-export function rowKey(row: ChatRow): string {
+export function rowKey(row: SidebarThreadRow): string {
   return `${row.kind}:${row.id}`
 }

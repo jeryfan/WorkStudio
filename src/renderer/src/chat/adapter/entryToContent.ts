@@ -15,7 +15,7 @@ import type { PendingApproval } from '../model/approval'
 import type { ChatContent } from '../model/content'
 import { parsePlanText, type Todo } from '../model/plan.ts'
 import { workingLabel } from '../model/working.ts'
-import type { ChatRow } from '../model/rows'
+import type { SidebarThreadRow } from '../model/rows'
 // 带扩展名：verify-chat-adapter.mjs 用 Node 的类型剥离直接跑这个文件，
 // 而 Node 的 ESM 解析不会替我们补 `.ts`。Vite 两种写法都认。
 import { approvalToInvocation, toToolInvocation, withApproval } from './toolInvocation.ts'
@@ -243,8 +243,8 @@ export function latestTodos(turns: readonly RuntimeTurn[]): Todo[] {
 export function turnsToRows(
   turns: readonly RuntimeTurn[],
   approvals: ReadonlyMap<string, PendingApproval> = new Map()
-): ChatRow[] {
-  const rows: ChatRow[] = []
+): SidebarThreadRow[] {
+  const rows: SidebarThreadRow[] = []
 
   for (const turn of turns) {
     const items = turn.items

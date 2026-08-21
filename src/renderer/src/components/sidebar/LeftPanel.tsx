@@ -11,12 +11,14 @@ import {
   ScheduledIcon,
   SearchIcon
 } from '../icons'
-import { NavRow } from './NavRow'
+import { SidebarItem } from './SidebarItem'
 import { ResizeHandle } from '../layout/ResizeHandle'
+import { usePanelResize } from '../../utils/usePanelResize'
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/PanelContext'
 import { IconButtonSm, SectionHeader, SidebarSection } from './SectionHeader'
-import { ProjectRow } from './ProjectRow'
+import { SidebarProjectRow } from './SidebarProjectRow'
 import { SortableProjects } from './SortableProjects'
-import { ChatRow } from './ChatRow'
+import { SidebarThreadRow } from './SidebarThreadRow'
 import { SidebarFooter } from './SidebarFooter'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 
@@ -34,7 +36,7 @@ type SectionId = 'pinned' | 'projects' | 'recents'
  * Pinned 无内容时整个分区隐藏；另两个分区始终显示，空时给空态文案。
  * 宽度由 PanelContext 的 sidebarWidth 经 props 传入,写在 aside 的内联 style 上(Codex 同做法)。
  */
-export function Sidebar({
+export function LeftPanel({
   width,
   onResize
 }: {
@@ -42,6 +44,7 @@ export function Sidebar({
   width: number
   onResize(desired: number): void
 }): React.JSX.Element {
+  const resize = usePanelResize({ edge: 'right', size: width, onResize })
   // collapseAllProjects 保留在 WorkspaceContext 里 —— Codex 是从
   // Project sidebar options → Organize sidebar 子菜单触发,不是独立按钮。
   const { pinnedChats, recentChats, chatsLoading, projects, selectProject } = useWorkspace()
@@ -130,7 +133,7 @@ export function Sidebar({
                 {/*
                  * 品牌行 —— Codex 实测 316×32:左侧 86×32 的模式切换器,右侧 26×26 的
                  * Search 图标按钮。Search 在 Codex 里**不是独立导航行**,原先把它做成
-                 * NavRow 是错的。
+                 * SidebarItem 是错的。
                  *
                  * 切换器目前只是外观占位:Codex 那个按钮背后是模式下拉,本项目还没有模式
                  * 概念,所以先不挂菜单,几何与状态类名(data-state)按 Codex 留好。
@@ -182,7 +185,7 @@ export function Sidebar({
                  */}
                 <div className="flex flex-col gap-1">
                   <div className="flex flex-col gap-px">
-                    <NavRow
+                    <SidebarItem
                       icon={<NewChatIcon className="icon-xs" />}
                       label="New chat"
                       onClick={startProjectlessChat}
@@ -214,9 +217,15 @@ export function Sidebar({
                   <div className="shrink-0 px-row-x">
                     <div className="flex flex-col gap-1">
                       <div className="flex flex-col gap-px">
-                        <NavRow icon={<BranchIcon className="icon-xs" />} label="Pull requests" />
-                        <NavRow icon={<ScheduledIcon className="icon-xs" />} label="Scheduled" />
-                        <NavRow icon={<PluginsIcon className="icon-xs" />} label="Plugins" />
+                        <SidebarItem
+                          icon={<BranchIcon className="icon-xs" />}
+                          label="Pull requests"
+                        />
+                        <SidebarItem
+                          icon={<ScheduledIcon className="icon-xs" />}
+                          label="Scheduled"
+                        />
+                        <SidebarItem icon={<PluginsIcon className="icon-xs" />} label="Plugins" />
                       </div>
                     </div>
                   </div>
@@ -237,7 +246,7 @@ export function Sidebar({
                   >
                     <div className="flex flex-col gap-px">
                       {pinnedChats.map((c) => (
-                        <ChatRow key={c.id} chat={c} />
+                        <SidebarThreadRow key={c.id} chat={c} />
                       ))}
                     </div>
                   </SidebarSection>
@@ -292,7 +301,7 @@ export function Sidebar({
                       <div className="p-2 text-sm text-token-text-tertiary">No projects</div>
                     ) : (
                       <SortableProjects projects={projects}>
-                        {(p) => <ProjectRow key={p.id} project={p} />}
+                        {(p) => <SidebarProjectRow key={p.id} project={p} />}
                       </SortableProjects>
                     )}
                   </div>
@@ -326,7 +335,7 @@ export function Sidebar({
                         {chatsLoading ? 'Loading…' : 'No chats'}
                       </div>
                     ) : (
-                      recentChats.map((c) => <ChatRow key={c.id} chat={c} />)
+                      recentChats.map((c) => <SidebarThreadRow key={c.id} chat={c} />)
                     )}
                   </div>
                 </SidebarSection>
@@ -347,12 +356,16 @@ export function Sidebar({
           </div>
         </div>
       </div>
-      {/* Codex 的手柄是 aside 的最后一个子元素,不是外部分隔条 */}
+      {/* Codex 的手柄是 aside 的最后一个子元素,不是外部分隔条。
+          edge='right' = 贴右缘;拖拽状态由 usePanelResize 持有再回传。 */}
       <ResizeHandle
-        placement="sidebar-end"
-        size={width}
-        onResize={onResize}
+        edge="right"
         ariaLabel="Resize sidebar"
+        currentSize={width}
+        minimumSize={SIDEBAR_MIN_WIDTH}
+        maximumSize={SIDEBAR_MAX_WIDTH}
+        isResizing={resize.isResizing}
+        onPointerDown={resize.onPointerDown}
       />
     </aside>
   )

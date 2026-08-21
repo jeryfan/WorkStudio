@@ -4,7 +4,7 @@ import { HelpIcon, SettingsIcon } from '../icons'
 /**
  * 侧栏底栏 —— 层级与类名逐字对齐 Codex 实测值。
  *
- * Codex 的形态(定位层由 Sidebar 给,这里从它的第一个子元素开始):
+ * Codex 的形态(定位层由 LeftPanel 给,这里从它的第一个子元素开始):
  *
  *   div.relative.z-20.[&>*>*]:px-row-x.[&>*>*]:pb-2      ← 上方插槽(常空)
  *   div.[container-type:inline-size].relative.w-full.shrink-0

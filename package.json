@@ -35,7 +35,6 @@
     "electron-updater": "^6.3.9",
     "monaco-editor": "^0.56.0",
     "react-arborist": "^3.16.0",
-    "react-resizable-panels": "^4.12.2",
     "react-virtuoso": "^4.18.11",
     "shiki": "^4.4.2"
   },

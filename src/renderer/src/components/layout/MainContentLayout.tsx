@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { TopBar } from './TopBar'
+import { AppShellHeader } from './AppShellHeader'
 
 /**
  * 主内容区 —— 对齐 Codex 的 main 壳层。Codex 的完整层级:
@@ -29,7 +29,7 @@ import { TopBar } from './TopBar'
  *
  * data-app-shell-main-surface 有 default / browser 两个取值,Electron 宿主用 default。
  */
-export function ContentArea({
+export function MainContentLayout({
   children,
   /** 进入会话后由 ChatView 侧切成 full-bleed;首页是 visible */
   topFade = 'visible',
@@ -62,7 +62,7 @@ export function ContentArea({
       data-app-shell-main-surface="default"
     >
       <div className="pointer-events-none absolute inset-y-0 start-0" />
-      <TopBar />
+      <AppShellHeader />
       {/*
        * 这一层是**横向** flex:MainContentViewport + 右面板 aside 并排。
        * Codex 的右面板不是独立 panel 库,而是这一层的第二个子元素:

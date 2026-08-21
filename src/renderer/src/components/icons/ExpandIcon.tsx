@@ -1,6 +1,6 @@
 import type { IconProps } from './types'
 
-/** 最大化/恢复面板宽度（panel/1.html 第 231 行，TopBar 右侧第一个按钮） */
+/** 最大化/恢复面板宽度（panel/1.html 第 231 行，AppShellHeader 右侧第一个按钮） */
 export function ExpandIcon({ className }: IconProps): React.JSX.Element {
   return (
     <svg

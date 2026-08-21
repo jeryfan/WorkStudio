@@ -387,12 +387,84 @@ div#root                                                     display:block
 `PanelContext` 从命令式 panelRef 改成宽度状态(`sidebarWidth` / `rightPanelWidth`),
 折叠用 `width: 0` 表达 —— Codex 也没有单独的 collapsed 标志。
 
-**仍保留 `react-resizable-panels` 依赖**:`panel/file/FileTab.tsx` 内部的
-文件树/预览分栏还在用它。那是右面板**内容**的对齐问题,与外壳无关,单独一轮再处理。
+~~仍保留 `react-resizable-panels` 依赖~~ → **已彻底移除**,见下一节。
 
 **Codex 侧无法取证的一项**:底部面板。Codex 的 "Toggle bottom panel" 点下去
 DOM 里不产生任何节点(实测),没有可对齐的目标结构。现放在 `main` 的 flex 列末尾 ——
 那是语义上唯一说得通的位置,等能复现出来再按实测调整。
+
+### 已完成:命名对齐 + 彻底移除 panels 库
+
+**命名证据来源(比 DOM 更硬)**:Codex 的 bundle `app-initial-Biw83Aiz.js` 是**格式化过**的
+(20MB / 换行完整),而且**解构参数名没被压缩** —— 组件 props 与内部状态名可直接读出。
+再配合 CSS Modules 的 `_Name_hash_line` 形态按 hash 分组,能确认哪些类同属一个源文件。
+
+关键分组 `[1e9gb]`:`MainContentSurface` / `MainContentViewport` / `MainContentFrame` /
+`MainContentTopFade` / `ApplicationMenuTopBar` / `FloatingHeader` —— 证实这是 AppShell 域。
+
+从 bundle 挖到的真实词汇(× 是出现次数):
+- `leftPanelWidth`×4 `leftPanelAnimatedWidth`×4 `leftPanelSlot`×4 `LeftPanel`×3 `floatingLeftPanelWidth`×2
+- `rightPanelOpen`×8 `rightPanelFullWidth`×9 `rightPanelWidth`×4 `rightPanelDefaultWidth`×4
+  `rightPanelWidthMode`×3 `RightPanelOutlet` `RightPanelTabs` `AppShellTabPanel`
+- `AppShell`×1 `AppShellLayoutMotionContext` `appShellTabPanelController` `ThreadAppShellChrome`
+  → **`AppShell` 这个名字 Codex 确实在用**,保留。
+- `sidebarThreadRow`×11 `sidebarProjectRow`×8 `sidebarFooter`×8 `sidebarItems`×3
+- `mainContentWidth`×15 `MainContentLayout`×1
+- `headerLeftWidth`×4 `headerRightWidth`×3 `upsertHeaderSlotElement`×10
+
+据此重命名(`git mv` 保留历史):
+
+| 原名 | 新名 | 证据 |
+|---|---|---|
+| `Sidebar.tsx` | `LeftPanel.tsx` | `LeftPanel` / `leftPanelWidth` |
+| `NavRow.tsx` | `SidebarItem.tsx` | `sidebarItems` + DOM 类 `.sidebar-item` |
+| `ChatRow.tsx` | `SidebarThreadRow.tsx` | `sidebarThreadRow` |
+| `ProjectRow.tsx` | `SidebarProjectRow.tsx` | `sidebarProjectRow` |
+| `ContentArea.tsx` | `MainContentLayout.tsx` | `MainContentLayout` |
+| `TopBar.tsx` | `AppShellHeader.tsx` | `data-app-shell-header-*` + `headerLeftWidth` |
+| `PanelShell.tsx` | `AppShellTabPanel.tsx` | `AppShellTabPanel` |
+| `AppShell.tsx` | *(不变)* | Codex 自己就叫这个 |
+
+**`ResizeHandle` 从 bundle 逆出了完整组件形态**(渲染 `sidebar-resize-handle-line` 的那个函数):
+
+```
+props = { ariaLabel, currentSize, edge, isKeyboardResizable, isResizing,
+          maximumSize, minimumSize, onClick, onKeyDown, onPointerDown }
+edge: 'left' | 'right' | 'top' | 'bottom'      ← 四向,不是我原先自创的 placement
+right  → z-20  -top-toolbar right-0 bottom-0 w-4 translate-x-2
+left   → z-40  top-0 bottom-0 left-0 w-4 -translate-x-2
+top    →       top-0 right-0 left-0 h-4 -translate-y-2
+bottom →       right-0 bottom-0 left-0 h-4 translate-y-2
+```
+
+两个只有读源码才知道的点,已照做:
+1. **手柄自己不管拖拽状态**,只抛 `onPointerDown`,拖拽由父级持有再用 `isResizing` 回传
+   (拖拽中线 `opacity-100` 常亮)。拖拽逻辑因此抽成 `utils/usePanelResize.ts`。
+2. **键盘可调整是可选的**(`isKeyboardResizable`):关闭时 `tabIndex`/`aria-label`/
+   `aria-valuemin|max|now`/`onKeyDown` **全部是 undefined**,不是给默认值。
+
+**panels 库已彻底移除**:`package.json` 依赖删除、`separators.tsx` 删除、
+`FileTab.tsx` 内部分栏改成同一套(宽度 state + `ResizeHandle edge="left"`)、
+`PanelContext` 从命令式 panelRef 改成宽度 state。源码零引用。
+
+拖拽逐档复测(CDP 真实鼠标,每档从 340 起):
+
+| 指针 x | 440 | 520 | 600 | 235 | 150 | 60 |
+|---|---|---|---|---|---|---|
+| 宽度 | 440 | 520 | **520** | **240** | 240 | **0** |
+
+toggle 折叠 → 展开恢复到折叠前那一档。控制台无 error/warning/异常。
+
+> **调试记录(避免重复踩)**:验证过程中三次误判为实现 bug,实际都是**测试脚本**的问题 ——
+> ① 手柄跟着 aside 右缘移动,每步必须重读手柄位置再按下,固定坐标会按在手柄之外;
+> ② 宽度归 0 后手柄消失,`HX()` 读到的是过期位置;
+> ③ `mousePressed` 未配对 `mouseReleased` 会**阻塞 CDP 输入队列**,后续 `dispatchMouseEvent`
+> 全部超时,看起来像渲染进程卡死。用 MutationObserver 观察 aside 内联 width 的变化序列
+> 才最终确认实现是对的(284 → 0)。
+>
+> 真实实现 bug 只有一个,已修:`usePanelResize` 最初用 `useCallback([onResize])` +
+> ref 存 cleanup,连续拖拽时旧监听摘不掉、多个 move 处理器各持 `startSize` 互相覆写,
+> 宽度卡住不动。改成**一次拖拽 = 一个 AbortController**,不跨拖拽存任何状态。
 
 ### 未完成(按原修复顺序)
 6. **A5 + A4** 首页流式布局 + Composer 重写(需引入 ProseMirror)。

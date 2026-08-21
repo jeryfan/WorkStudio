@@ -82,7 +82,9 @@ export function DropdownMenu({
                 onClose()
               }}
               className={`group/mi flex w-full flex-col rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground ${
-                entry.disabled ? 'cursor-default opacity-50' : 'hover:bg-token-list-hover-background'
+                entry.disabled
+                  ? 'cursor-default opacity-50'
+                  : 'hover:bg-token-list-hover-background'
               }`}
             >
               <span className="flex w-full items-center gap-1.5">
@@ -91,7 +93,9 @@ export function DropdownMenu({
                 )}
                 <span className="min-w-0 flex-1 truncate">{entry.label}</span>
                 {entry.shortcut && (
-                  <span className="ml-2 shrink-0 text-xs text-token-description-foreground">{entry.shortcut}</span>
+                  <span className="ml-2 shrink-0 text-xs text-token-description-foreground">
+                    {entry.shortcut}
+                  </span>
                 )}
                 {entry.submenu && (
                   <SubmenuChevronIcon className="size-4 shrink-0 text-token-description-foreground opacity-75" />

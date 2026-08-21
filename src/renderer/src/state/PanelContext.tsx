@@ -27,7 +27,7 @@ export function resolveSidebarWidth(desired: number): number {
 export const RIGHT_PANEL_DEFAULT_WIDTH = 320
 export const RIGHT_PANEL_MIN_WIDTH = 240
 
-/** 面板停靠位置：右侧 / 底部（PanelShell 同一组件，两种停靠） */
+/** 面板停靠位置：右侧 / 底部（AppShellTabPanel 同一组件，两种停靠） */
 export type PanelDock = 'right' | 'bottom'
 
 /**

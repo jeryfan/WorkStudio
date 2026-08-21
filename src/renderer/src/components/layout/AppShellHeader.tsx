@@ -80,7 +80,7 @@ function HeaderSlot({
  * 结构是五个兄弟:左测量副本 / 左槽 / 中间 context surface / 右测量副本 / 右槽。
  * 中间那层是给 thread 标题和它右侧动作用的,首页态为空但结构要在。
  */
-export function TopBar(): React.JSX.Element {
+export function AppShellHeader(): React.JSX.Element {
   // 只取 sidebarOpen —— 它只用来切 aria-label。Codex 不给按钮激活态,
   // 所以 rightPanelOpen / bottomPanelOpen / panelMaximized 在 header 里都不需要。
   const { sidebarOpen, toggleSidebar, toggleRightPanel, toggleBottomPanel } = usePanels()

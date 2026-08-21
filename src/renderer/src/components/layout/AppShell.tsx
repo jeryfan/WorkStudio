@@ -5,10 +5,10 @@ import { SessionProvider } from '../../state/SessionContext'
 import { ChatRuntimeProvider, useChatRuntime } from '../../state/ChatRuntimeContext'
 import { OverlayProvider, useOverlay } from '../../state/OverlayContext'
 import { PanelProvider, usePanels } from '../../state/PanelContext'
-import { Sidebar } from '../sidebar/Sidebar'
-import { ContentArea } from './ContentArea'
+import { LeftPanel } from '../sidebar/LeftPanel'
+import { MainContentLayout } from './MainContentLayout'
 import { RightPanel } from './RightPanel'
-import { PanelShell } from '../panel/PanelShell'
+import { AppShellTabPanel } from '../panel/AppShellTabPanel'
 import { OverlayLayer } from '../overlay/OverlayLayer'
 import { HomeView } from '../../views/HomeView'
 import { ChatView } from '../../chat/ChatView'
@@ -74,20 +74,20 @@ function Shell(): React.JSX.Element {
       }
     >
       <div className="relative isolate flex max-h-full min-h-0 w-full flex-1">
-        <Sidebar width={sidebarWidth} onResize={setSidebarWidth} />
-        <ContentArea
+        <LeftPanel width={sidebarWidth} onResize={setSidebarWidth} />
+        <MainContentLayout
           rightPanelFullWidth={panelMaximized}
           rightPanel={
             rightPanelOpen ? (
               <RightPanel width={rightPanelWidth} onResize={setRightPanelWidth}>
-                <PanelShell docked="right" />
+                <AppShellTabPanel docked="right" />
               </RightPanel>
             ) : undefined
           }
-          bottomPanel={bottomPanelOpen ? <PanelShell docked="bottom" /> : undefined}
+          bottomPanel={bottomPanelOpen ? <AppShellTabPanel docked="bottom" /> : undefined}
         >
           <MainView />
-        </ContentArea>
+        </MainContentLayout>
       </div>
       <OverlayLayer />
     </div>

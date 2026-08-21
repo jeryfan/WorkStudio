@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react'
 import { ResizeHandle } from './ResizeHandle'
+import { usePanelResize } from '../../utils/usePanelResize'
+import { RIGHT_PANEL_MIN_WIDTH } from '../../state/PanelContext'
 
 /**
- * 右侧面板外壳 —— 逐层复刻 Codex 实测形态(见 ContentArea 里的层级注释)。
+ * 右侧面板外壳 —— 逐层复刻 Codex 实测形态(见 MainContentLayout 里的层级注释)。
  *
  * 四个细节都是实测出来的,别按直觉改:
  *
@@ -24,6 +26,8 @@ export function RightPanel({
   onResize(desired: number): void
   children: ReactNode
 }): React.JSX.Element {
+  const resize = usePanelResize({ edge: 'left', size: width, onResize })
+
   return (
     <aside
       data-app-shell-focus-area="right-panel"
@@ -32,10 +36,12 @@ export function RightPanel({
     >
       <div className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px shadow-[-8px_0_16px_-8px_rgb(0_0_0/0.18)]" />
       <ResizeHandle
-        placement="panel-start"
-        size={width}
-        onResize={onResize}
+        edge="left"
         ariaLabel="Resize side panel"
+        currentSize={width}
+        minimumSize={RIGHT_PANEL_MIN_WIDTH}
+        isResizing={resize.isResizing}
+        onPointerDown={resize.onPointerDown}
       />
       <div className="absolute inset-0 min-h-0 min-w-0 overflow-hidden">
         <div

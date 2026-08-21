@@ -113,7 +113,9 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
           <div className="flex max-h-[440px] flex-col gap-1 overflow-y-auto transition-[max-height] duration-150">
             {groups.map((g) => (
               <div key={g.name} className="flex flex-col gap-1">
-                <div className="block px-2 pb-0 pt-2 text-[13px] text-token-description-foreground">{g.name}</div>
+                <div className="block px-2 pb-0 pt-2 text-[13px] text-token-description-foreground">
+                  {g.name}
+                </div>
                 <div className="flex flex-col gap-1">
                   {g.list.map((item) => {
                     rowIndex += 1

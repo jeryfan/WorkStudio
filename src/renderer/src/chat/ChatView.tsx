@@ -31,7 +31,7 @@ export function ChatView(): React.JSX.Element {
 
   return (
     <ChatActionsProvider respondToApproval={respondToApproval}>
-      {/* pt-11：TopBar 是 fixed 的悬浮层，不留出来第一条消息会被压在底下 */}
+      {/* pt-11：AppShellHeader 是 fixed 的悬浮层，不留出来第一条消息会被压在底下 */}
       <div className="flex h-full min-h-0 flex-col pt-11">
         {readOnly && readOnlyReason && (
           <div className="mx-auto mt-2 w-full max-w-[950px] shrink-0 px-8">

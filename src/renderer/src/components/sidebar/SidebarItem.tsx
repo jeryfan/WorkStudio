@@ -33,7 +33,7 @@ interface NavRowProps {
  * 焦点态用 Codex 的 focus-visible:outline-token-border + offset-2(不是 ring),
  * 光标用 cursor-interaction(桌面端解析成 default,见 app-theme.css 的 body 层)。
  */
-export function NavRow({ icon, label, status, onClick }: NavRowProps): React.JSX.Element {
+export function SidebarItem({ icon, label, status, onClick }: NavRowProps): React.JSX.Element {
   return (
     <button
       type="button"

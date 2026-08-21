@@ -24,7 +24,10 @@ export function FileNavbar({
   return (
     <nav className="relative z-20 flex h-8 shrink-0 items-center border-b border-[#e2e4e8] bg-white px-2">
       <div className="flex min-w-0 flex-1 items-center gap-1 px-2 text-xs text-[#54585f]">
-        <button type="button" className="whitespace-nowrap rounded text-xs hover:text-token-foreground">
+        <button
+          type="button"
+          className="whitespace-nowrap rounded text-xs hover:text-token-foreground"
+        >
           {projectName}
         </button>
         {fileName && (
