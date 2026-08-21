@@ -102,7 +102,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
           aria-label="Back"
           disabled={!canBack}
           onClick={() => callView('goBack')}
-          className="flex size-7 items-center justify-center rounded-lg text-tertiary enabled:hover:bg-row-hover disabled:cursor-default disabled:opacity-40 [&_svg]:size-4"
+          className="flex size-7 items-center justify-center rounded-lg text-token-text-tertiary enabled:hover:bg-token-list-hover-background disabled:cursor-default disabled:opacity-40 [&_svg]:size-4"
         >
           <ArrowIcon />
         </button>
@@ -111,7 +111,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
           aria-label="Forward"
           disabled={!canForward}
           onClick={() => callView('goForward')}
-          className="flex size-7 items-center justify-center rounded-lg text-tertiary enabled:hover:bg-row-hover disabled:cursor-default disabled:opacity-40 [&_svg]:size-4"
+          className="flex size-7 items-center justify-center rounded-lg text-token-text-tertiary enabled:hover:bg-token-list-hover-background disabled:cursor-default disabled:opacity-40 [&_svg]:size-4"
         >
           <ArrowIcon className="-scale-x-100" />
         </button>
@@ -119,7 +119,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
           type="button"
           aria-label="Reload"
           onClick={() => callView('reload')}
-          className={`flex size-7 items-center justify-center rounded-lg text-tertiary hover:bg-row-hover [&_svg]:size-4 ${
+          className={`flex size-7 items-center justify-center rounded-lg text-token-text-tertiary hover:bg-token-list-hover-background [&_svg]:size-4 ${
             loading ? 'animate-spin' : ''
           }`}
         >
@@ -140,7 +140,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
             onFocus={(e) => e.target.select()}
             spellCheck={false}
             aria-label="Address"
-            className="h-7 w-full rounded-lg border border-[#e2e4e8] bg-[#f6f7f8] px-2.5 text-[13px] text-ink outline-none placeholder:text-[#9ba1a6] focus:border-focus"
+            className="h-7 w-full rounded-lg border border-[#e2e4e8] bg-[#f6f7f8] px-2.5 text-[13px] text-token-foreground outline-none placeholder:text-[#9ba1a6] focus:border-token-focus-border"
             placeholder="Search or enter URL"
           />
         </form>
@@ -150,7 +150,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
           aria-label="Open in external browser"
           title="Open in external browser"
           onClick={() => void window.api.openExternal(address)}
-          className="flex size-7 items-center justify-center rounded-lg text-tertiary hover:bg-row-hover [&_svg]:size-4"
+          className="flex size-7 items-center justify-center rounded-lg text-token-text-tertiary hover:bg-token-list-hover-background [&_svg]:size-4"
         >
           <ArrowIcon className="-rotate-45" />
         </button>

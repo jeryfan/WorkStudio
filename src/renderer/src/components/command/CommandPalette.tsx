@@ -108,12 +108,12 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
             }}
             onKeyDown={onKeyDown}
             placeholder="Search chats or run a command"
-            className="block h-[33px] w-full border-none bg-transparent px-2.5 py-1.5 text-sm leading-[21px] text-ink outline-none placeholder:text-desc"
+            className="block h-[33px] w-full border-none bg-transparent px-2.5 py-1.5 text-sm leading-[21px] text-token-foreground outline-none placeholder:text-token-description-foreground"
           />
           <div className="flex max-h-[440px] flex-col gap-1 overflow-y-auto transition-[max-height] duration-150">
             {groups.map((g) => (
               <div key={g.name} className="flex flex-col gap-1">
-                <div className="block px-2 pb-0 pt-2 text-[13px] text-desc">{g.name}</div>
+                <div className="block px-2 pb-0 pt-2 text-[13px] text-token-description-foreground">{g.name}</div>
                 <div className="flex flex-col gap-1">
                   {g.list.map((item) => {
                     rowIndex += 1
@@ -124,14 +124,14 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
                         type="button"
                         onMouseEnter={() => setActive(rowIndex)}
                         onClick={onClose}
-                        className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-[5px] text-left text-sm text-ink ${
-                          selected ? 'bg-row-hover' : ''
+                        className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-[5px] text-left text-sm text-token-foreground ${
+                          selected ? 'bg-token-list-hover-background' : ''
                         }`}
                       >
                         {item.unreadDot ? (
                           <span className="size-4 shrink-0">
                             <span className="flex size-5 items-center justify-center">
-                              <span className="size-2 rounded-full bg-focus" />
+                              <span className="size-2 rounded-full bg-token-focus-border" />
                             </span>
                           </span>
                         ) : item.icon ? (
@@ -146,12 +146,12 @@ export function CommandPalette({ onClose }: { onClose(): void }): React.JSX.Elem
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             <span className="ml-auto flex min-w-0 items-center gap-2">
                               {item.project && (
-                                <span className="w-24 shrink-0 truncate text-right text-[13px] text-desc">
+                                <span className="w-24 shrink-0 truncate text-right text-[13px] text-token-description-foreground">
                                   {item.project}
                                 </span>
                               )}
                               {item.kbd && (
-                                <kbd className="inline-flex shrink-0 whitespace-nowrap rounded-md bg-ink-10 px-1.5 py-0.5 text-xs leading-none opacity-80">
+                                <kbd className="inline-flex shrink-0 whitespace-nowrap rounded-md bg-token-foreground/10 px-1.5 py-0.5 text-xs leading-none opacity-80">
                                   {item.kbd}
                                 </kbd>
                               )}

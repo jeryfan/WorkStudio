@@ -1,31 +1,50 @@
-import { useEffect, useRef } from 'react'
-import { Group, Panel } from 'react-resizable-panels'
+import { useEffect } from 'react'
+import { SAFE_HEADER_LEFT, SAFE_HEADER_RIGHT } from '../../utils/platform'
 import { WorkspaceProvider } from '../../state/WorkspaceContext'
 import { SessionProvider } from '../../state/SessionContext'
 import { ChatRuntimeProvider, useChatRuntime } from '../../state/ChatRuntimeContext'
 import { OverlayProvider, useOverlay } from '../../state/OverlayContext'
 import { PanelProvider, usePanels } from '../../state/PanelContext'
 import { Sidebar } from '../sidebar/Sidebar'
-import { TopBar } from './TopBar'
 import { ContentArea } from './ContentArea'
+import { RightPanel } from './RightPanel'
 import { PanelShell } from '../panel/PanelShell'
 import { OverlayLayer } from '../overlay/OverlayLayer'
 import { HomeView } from '../../views/HomeView'
 import { ChatView } from '../../chat/ChatView'
-import { HorizontalSeparator, VerticalSeparator } from './separators'
 
+/**
+ * 应用骨架 —— 祖先链逐层对齐 Codex 实测值:
+ *
+ *   div#root                                                    (块级,React 挂载点)
+ *   └ div.relative.flex.flex-col                                ← 应用根,纵向
+ *     style: --spacing-token-safe-header-left/right
+ *            width/height: calc(100vw|100vh / var(--codex-window-zoom))
+ *            zoom: var(--codex-window-zoom)
+ *     └ div.relative.isolate.flex.max-h-full.min-h-0.w-full.flex-1   ← 主行,**横向**
+ *       ├ aside.app-shell-left-panel  style: padding-top: var(--height-toolbar); width: <n>px
+ *       └ main.codex-MainContentSurface                          (flex:1 由模块 CSS 给)
+ *
+ * **这里没有任何分隔条元素。** 两个面板的宽度各自走内联 width,拖拽手柄是
+ * absolute 贴在面板自己身上的(见 ResizeHandle)。之前用 react-resizable-panels
+ * 会在 DOM 里插入 `[data-panel-group]` / `[data-panel]` / `[role=separator]` 共 9 个
+ * Codex 完全没有的节点,而且 Panel 是**块级** div —— aside 和 main 因此拿不到
+ * flex 行的 stretch 高度,得靠 h-full/w-full 打补丁。祖先链一改,那些补丁全部删掉。
+ *
+ * 高度传递链:应用根有确定高度(100vh) → 主行 flex-1 + min-h-0 → aside/main 靠
+ * align-items:stretch 自动等高。任何一环写成块级,后面全得手写高度。
+ */
 function Shell(): React.JSX.Element {
   const { toggleCommand, closeAll } = useOverlay()
-  const { sidebarRef, rightRef, bottomRef, reportPanelSize, panelMaximized } = usePanels()
-
-  // 右/底面板初始为折叠态（命令式 API 在挂载后调用一次）
-  const didInit = useRef(false)
-  useEffect(() => {
-    if (didInit.current) return
-    didInit.current = true
-    rightRef.current?.collapse()
-    bottomRef.current?.collapse()
-  }, [rightRef, bottomRef])
+  const {
+    sidebarWidth,
+    setSidebarWidth,
+    rightPanelWidth,
+    setRightPanelWidth,
+    rightPanelOpen,
+    bottomPanelOpen,
+    panelMaximized
+  } = usePanels()
 
   // 全局快捷键：⌘K 命令面板 / Escape 关闭浮层
   useEffect(() => {
@@ -42,73 +61,34 @@ function Shell(): React.JSX.Element {
   }, [toggleCommand, closeAll])
 
   return (
-    <div className="flex h-screen flex-col">
-      <Group orientation="horizontal" className="min-h-0 flex-1">
-        {/* collapsible + collapsedSize=0：拖过 minSize 继续拖会自动折叠（库的原生行为） */}
-        <Panel
-          id="sidebar"
-          panelRef={sidebarRef}
-          defaultSize="299px"
-          minSize="220px"
-          maxSize="480px"
-          collapsible
-          collapsedSize={0}
-          onResize={(size) => reportPanelSize('sidebar', size.inPixels)}
-          className="min-h-0"
+    <div
+      className="relative flex flex-col"
+      style={
+        {
+          '--spacing-token-safe-header-left': `${SAFE_HEADER_LEFT}px`,
+          '--spacing-token-safe-header-right': `${SAFE_HEADER_RIGHT}px`,
+          width: 'calc(100vw / var(--codex-window-zoom))',
+          height: 'calc(100vh / var(--codex-window-zoom))',
+          zoom: 'var(--codex-window-zoom)'
+        } as React.CSSProperties
+      }
+    >
+      <div className="relative isolate flex max-h-full min-h-0 w-full flex-1">
+        <Sidebar width={sidebarWidth} onResize={setSidebarWidth} />
+        <ContentArea
+          rightPanelFullWidth={panelMaximized}
+          rightPanel={
+            rightPanelOpen ? (
+              <RightPanel width={rightPanelWidth} onResize={setRightPanelWidth}>
+                <PanelShell docked="right" />
+              </RightPanel>
+            ) : undefined
+          }
+          bottomPanel={bottomPanelOpen ? <PanelShell docked="bottom" /> : undefined}
         >
-          <Sidebar />
-        </Panel>
-        <VerticalSeparator />
-
-        <Panel id="main" minSize="360px" className="min-h-0">
-          <Group orientation="vertical" className="h-full">
-            <Panel id="content-row" minSize="240px" className="min-h-0">
-              <Group orientation="horizontal" className="h-full">
-                {/* 最大化时隐藏内容区，tab panel 占满整行 */}
-                {!panelMaximized && (
-                  <>
-                    <Panel id="content" minSize="320px" className="min-h-0">
-                      <ContentArea>
-                        <MainView />
-                      </ContentArea>
-                    </Panel>
-                    <VerticalSeparator />
-                  </>
-                )}
-                <Panel
-                  id="right-panel"
-                  panelRef={rightRef}
-                  defaultSize="320px"
-                  minSize="240px"
-                  maxSize={panelMaximized ? '100%' : '50%'}
-                  collapsible
-                  collapsedSize={0}
-                  onResize={(size) => reportPanelSize('right', size.inPixels)}
-                  className="min-h-0"
-                >
-                  <PanelShell docked="right" />
-                </Panel>
-              </Group>
-            </Panel>
-
-            <HorizontalSeparator />
-            <Panel
-              id="bottom-panel"
-              panelRef={bottomRef}
-              defaultSize="240px"
-              minSize="120px"
-              maxSize="70%"
-              collapsible
-              collapsedSize={0}
-              onResize={(size) => reportPanelSize('bottom', size.inPixels)}
-            >
-              <PanelShell docked="bottom" />
-            </Panel>
-          </Group>
-        </Panel>
-      </Group>
-
-      <TopBar />
+          <MainView />
+        </ContentArea>
+      </div>
       <OverlayLayer />
     </div>
   )
@@ -120,11 +100,6 @@ function MainView(): React.JSX.Element {
   return activeChatId ? <ChatView /> : <HomeView />
 }
 
-/**
- * .app (100vh 纵向) → 三向面板骨架（react-resizable-panels）：
- * 所有面板常驻挂载 + collapsible，开关走命令式 collapse/expand，
- * 拖拽过界自动折叠由库原生处理。
- */
 export function AppShell(): React.JSX.Element {
   return (
     <WorkspaceProvider>

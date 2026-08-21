@@ -19,7 +19,7 @@ export function UtilityPill({
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="flex h-6 shrink-0 items-center gap-1.5 rounded-full px-1.5 text-[13px] text-primary hover:bg-black/5"
+      className="flex h-6 shrink-0 items-center gap-1.5 rounded-full px-1.5 text-[13px] text-token-text-primary hover:bg-black/5"
     >
       <span className="flex size-4 items-center justify-center">{icon}</span>
       <span className="max-w-60 truncate">{label}</span>

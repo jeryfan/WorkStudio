@@ -24,7 +24,7 @@ function Row({ node, style, dragHandle }: NodeRendererProps<TreeNode>): React.JS
           node.tree.props.onActivate?.(node)
         }
       }}
-      className={`flex h-8 cursor-default items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-2 text-[13px] text-ink ${
+      className={`flex h-8 cursor-default items-center gap-2 overflow-hidden whitespace-nowrap rounded-md px-2 text-[13px] text-token-foreground ${
         node.isSelected ? 'bg-[#ececec]' : 'hover:bg-[#f2f3f5]'
       }`}
     >
@@ -68,7 +68,7 @@ export function FileTreePane({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files…"
-            className="min-w-0 flex-1 border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-[#9ba1a6]"
+            className="min-w-0 flex-1 border-none bg-transparent text-[13px] text-token-foreground outline-none placeholder:text-[#9ba1a6]"
           />
         </div>
       </div>

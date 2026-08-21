@@ -7,7 +7,6 @@ import {
   ChromeIcon,
   HelpIcon,
   KeyboardIcon,
-  LogoutIcon,
   OrganizeIcon,
   PetIcon,
   PinProjectIcon,
@@ -46,14 +45,16 @@ export const menuDefs: Record<MenuId, { entries: MenuEntry[]; minWidth?: number;
         { id: 'remove', label: 'Remove', icon: RemoveIcon }
       ]
     },
+    // Codex 的 profile 菜单实测:卡片 324 宽,三条 316×29 的 menuitem
+    // (账户名 / Show pet / Settings ⌘,)。账户名那条也是普通 menuitem,
+    // 只是下面跟了分隔线才看着像标题。Codex 这个菜单里没有 Log out。
     settings: {
-      width: 283,
+      width: 324,
       entries: [
         { id: 'api-key', label: 'Logged in with API key', icon: ApiKeyIcon, disabled: true },
         { separator: 'thin' },
         { id: 'show-pet', label: 'Show pet', icon: PetIcon },
-        { id: 'settings', label: 'Settings', icon: SettingsIcon, shortcut: '⌘,' },
-        { id: 'logout', label: 'Log out', icon: LogoutIcon }
+        { id: 'settings', label: 'Settings', icon: SettingsIcon, shortcut: '⌘,' }
       ]
     },
     help: {

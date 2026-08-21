@@ -22,10 +22,10 @@ import { createHighlighterCore, type HighlighterCore } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { shikiToMonaco } from '@shikijs/monaco'
 import { LANG_LOADERS, type ShikiLang } from '../../shiki/langs'
-import { THEME_NAMES, VSCODE_THEMES, type ThemeName } from '../theme/themes'
+import { THEME_VARIANTS, VSCODE_THEMES, type ThemeVariant } from '../theme/themes'
 import { getTheme, subscribeTheme } from '../theme/themeStore'
 
-export type { ThemeName }
+export type { ThemeVariant }
 export { monaco }
 
 /**
@@ -44,7 +44,7 @@ const registered = new Set<ShikiLang>()
 
 async function boot(): Promise<HighlighterCore> {
   const highlighter = await createHighlighterCore({
-    themes: THEME_NAMES.map((name) => VSCODE_THEMES[name] as never),
+    themes: THEME_VARIANTS.map((variant) => VSCODE_THEMES[variant] as never),
     langs: [],
     // JavaScript 正则引擎：省掉 oniguruma 的 WASM 资源。代价是极少数语法
     // （用到 oniguruma 独有语法的）会降级，常见语言不受影响。

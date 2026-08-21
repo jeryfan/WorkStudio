@@ -3,30 +3,56 @@ import type { ReactNode } from 'react'
 interface NavRowProps {
   icon: ReactNode
   label: string
-  /** 快捷键提示（⌘N / ⌘K），hover 时淡入 */
-  kbd?: string
+  /** 非空闲状态的圆点(Codex 只在有活动的行上渲染这一槽) */
+  status?: boolean
   onClick?: () => void
 }
 
 /**
- * .row / .row-btn —— 侧栏通用行：
- * hover 背景变灰；带 kbd 时右侧 chip 从透明淡入。
+ * 侧栏通用导航行 —— 类名逐字对齐 Codex 实测值。
+ *
+ * 高度与左右内边距一律走 token,不写死:
+ *   h-[var(--height-token-row)]
+ *   px-[var(--padding-row-cell-x,var(--padding-row-x))]
+ *   py-row-y
+ * 行高由上下文决定 —— 滚动区注入 30px,header 里落到 theme 的 29px。写死 h-[30px]
+ * 就丢掉了这个能力,换宽度或换宿主时对不上。
+ *
+ * 三个容易写错的地方:
+ *
+ * 1. **中间必须有内容层** `div.flex.min-w-0.items-center.text-base.gap-2.flex-1`。
+ *    文字色和 text-base 挂在它身上,不在 button 上 —— 因为右侧状态槽是 button 的
+ *    直接子元素,不该继承这些。把子元素直接摊在 button 下,状态槽会跟着变 14px。
+ *
+ * 2. 标签用 `text-fade-truncate`(mask 右侧渐隐),**不是** `truncate`(省略号)。
+ *    Codex 全站没有一处用省略号截断行标签。
+ *
+ * 3. 图标尺寸由 svg 自己的 `icon-xs` 决定,不要在插槽上写 `[&_svg]:size-4` ——
+ *    那会把所有嵌套 svg 一起压成 16px,且绕过 icon-* 这套标度。
+ *
+ * 焦点态用 Codex 的 focus-visible:outline-token-border + offset-2(不是 ring),
+ * 光标用 cursor-interaction(桌面端解析成 default,见 app-theme.css 的 body 层)。
  */
-export function NavRow({ icon, label, kbd, onClick }: NavRowProps): React.JSX.Element {
+export function NavRow({ icon, label, status, onClick }: NavRowProps): React.JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex h-[30px] w-full shrink-0 items-center gap-2 overflow-hidden rounded-row px-2 text-left text-sm leading-[21px] text-ink hover:bg-row-hover"
+      className="sidebar-item focus-visible:outline-token-border relative h-[var(--height-token-row)] px-[var(--padding-row-cell-x,var(--padding-row-x))] py-row-y cursor-interaction shrink-0 items-center overflow-hidden text-start text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 gap-2 flex w-full hover:bg-token-list-hover-background"
     >
-      <span className="flex w-4 shrink-0 items-center justify-center [&_svg]:size-4">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {kbd && (
-        <span className="shrink-0 text-desc opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-visible:opacity-100">
-          <kbd className="inline-flex whitespace-nowrap rounded-md bg-ink-10 px-1.5 py-0.5 text-xs leading-none">
-            {kbd}
-          </kbd>
-        </span>
+      <div className="flex min-w-0 items-center text-base gap-2 flex-1 text-token-foreground">
+        <span className="flex w-4 shrink-0 items-center justify-center">{icon}</span>
+        <span className="text-fade-truncate">{label}</span>
+      </div>
+      {status && (
+        <div className="relative flex size-5 shrink-0 items-center justify-center text-token-description-foreground">
+          <span className="icon-xs relative scale-50">
+            <span
+              className="absolute inset-0 rounded-full"
+              style={{ backgroundColor: 'var(--vscode-textLink-foreground)' }}
+            />
+          </span>
+        </div>
       )}
     </button>
   )

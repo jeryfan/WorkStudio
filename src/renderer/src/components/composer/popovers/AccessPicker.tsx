@@ -22,7 +22,7 @@ export function AccessPicker({ onClose }: AccessPickerProps): React.JSX.Element 
 
   return (
     <>
-      <div className="flex min-h-6 items-center px-2 py-[5px] text-[13px] leading-4 text-desc">
+      <div className="flex min-h-6 items-center px-2 py-[5px] text-[13px] leading-4 text-token-description-foreground">
         How should agent actions be approved?
       </div>
       {ACCESS_POLICIES.map((policy) => {
@@ -36,8 +36,8 @@ export function AccessPicker({ onClose }: AccessPickerProps): React.JSX.Element 
               setAccess(policy)
               onClose()
             }}
-            className={`flex w-full items-center gap-3 rounded-[12.5px] px-2 py-[5px] text-left hover:bg-row-hover ${
-              policy.warn ? 'text-accent' : 'text-ink'
+            className={`flex w-full items-center gap-3 rounded-[12.5px] px-2 py-[5px] text-left hover:bg-token-list-hover-background ${
+              policy.warn ? 'text-(--color-accent-orange)' : 'text-token-foreground'
             }`}
           >
             <Icon className="size-[18px] shrink-0 opacity-75" />
@@ -45,13 +45,13 @@ export function AccessPicker({ onClose }: AccessPickerProps): React.JSX.Element 
               <span className="text-[13px] leading-[18.57px]">{policy.label}</span>
               <span
                 className={`whitespace-normal text-[13px] leading-[18.57px] ${
-                  policy.warn ? 'text-accent' : 'text-desc'
+                  policy.warn ? 'text-(--color-accent-orange)' : 'text-token-description-foreground'
                 }`}
               >
                 {policy.description}
               </span>
             </span>
-            {active && <CheckIcon className="size-4 shrink-0 text-accent" />}
+            {active && <CheckIcon className="size-4 shrink-0 text-(--color-accent-orange)" />}
           </button>
         )
       })}

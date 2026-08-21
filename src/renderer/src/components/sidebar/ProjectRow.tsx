@@ -9,6 +9,9 @@ import { DotsIcon, NewChatIcon, OpenFolderIcon } from '../icons'
 import { IconButtonSm } from './SectionHeader'
 import { ChatRow } from './ChatRow'
 import { ProjectHoverCard } from './ProjectHoverCard'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { projectDragId } from './SortableProjects'
 
 interface ProjectRowProps {
   project: Project
@@ -39,6 +42,14 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
 
   // —— 悬浮卡片（prototype/project/hover.html）：hover 行延迟打开，可滑入卡片 ——
   const rowRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * 可拖单元与把手分开:
+   *   setNodeRef        → 外层包装(整组:项目行 + 其下会话),所以拖拽副本是整组
+   *   setActivatorNodeRef → 项目行本身,只有它能起手拖拽
+   * 合在一起的话,点子会话也会被当成拖拽起手,会话点击就失灵了。
+   */
+  const sortable = useSortable({ id: projectDragId(project.id) })
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [cardAnchor, setCardAnchor] = useState<DOMRect | null>(null)
@@ -98,12 +109,28 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
   }, [cardAnchor])
 
   return (
-    <div className="relative flex flex-col" role="listitem" aria-label={project.name}>
+    <div
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+        // 被拖的那一份在原位淡出,副本由 DragOverlay 渲染
+        opacity: sortable.isDragging ? 0.4 : undefined
+      }}
+      className="relative flex flex-col"
+      role="listitem"
+      aria-label={project.name}
+    >
       {/* 拖放区（原型保留的占位，pointer-events-none） */}
       <div className="pointer-events-none absolute bottom-0 left-0 top-[30px] z-10 w-8" />
 
       <div
-        ref={rowRef}
+        ref={(el) => {
+          rowRef.current = el
+          sortable.setActivatorNodeRef(el)
+        }}
+        {...sortable.attributes}
+        {...sortable.listeners}
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
@@ -128,23 +155,46 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
             })
           }
         }}
-        className={`group relative flex h-[30px] w-full cursor-pointer items-center justify-between overflow-hidden rounded-row text-left text-sm text-ink hover:bg-row-hover ${
-          actionsOpen ? 'bg-row-hover' : ''
+        /*
+         * 悬浮卡片打开时也要保持行高亮。
+         *
+         * 卡片渲染在行外面(浮层),鼠标滑进卡片的那一刻行就失去 :hover,
+         * 高亮消失 —— 视觉上像是"离开了这个项目",但卡片还开着,自相矛盾。
+         * 菜单那条路径本来就这么处理的(actionsOpen),卡片这条漏了。
+         */
+        aria-label={project.name}
+        data-app-action-sidebar-project-row=""
+        data-app-action-sidebar-project-id={project.id}
+        data-app-action-sidebar-project-label={project.name}
+        data-app-action-sidebar-project-collapsed={expanded ? 'false' : 'true'}
+        /*
+         * 命名 group 用 /folder-row —— 行内操作按钮靠它显现。用匿名 group 会和
+         * 嵌套的会话行的 group 串在一起:hover 项目行时子会话的操作也会亮。
+         * 高度走 token,光标用 Codex 的 cursor-interaction。
+         */
+        className={`sidebar-item group/folder-row group relative flex h-[var(--height-token-row)] w-full cursor-interaction items-center justify-between overflow-hidden text-sm text-token-foreground hover:bg-token-list-hover-background focus-visible:outline focus-visible:outline-offset-2 ${
+          actionsOpen || cardAnchor ? 'bg-token-list-hover-background' : ''
         }`}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1 pl-1">
+          {/*
+           * 图标位同时是 DnD 放置区(Codex 用 data-sidebar-project-drop-zone 标记),
+           * 尺寸走 --height-token-row 与行等高,svg 用 icon-xs(16px)。
+           */}
           <button
             type="button"
             aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+            data-sidebar-project-drop-zone="project-icon"
+            data-sidebar-project-kind="local"
             onClick={(e) => {
               e.stopPropagation()
               toggleProject(project.id)
             }}
-            className="-mx-[3px] flex size-[30px] shrink-0 items-center justify-center [&_svg]:size-4"
+            className="-mx-[3px] flex size-[var(--height-token-row)] shrink-0 items-center justify-center [&_svg]:icon-xs"
           >
             <OpenFolderIcon />
           </button>
-          <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md py-1 text-left text-sm text-ink">
+          <div className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap rounded-md py-1 pe-0 text-start text-base text-token-foreground">
             <span className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap">
               <span className="flex min-w-0 flex-1 items-center gap-0.5">
                 <span className="truncate pr-1">{project.name}</span>
@@ -153,18 +203,20 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
           </div>
         </div>
 
-        <div className="flex min-w-0 max-w-1/2 items-center gap-1">
+        <div className="flex max-w-[50%] min-w-0 gap-1">
+          {/* 静态圆点,不加 animate-pulse —— 与会话行一致(Codex 的状态点无动画) */}
           {busy && (
             <span
               title={`Running in ${project.name}`}
-              className="mr-0.5 size-1.5 shrink-0 animate-pulse rounded-full bg-focus group-hover:hidden"
+              className="me-0.5 size-2 shrink-0 rounded-full group-hover/folder-row:hidden"
+              style={{ backgroundColor: 'var(--vscode-textLink-foreground)' }}
             />
           )}
           <div
             className={`transition-opacity duration-100 ${
               actionsOpen
                 ? 'w-auto overflow-visible opacity-100'
-                : 'w-0 overflow-hidden opacity-0 group-hover:w-auto group-hover:overflow-visible group-hover:opacity-100'
+                : 'w-0 overflow-hidden opacity-0 group-hover/folder-row:w-auto group-hover/folder-row:overflow-visible group-hover/folder-row:opacity-100 focus-within:w-auto focus-within:overflow-visible focus-within:opacity-100'
             }`}
           >
             <IconButtonSm
@@ -183,16 +235,16 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
           </div>
           <div
             className={`mr-0.5 grid h-6 max-w-48 shrink-0 grid-cols-[1fr] items-center transition-[min-width] duration-100 ${
-              actionsOpen ? 'min-w-6' : 'min-w-0 group-hover:min-w-6'
+              actionsOpen ? 'min-w-6' : 'min-w-0 group-hover/folder-row:w-6'
             }`}
           >
             <span
               className={`col-start-1 row-start-1 inline-flex justify-self-end transition-opacity duration-100 ${
-                actionsOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                actionsOpen ? 'opacity-100' : 'opacity-0 group-hover/folder-row:opacity-100'
               }`}
             >
               <IconButtonSm
-                title={`New chat in ${project.name}`}
+                title={`Start new chat in ${project.name}`}
                 onClick={(e) => {
                   e.stopPropagation()
                   // 从项目发起的新会话默认落在该项目里：先切选中项，
@@ -206,6 +258,23 @@ export function ProjectRow({ project }: ProjectRowProps): React.JSX.Element {
             </span>
           </div>
         </div>
+
+        {/*
+         * 隐藏的"选中该项目"入口 —— Codex 每个项目行末尾都有一个
+         * button.sr-only[aria-hidden][data-app-action-sidebar-select-project]。
+         * 视觉上不可见(1×1),但给屏幕阅读器和自动化留了明确的动作锚点。
+         */}
+        <button
+          type="button"
+          aria-hidden="true"
+          data-app-action-sidebar-select-project=""
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation()
+            void selectProject({ type: 'project', projectId: project.id })
+          }}
+          className="sr-only"
+        />
       </div>
 
       {cardAnchor &&

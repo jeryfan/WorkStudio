@@ -1,0 +1,106 @@
+/* ==========================================================================
+   Codex 语法高亮
+   由 scripts/extract-codex-tokens.mjs 从 Codex webview 产物自动生成 —— 请勿手改
+   .hljs-* —— 配色出自 Codex token,与外壳同源
+   ========================================================================== */
+
+code[class*=language-],pre[class*=language-],code.hljs {
+  text-align:left;
+  white-space:pre;
+  word-spacing:normal;
+  word-break:normal;
+  word-wrap:normal;
+  tab-size:4;
+  -webkit-hyphens:none;
+  hyphens:none;
+  background:0 0;
+  line-height:1.5
+}
+
+:not(pre)>code[class*=language-],:not(pre)>code.hljs {
+  white-space:normal;
+  border-radius:.3em;
+  padding:.1em
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) code[class*=language-],:is(.light .dark,:is(.dark,.electron-dark)) pre[class*=language-],:is(.light .dark,:is(.dark,.electron-dark)) code.hljs {
+  color:#fff
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-comment {
+  color:#ffffff80
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-meta {
+  color:#fff9
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-built_in,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-class .hljs-title {
+  color:#e9950c
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-doctag,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-keyword,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-formula,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-literal {
+  color:#2e95d3
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-string,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-regexp,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-addition,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-attribute,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-meta-string {
+  color:#00a67d
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-attr,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-variable,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-template-variable,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-type,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-selector-class,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-selector-attr,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-selector-pseudo,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-number {
+  color:#df3079
+}
+
+:is(.light .dark,:is(.dark,.electron-dark)) .hljs-symbol,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-bullet,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-link,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-selector-id,:is(.light .dark,:is(.dark,.electron-dark)) .hljs-title {
+  color:#f22c3d
+}
+
+:is(.light,.electron-light) code[class*=language-],:is(.light,.electron-light) pre[class*=language-],:is(.light,.electron-light) code.hljs {
+  color:#383a42
+}
+
+:is(.light,.electron-light) .hljs-comment,:is(.light,.electron-light) .hljs-quote {
+  color:#a0a1a7;
+  font-style:italic
+}
+
+:is(.light,.electron-light) .hljs-doctag,:is(.light,.electron-light) .hljs-keyword,:is(.light,.electron-light) .hljs-formula {
+  color:#a626a4
+}
+
+:is(.light,.electron-light) .hljs-section,:is(.light,.electron-light) .hljs-name,:is(.light,.electron-light) .hljs-selector-tag,:is(.light,.electron-light) .hljs-deletion,:is(.light,.electron-light) .hljs-subst {
+  color:#e45649
+}
+
+:is(.light,.electron-light) .hljs-literal {
+  color:#0184bb
+}
+
+:is(.light,.electron-light) .hljs-string,:is(.light,.electron-light) .hljs-regexp,:is(.light,.electron-light) .hljs-addition,:is(.light,.electron-light) .hljs-attribute,:is(.light,.electron-light) .hljs-meta-string {
+  color:#50a14f
+}
+
+:is(.light,.electron-light) .hljs-built_in,:is(.light,.electron-light) .hljs-class .hljs-title {
+  color:#c18401
+}
+
+:is(.light,.electron-light) .hljs-attr,:is(.light,.electron-light) .hljs-variable,:is(.light,.electron-light) .hljs-template-variable,:is(.light,.electron-light) .hljs-type,:is(.light,.electron-light) .hljs-selector-class,:is(.light,.electron-light) .hljs-selector-attr,:is(.light,.electron-light) .hljs-selector-pseudo,:is(.light,.electron-light) .hljs-number {
+  color:#986801
+}
+
+:is(.light,.electron-light) .hljs-symbol,:is(.light,.electron-light) .hljs-bullet,:is(.light,.electron-light) .hljs-link,:is(.light,.electron-light) .hljs-meta,:is(.light,.electron-light) .hljs-selector-id,:is(.light,.electron-light) .hljs-title {
+  color:#4078f2
+}
+
+:is(.light,.electron-light) .hljs-emphasis {
+  font-style:italic
+}
+
+:is(.light,.electron-light) .hljs-strong {
+  font-weight:700
+}
+
+:is(.light,.electron-light) .hljs-link {
+  text-decoration:underline
+}
+

@@ -1,226 +1,144 @@
 @import 'tailwindcss';
 
 /* ==========================================================================
-   Design tokens — 逐条对应 prototype/1.html 的 :root（第 8-31 行）
+   Codex 设计系统 —— 五层,顺序即依赖方向
+   全部由 scripts/extract-codex-tokens.mjs 从 Codex webview 产物生成。
+   变量名、类名、选择器一律保持 Codex 原样:升级时重跑提取器直接替换,
+   不需要维护任何映射层。要改样式请改组件的 className,不要改这些文件。
+
+     theme      原语(--gray-N / --blue-N) + 标度 + --color-token-N 别名层
+     semantic   明暗语义层 .electron-light / .electron-dark
+     app-theme  698 个 --vscode-*,全部由语义层合成(Monaco/shiki 吃这一层)
+     utilities  @custom-variant + @utility + 命名语义类
+     components CSS Modules 组件类 + keyframes
+     highlight  .hljs-* 语法高亮
    ========================================================================== */
-@theme {
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono:
-    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+@import './codex/theme.css';
+@import './codex/semantic.css';
+@import './codex/app-theme.css';
+/*
+ * 运行时实测值 —— 必须排在**最后**。
+ *
+ * Codex 把这 66 个 --color-* 内联注入 <html>,内联优先级高于任何选择器;
+ * WorkStudio 用 .electron-light / .electron-dark 承载,特异性只有 (0,1,0),
+ * 与 app-theme.css 的 :is([data-codex-window-type=…]) 完全相同 —— 只能靠源码
+ * 顺序决胜,所以必须排在它后面。
+ *
+ * 排在前面的实测后果:app-theme.css 里那些"绕回 --vscode-* 的别名"会反压运行时值,
+ * 形成取值环。例如
+ *     --color-background-surface-under: var(--vscode-sideBar-background)   [app-theme]
+ *     --vscode-sideBar-background:      var(--color-background-surface-under)
+ * 两边互相引用,计算值双双变成空 —— 侧栏底色、sideBar 系 --vscode-* 全丢。
+ */
+@import './codex/runtime-light.css';
+@import './codex/runtime-dark.css';
+@import './codex/utilities.css';
+@import './codex/components.css';
+@import './codex/highlight.css';
 
-  /* --bg-app / --bg-hover */
-  --color-app: #f4f4f5;
-  --color-hover: rgb(0 0 0 / 0.045);
+/* ==========================================================================
+   品牌字体 —— 随 Codex webview 一同发布的两个字重
+   ========================================================================== */
+@font-face {
+  font-family: 'OpenAI Sans';
+  src: url('./fonts/OpenAISans-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
-  /* --text-* */
-  --color-primary: #212124;
-  --color-tertiary: #6f6f74;
-  --color-muted: #97979c;
-  --color-placeholder: #9c9ca1;
-
-  /* --border-color / --card-* / --utility-bg / --composer-bg */
-  --color-line: #e5e5e8;
-  --color-card: #fcfcfd;
-  --color-card-border: #e7e7ea;
-  --color-utility: #ebebee;
-  --color-composer: rgb(252 252 253 / 0.92);
-
-  /* 强调色 */
-  --color-accent: #c2570b; /* --orange，Full access 按钮 */
-  --color-icon-blue: #3b82f6;
-  --color-icon-purple: #a855f7;
-  --color-icon-green: #22c55e;
-  --color-icon-orange: #ea580c; /* --chart-orange */
-  --color-dot: #3f8cfa; /* --dot-blue，项目状态点 */
-
-  /* 双层阴影收成 token，避免调用处出现长串 arbitrary value */
-  --shadow-card: 0 2px 8px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.04);
-  --shadow-composer: 0 8px 24px rgb(0 0 0 / 0.07), 0 2px 6px rgb(0 0 0 / 0.04);
-
-  /* --row-radius */
-  --radius-row: 10px;
-
-  /* ==========================================================================
-     sider/2.html :root tokens（第 17-50 行）——侧栏完整版 / 菜单 / 命令面板 / 对话框
-     ========================================================================== */
-  --color-ink: rgb(26 28 31); /* --token-foreground */
-  --color-ink-50: rgb(26 28 31 / 0.425); /* --token-foreground-50 */
-  --color-ink-10: rgb(26 28 31 / 0.1); /* kbd-badge 背景 */
-  --color-desc: rgb(26 28 31 / 0.494); /* --token-description-foreground */
-  --color-row-hover: rgb(26 28 31 / 0.055); /* --token-list-hover-background */
-  --color-dropdown: rgb(255 255 255 / 0.9); /* --token-dropdown-background */
-  --color-dropdown-full: rgb(255 255 255 / 0.96);
-  --color-menu-line: rgb(26 28 31 / 0.08); /* --token-border / --token-menu-border */
-  --color-focus: rgb(51 156 255); /* --token-focus-border / 未读点 */
-  --color-surface: #ffffff; /* --token-main-surface-primary，内容区白底 */
-  --color-toolbar-hover: rgb(26 28 31 / 0.08);
-
-  /* ==========================================================================
-     chat2.html :root tokens（第 8-23 行）——会话页
-     ========================================================================== */
-  --color-conv-fg: #0d0d0d; /* --token-foreground */
-  --color-conv-body: rgb(13 13 13 / 0.6); /* --token-conversation-body，活动行/分隔标签 */
-  --color-conv-secondary: #5d5d5d; /* --token-text-secondary */
-  --color-conv-tertiary: #8f8f8f; /* --token-text-tertiary */
-  --color-conv-border: #e6e6e6; /* --token-border */
-  --color-conv-border-strong: #d9d9d9; /* --token-border-default */
-  --color-conv-hover: rgb(13 13 13 / 0.06); /* --token-list-hover-background */
-  --color-conv-bubble: rgb(13 13 13 / 0.05); /* 用户气泡底色 */
-  --color-conv-code: #ebebeb; /* 行内代码底色 */
-  --color-conv-mention: #1f66cc; /* 文件提及 */
-  --color-conv-warning: #ea580c; /* --token-editor-warning-foreground */
-
-  /* 内容列宽与左右留白：正文列固定 826px，两侧各 48px */
-  --spacing-conv-gutter: 48px;
-  --container-conv: 826px;
+@font-face {
+  font-family: 'OpenAI Sans';
+  src: url('./fonts/OpenAISans-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
 }
 
 /* ==========================================================================
-   会话内的提示卡片（轮次失败等）
-   白底 + 0.5px 发丝描边 + 一层极浅投影，逆向自上游的 callout。
-   刻意不用红底红字：断流、限流这类错误绝大多数重试一次就好了。
-   ========================================================================== */
-.conv-card {
-  box-shadow:
-    0 0 0 0.5px rgb(26 28 31 / 0.118),
-    0 1px 2px rgb(0 0 0 / 0.05);
-}
-
-/* ==========================================================================
-   Shimmer — 逆向自上游会话页的 cadencedShimmer
-   文字始终实心可读；在其上叠一层更深的同文副本，用 mask 开一条窄缝横扫。
-   steps(48,end) 是刻意的：连续位移在低对比度文字上糊成一片，
-   分级步进反而让"正在进行"看得清。
-   ========================================================================== */
-@keyframes conv-shimmer-sweep {
-  0% {
-    transform: translateX(-50%);
-  }
-  100% {
-    transform: translateX(125%);
-  }
-}
-
-@keyframes conv-shimmer-highlight {
-  0% {
-    transform: translateX(50%);
-  }
-  100% {
-    transform: translateX(-125%);
-  }
-}
-
-.conv-shimmer {
-  position: relative;
-  display: block;
-  color: var(--color-conv-secondary);
-}
-
-.conv-shimmer-sweep {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 100%;
-  overflow: hidden;
-  pointer-events: none;
-  transform: translateX(-50%);
-  -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    #000 20%,
-    #000 30%,
-    transparent 50%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    #000 20%,
-    #000 30%,
-    transparent 50%,
-    transparent 100%
-  );
-}
-
-.conv-shimmer-highlight {
-  display: block;
-  width: 100%;
-  transform: translateX(50%);
-  color: var(--color-conv-fg);
-}
-
-.conv-shimmer-active .conv-shimmer-sweep,
-.conv-shimmer-active .conv-shimmer-highlight {
-  animation-duration: 1s;
-  animation-timing-function: steps(48, end);
-  animation-iteration-count: 1;
-}
-
-.conv-shimmer-active .conv-shimmer-sweep {
-  animation-name: conv-shimmer-sweep;
-}
-
-.conv-shimmer-active .conv-shimmer-highlight {
-  animation-name: conv-shimmer-highlight;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .conv-shimmer-active .conv-shimmer-sweep,
-  .conv-shimmer-active .conv-shimmer-highlight {
-    animation: none;
-  }
-}
-
-/* ==========================================================================
-   Base — 复刻 1.html 第 32-59 行的 reset
-   Tailwind preflight 覆盖了大部分，此处只补它不做或行为不同的部分
+   Base —— 对齐 Codex 的 html/body 基线
    ========================================================================== */
 @layer base {
-  * {
-    margin: 0;
-    padding: 0; /* preflight 只清部分元素的 padding */
-    box-sizing: border-box;
+  /*
+   * .app-theme 把 --vscode-font-family 置为 inherit,所以 --font-sans 会一路
+   * 继承上来。Codex 在 Electron 宿主里由外层设定实际字体,这里让继承链
+   * 终结在系统字体栈上 —— 与 Codex 在 macOS 上的渲染结果一致。
+   * OpenAI Sans 不做默认字体,它在 Codex 里也是按需用 font-openai-sans 类。
+   */
+  html {
+    height: 100%;
+    font-family: var(--font-sans-default);
   }
 
-  html,
   body {
     height: 100%;
-    overflow: hidden;
-  }
-
-  body {
-    font-family: var(--font-sans);
-    font-size: 14px;
-    background: var(--color-app);
-    color: var(--color-primary);
+    padding: 0;
+    color: var(--color-token-editor-foreground);
+    font-family: var(--vscode-font-family);
+    font-weight: var(--vscode-font-weight);
+    /* 不设 font-size: Codex 的 body 就是浏览器默认 16px,字号由各元素的
+     * text-* utility 决定。在 body 上压成 14px 会让所有未显式指定字号的
+     * 元素比 Codex 小一号。 */
+    background-color: transparent;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* 挂载点必须撑满，否则内部 h-full 链条断掉 */
+  /* 挂载点必须撑满,否则内部 h-full 链条断掉 */
   #root {
     height: 100%;
   }
 
-  /* 无边框窗口拖拽区：TopBar 整体可拖，按钮组恢复交互 */
-  .drag-region {
-    -webkit-app-region: drag;
-  }
-  .no-drag {
-    -webkit-app-region: no-drag;
+  /* 溢出交给各面板自己管,窗口层不滚动 */
+  html,
+  body {
+    overflow: hidden;
   }
 }
 
 /* ==========================================================================
-   shiki 代码预览覆盖（panel/1.html .cl pre：13px/25px mono）
+   浮层层级 —— 圆角与背景模糊按"打断程度"分档,实测自 Codex
+
+     菜单 / 悬浮面板    圆角 15px   blur(8px)    轻量,不打断当前任务
+     弹窗              圆角 25px   blur(24px)   需要用户停下来处理
+
+   三者共同点:底色是 token-dropdown-background 的 90% 透明,**没有 border**,
+   边缘只靠 box-shadow 的 0.5px ring 给出。同时叠 border 和 ring 会让边缘比
+   Codex 重一层。遮罩固定 rgba(0,0,0,0.133) 且**不带 backdrop-filter**。
    ========================================================================== */
-.code-shiki pre {
-  background: transparent !important;
-  margin: 0;
-  font: 13px/25px var(--font-mono);
+@utility overlay-light {
+  border-radius: 15px;
+  backdrop-filter: blur(8px);
 }
+
+@utility overlay-heavy {
+  border-radius: 25px;
+  backdrop-filter: blur(24px);
+}
+
+/* ==========================================================================
+   WorkStudio 自有 —— 仅限 Codex 没有对应物的部分
+
+   窗口拖拽用 Codex 的 .draggable / .no-drag(见 codex/utilities.css)。
+   .draggable 自带 `.draggable button { -webkit-app-region: no-drag }`,
+   按钮无需再单独标记。
+   ========================================================================== */
+
+/*
+ * shiki 预览容器。
+ * Codex 的代码展示走 .hljs-*(见 codex/highlight.css),但 WorkStudio 的
+ * CodePane 用 Monaco + shiki 渲染整块文件,需要一个容器统一行高与背景。
+ */
+.code-shiki pre {
+  margin: 0;
+  background: transparent !important;
+  font:
+    var(--text-sm) / 25px var(--font-mono);
+}
+
 .code-shiki code {
   font-family: inherit;
 }
+
 .code-shiki .line {
   display: block;
   min-height: 25px;

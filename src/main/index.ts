@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerFileIpc } from './fileIpc'
+import { registerThemeIpc } from './themeIpc'
 import { AgentRuntime } from './agent/AgentRuntime'
 import { ProjectRegistry } from './workspace/ProjectRegistry'
 import { registerProjectMethods } from './workspace/projectMethods'
@@ -10,6 +11,17 @@ import { registerBootstrap } from './workspace/bootstrap'
 import icon from '../../resources/icon.png?asset'
 
 const isMac = process.platform === 'darwin'
+
+/**
+ * 开发期打开 CDP 端口。
+ *
+ * 样式对齐要能拿计算样式和上游逐项比数值,肉眼看截图不够准。开关必须在
+ * app ready 之前设置,否则不生效。仅 dev —— 打包产物不会带这个端口。
+ */
+if (is.dev) {
+  // 9222 常被 Chrome/Edge 占用,换一个不冲突的
+  app.commandLine.appendSwitch('remote-debugging-port', '9333')
+}
 
 /** agent 运行时：全应用一个实例，窗口关闭不影响进行中的任务 */
 const agentRuntime = new AgentRuntime()
@@ -79,6 +91,7 @@ app.whenReady().then(() => {
 
   // 文件服务 IPC（file:listDir / file:readFile）
   registerFileIpc(projectRegistry)
+  registerThemeIpc()
 
   // agent 运行时先于窗口启动：路由要在渲染层首次发消息前就位。
   // 二进制不可用时不阻塞界面，状态经 app/agent/status 暴露给渲染层。

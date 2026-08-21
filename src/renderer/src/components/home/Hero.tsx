@@ -16,10 +16,10 @@ export function Hero(): React.JSX.Element | null {
 
   return (
     <div className="absolute left-1/2 top-[289px] flex w-max max-w-full -translate-x-1/2 flex-col items-center gap-6">
-      <div data-testid="home-icon" className="relative size-14 text-primary opacity-30">
+      <div data-testid="home-icon" className="relative size-14 text-token-text-primary opacity-30">
         <HomeLogoIcon className="absolute inset-0 size-full" />
       </div>
-      <h1 className="select-none whitespace-pre-wrap text-center text-2xl font-normal leading-8 text-primary">
+      <h1 className="select-none whitespace-pre-wrap text-center text-2xl font-normal leading-8 text-token-text-primary">
         What should we build in{' '}
         <button
           type="button"

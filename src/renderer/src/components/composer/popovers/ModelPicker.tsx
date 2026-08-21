@@ -53,18 +53,18 @@ function EffortSlider({ efforts, value, onChange }: EffortSliderProps): React.JS
         }}
         className="relative h-4 flex-1 cursor-pointer touch-none outline-none"
       >
-        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-sm bg-ink/[0.12]" />
+        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-sm bg-token-foreground/[0.12]" />
         {efforts.map((effort, i) => (
           <span
             key={effort}
             className={`absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-              i <= index ? 'bg-ink' : 'bg-ink/25'
+              i <= index ? 'bg-token-foreground' : 'bg-token-foreground/25'
             }`}
             style={{ left: `${pct(i)}%` }}
           />
         ))}
         <span
-          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink shadow-[0_1px_3px_rgb(0_0_0/0.25)]"
+          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-token-foreground shadow-[0_1px_3px_rgb(0_0_0/0.25)]"
           style={{ left: `${pct(index)}%` }}
         />
       </div>
@@ -88,7 +88,7 @@ export function ModelPicker(): React.JSX.Element {
           key={m.id}
           type="button"
           onClick={() => selectModel(m.id)}
-          className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink hover:bg-row-hover"
+          className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground hover:bg-token-list-hover-background"
         >
           <span className="min-w-0 flex-1 truncate">{m.displayName}</span>
           {m.id === model?.id && <CheckIcon className="size-4 shrink-0 opacity-75" />}
@@ -98,9 +98,9 @@ export function ModelPicker(): React.JSX.Element {
       {model && model.efforts.length > 0 && (
         <>
           <div className="px-2 py-1">
-            <div className="h-px w-full bg-menu-line" />
+            <div className="h-px w-full bg-token-menu-border" />
           </div>
-          <div className="flex items-center justify-between px-2 pb-1 pt-2 text-xs text-desc">
+          <div className="flex items-center justify-between px-2 pb-1 pt-2 text-xs text-token-description-foreground">
             <span>Faster</span>
             <span>Smarter</span>
           </div>

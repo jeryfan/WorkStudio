@@ -12,7 +12,7 @@ interface CodePaneProps {
 export function CodePane({ html, loading, lineCount }: CodePaneProps): React.JSX.Element {
   if (!html) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-desc">
+      <div className="flex h-full items-center justify-center text-[13px] text-token-description-foreground">
         {loading ? 'Loading…' : 'Select a file to preview'}
       </div>
     )

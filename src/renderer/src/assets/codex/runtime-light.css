@@ -1,0 +1,109 @@
+/* ==========================================================================
+   Codex 运行时语义层 —— light
+   ==========================================================================
+   来源不是 CSS 文件,而是运行中的 Codex 实例:它把整套语义 token 以内联样式
+   注入 <html>。静态 CSS 里的 .electron-light 只是兜底,会被这批值覆盖。
+
+   为什么必须取运行时值:Codex 的语义层是**生成**的,不是写死的。四个种子
+       --codex-base-accent / --codex-base-ink / --codex-base-surface / --codex-base-contrast
+   经运行时颜色引擎推导出下面这些 token(带对比度感知的 alpha 阶梯)。
+   静态兜底与生成结果在少数 token 上并不相同,实测差异例:
+       --color-background-surface-under      兜底 #f9f9f9   运行时 #f6f6f6
+       --color-background-application-menu   兜底 #f9f9f9   运行时 #f8f8f9
+
+   重新捕获(在跑着的 Codex 页面上执行):
+       [...document.documentElement.getAttribute('style')
+         .matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)]
+         .map(m => `${m[1]}: ${m[2].trim()};`).join('\n')
+
+   暗色一套需要宿主上报 dark 外观时再捕获一次,存成 runtime-dark.css。
+   已排除 --codex-sidebar-preferred-width:那是用户拖拽出的界面状态,不是主题 token。
+   ========================================================================== */
+
+.electron-light {
+  /* 生成种子 */
+  --codex-base-accent: #339cff;
+  --codex-base-contrast: 45;
+  --codex-base-ink: #1a1c1f;
+  --codex-base-surface: #ffffff;
+
+  /* 宿主字号 */
+  --vscode-editor-font-size: 12px;
+  --vscode-font-size: 14px;
+
+  /* 字号标度 */
+  --text-4xl: 72px;
+  --text-3xl: 48px;
+  --text-2xl: 36px;
+  --text-xl: 28px;
+  --text-lg: 16px;
+  --text-base: 14px;
+  --text-sm: 13px;
+  --text-xs: 12px;
+  --text-heading-lg: 24px;
+  --text-heading-md: 20px;
+  --text-heading-sm: 18px;
+
+  /* 强调色 */
+  --color-accent-blue: #339cff;
+  --color-accent-purple: #924ff7;
+  --color-background-accent: #e5f2ff;
+  --color-background-accent-active: #e0f0ff;
+  --color-background-accent-hover: #e2f1ff;
+  --color-icon-accent: #339cff;
+  --color-text-accent: #339cff;
+  --color-text-on-accent: rgb(255, 255, 255);
+
+  /* 表面 */
+  --color-background-surface: #ffffff;
+  --color-background-surface-under: #f6f6f6;
+  --color-background-panel: #ffffff;
+  --color-background-application-menu: #f8f8f9;
+  --color-background-control: rgba(255, 255, 255, 0.96);
+  --color-background-control-opaque: rgb(255, 255, 255);
+  --color-background-editor-opaque: rgb(255, 255, 255);
+  --color-background-elevated-primary: rgba(255, 255, 255, 0.96);
+  --color-background-elevated-primary-opaque: rgb(255, 255, 255);
+  --color-background-elevated-secondary: rgba(255, 255, 255, 0.96);
+  --color-background-elevated-secondary-opaque: rgb(255, 255, 255);
+
+  /* 按钮三级 —— alpha 阶梯由 --codex-base-contrast 推导 */
+  --color-background-button-primary: #1a1c1f;
+  --color-background-button-primary-hover: rgba(26, 28, 31, 0.077);
+  --color-background-button-primary-active: rgba(26, 28, 31, 0.154);
+  --color-background-button-primary-inactive: rgba(26, 28, 31, 0.243);
+  --color-background-button-secondary: rgba(26, 28, 31, 0.049);
+  --color-background-button-secondary-hover: rgba(26, 28, 31, 0.053);
+  --color-background-button-secondary-active: rgba(26, 28, 31, 0.039);
+  --color-background-button-secondary-inactive: rgba(26, 28, 31, 0.019);
+  --color-background-button-tertiary: rgba(26, 28, 31, 0);
+  --color-background-button-tertiary-hover: rgba(26, 28, 31, 0.098);
+  --color-background-button-tertiary-active: rgba(26, 28, 31, 0.196);
+  --color-text-button-primary: #ffffff;
+  --color-text-button-secondary: #1a1c1f;
+  --color-text-button-tertiary: rgba(26, 28, 31, 0.495);
+
+  /* 描边 */
+  --color-border: rgba(26, 28, 31, 0.078);
+  --color-border-light: rgba(26, 28, 31, 0.049);
+  --color-border-heavy: rgba(26, 28, 31, 0.117);
+  --color-border-focus: #339cff;
+  --color-border-application-menu-separator: rgba(26, 28, 31, 0.117);
+
+  /* 文字与图标 */
+  --color-text-foreground: #1a1c1f;
+  --color-text-foreground-secondary: rgba(26, 28, 31, 0.695);
+  --color-text-foreground-tertiary: rgba(26, 28, 31, 0.495);
+  --color-foreground-application-menu: #1a1c1f;
+  --color-icon-primary: #1a1c1f;
+  --color-icon-secondary: rgba(26, 28, 31, 0.695);
+  --color-icon-tertiary: rgba(26, 28, 31, 0.495);
+
+  /* diff / 装饰 */
+  --color-decoration-added: #00a240;
+  --color-decoration-deleted: #ba2623;
+  --color-editor-added: rgba(0, 162, 64, 0.15);
+  --color-editor-deleted: rgba(186, 38, 35, 0.15);
+
+  --color-simple-scrim: rgba(0, 0, 0, 0.098);
+}

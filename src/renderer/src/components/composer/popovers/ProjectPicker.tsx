@@ -31,14 +31,14 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.JSX.Elemen
   return (
     <>
       <div className="mb-1 flex items-center gap-1.5 px-2 py-[5px]">
-        <SearchIcon className="size-3.5 shrink-0 text-desc" />
+        <SearchIcon className="size-3.5 shrink-0 text-token-description-foreground" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search projects"
           aria-label="Search projects"
-          className="min-w-0 flex-1 border-none bg-transparent text-[13px] leading-[18.57px] text-ink outline-none placeholder:text-placeholder"
+          className="min-w-0 flex-1 border-none bg-transparent text-[13px] leading-[18.57px] text-token-foreground outline-none placeholder:text-token-input-placeholder-foreground"
         />
       </div>
 
@@ -48,8 +48,8 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.JSX.Elemen
             key={p.id}
             type="button"
             onClick={() => select(p.id)}
-            className={`flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink hover:bg-row-hover ${
-              p.id === selectedId ? 'bg-row-hover' : ''
+            className={`flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground hover:bg-token-list-hover-background ${
+              p.id === selectedId ? 'bg-token-list-hover-background' : ''
             }`}
           >
             <FolderIcon className="size-4 shrink-0 opacity-75" />
@@ -58,14 +58,14 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.JSX.Elemen
           </button>
         ))}
         {filtered.length === 0 && (
-          <div className="px-2 py-[5px] text-[13px] leading-[18.57px] text-placeholder">
+          <div className="px-2 py-[5px] text-[13px] leading-[18.57px] text-token-input-placeholder-foreground">
             No projects found
           </div>
         )}
       </div>
 
       <div className="px-2 py-1">
-        <div className="h-px w-full bg-menu-line" />
+        <div className="h-px w-full bg-token-menu-border" />
       </div>
 
       <button
@@ -74,7 +74,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.JSX.Elemen
           onClose()
           setCreateProjectOpen(true)
         }}
-        className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink hover:bg-row-hover"
+        className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground hover:bg-token-list-hover-background"
       >
         <PlusIcon className="size-4 shrink-0 opacity-75" />
         <span className="min-w-0 flex-1 truncate">New project</span>
@@ -85,7 +85,7 @@ export function ProjectPicker({ onClose }: ProjectPickerProps): React.JSX.Elemen
           void selectProject({ type: 'unassigned' })
           onClose()
         }}
-        className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink hover:bg-row-hover"
+        className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground hover:bg-token-list-hover-background"
       >
         <CloseIcon className="size-4 shrink-0 opacity-75" />
         <span className="min-w-0 flex-1 truncate">Don&apos;t work in a project</span>

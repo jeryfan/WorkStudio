@@ -44,6 +44,8 @@ interface WorkspaceContextValue {
   pickDirectories(): Promise<string[]>
   createProject(input: CreateProjectInput): Promise<void>
   renameProject(projectId: string, name: string): Promise<void>
+  /** 拖拽排序后持久化项目顺序 */
+  reorderProjects(projectIds: string[]): Promise<void>
   removeProject(projectId: string): Promise<void>
   selectProject(selection: ProjectSelection): Promise<void>
   setChatPinned(chatId: string, pinned: boolean): Promise<void>
@@ -189,6 +191,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
     setSnapshot(await workspaceService.removeProject(projectId))
   }, [])
 
+  const reorderProjects = useCallback(async (projectIds: string[]): Promise<void> => {
+    setSnapshot(await workspaceService.reorderProjects(projectIds))
+  }, [])
+
   const selectProject = useCallback(async (selection: ProjectSelection): Promise<void> => {
     setSnapshot(await workspaceService.selectProject(selection))
   }, [])
@@ -237,6 +243,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
       pickDirectories,
       createProject,
       renameProject,
+      reorderProjects,
       removeProject,
       selectProject,
       setChatPinned,

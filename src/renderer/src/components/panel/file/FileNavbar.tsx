@@ -24,7 +24,7 @@ export function FileNavbar({
   return (
     <nav className="relative z-20 flex h-8 shrink-0 items-center border-b border-[#e2e4e8] bg-white px-2">
       <div className="flex min-w-0 flex-1 items-center gap-1 px-2 text-xs text-[#54585f]">
-        <button type="button" className="whitespace-nowrap rounded text-xs hover:text-ink">
+        <button type="button" className="whitespace-nowrap rounded text-xs hover:text-token-foreground">
           {projectName}
         </button>
         {fileName && (
@@ -34,7 +34,7 @@ export function FileNavbar({
             </span>
             <button
               type="button"
-              className="whitespace-nowrap rounded text-xs font-medium text-ink"
+              className="whitespace-nowrap rounded text-xs font-medium text-token-foreground"
             >
               {fileName}
             </button>
@@ -76,7 +76,7 @@ export function FileNavbar({
           onClick={onToggleTree}
           className={`flex size-7 items-center justify-center rounded-lg [&_svg]:size-5 ${
             treeVisible
-              ? 'bg-[#f2f3f4] text-ink hover:bg-ink-10'
+              ? 'bg-[#f2f3f4] text-token-foreground hover:bg-token-foreground/10'
               : 'text-[#71767d] hover:bg-[#f2f3f5]'
           }`}
         >

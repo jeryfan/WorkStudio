@@ -109,7 +109,7 @@ export function PlusMenu({ onSelect }: PlusMenuProps): React.JSX.Element {
       {SECTIONS.map((section, i) => (
         <div key={section.heading}>
           <div
-            className={`sticky top-0 z-10 bg-dropdown-full px-2 py-1 text-[13px] leading-[18.57px] text-desc ${
+            className={`sticky top-0 z-10 bg-token-dropdown-background px-2 py-1 text-[13px] leading-[18.57px] text-token-description-foreground ${
               i > 0 ? 'pt-2' : ''
             }`}
           >
@@ -120,17 +120,17 @@ export function PlusMenu({ onSelect }: PlusMenuProps): React.JSX.Element {
               key={item.id}
               type="button"
               onClick={() => onSelect(item.id)}
-              className="flex w-full items-center gap-2 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink/75 hover:bg-row-hover hover:text-ink"
+              className="flex w-full items-center gap-2 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground/75 hover:bg-token-list-hover-background hover:text-token-foreground"
             >
               <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden rounded">
                 <item.icon className="size-4" />
               </span>
               <span className="shrink-0 whitespace-nowrap">{item.title}</span>
-              {item.desc && <span className="min-w-0 flex-1 truncate text-desc">{item.desc}</span>}
+              {item.desc && <span className="min-w-0 flex-1 truncate text-token-description-foreground">{item.desc}</span>}
             </button>
           ))}
           {section.emptyText && (
-            <div className="px-2 py-[5px] text-[13px] leading-[18.57px] text-placeholder">
+            <div className="px-2 py-[5px] text-[13px] leading-[18.57px] text-token-input-placeholder-foreground">
               {section.emptyText}
             </div>
           )}

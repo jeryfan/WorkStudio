@@ -147,7 +147,7 @@ export function Composer({ inline = false }: { inline?: boolean } = {}): React.J
             'absolute bottom-[15px] left-1/2 flex w-[738px] max-w-[calc(100%-32px)] -translate-x-1/2 flex-col'
       }
     >
-      <div className="mx-3 -mb-[23px] flex items-center gap-1 overflow-hidden rounded-t-2xl bg-utility px-2 pb-[27px] pt-2">
+      <div className="mx-3 -mb-[23px] flex items-center gap-1 overflow-hidden rounded-t-2xl bg-(--color-background-button-secondary) px-2 pb-[27px] pt-2">
         {/* 项目 pill + hover 出现的取消按钮（chat.html .proj-group） */}
         <span ref={projectPillRef} className="group/proj flex items-center gap-0.5">
           <UtilityPill
@@ -161,7 +161,7 @@ export function Composer({ inline = false }: { inline?: boolean } = {}): React.J
               type="button"
               aria-label="Don't work in a project"
               onClick={() => void selectProject({ type: 'unassigned' })}
-              className="flex size-4 items-center justify-center text-tertiary opacity-0 transition-opacity hover:text-primary group-hover/proj:opacity-100"
+              className="flex size-4 items-center justify-center text-token-text-tertiary opacity-0 transition-opacity hover:text-token-text-primary group-hover/proj:opacity-100"
             >
               <CircleCloseIcon className="size-4" />
             </button>
@@ -172,13 +172,13 @@ export function Composer({ inline = false }: { inline?: boolean } = {}): React.J
         {currentProject && <UtilityPill icon={<BranchIcon className="size-4" />} label="main" />}
       </div>
 
-      <div className="relative z-10 flex flex-col rounded-2xl border border-black/5 bg-composer shadow-composer backdrop-blur-[16px]">
+      <div className="relative z-10 flex flex-col rounded-2xl border border-black/5 bg-(--color-background-elevated-primary) shadow-(--color-background-elevated-primary) backdrop-blur-[16px]">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={readOnly}
-          className="h-12 w-full resize-none bg-transparent px-3 pb-0.5 pt-3 text-base leading-[22px] text-primary outline-none placeholder:text-placeholder"
+          className="h-12 w-full resize-none bg-transparent px-3 pb-0.5 pt-3 text-base leading-[22px] text-token-text-primary outline-none placeholder:text-token-input-placeholder-foreground"
           placeholder={readOnly ? 'Read-only — open in another client' : 'Do anything'}
           spellCheck
         />
@@ -188,7 +188,7 @@ export function Composer({ inline = false }: { inline?: boolean } = {}): React.J
               type="button"
               aria-label="Add files and more"
               onClick={togglePlusMenu}
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-primary hover:bg-black/5"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-token-text-primary hover:bg-black/5"
             >
               <PlusIcon />
             </button>
@@ -196,7 +196,7 @@ export function Composer({ inline = false }: { inline?: boolean } = {}): React.J
               type="button"
               onClick={(e) => togglePopover('access', e.currentTarget.getBoundingClientRect())}
               className={`flex h-6 items-center gap-1.5 rounded-full px-1.5 text-[13px] hover:bg-black/5 ${
-                access.warn ? 'text-accent' : 'text-primary'
+                access.warn ? 'text-(--color-accent-orange)' : 'text-token-text-primary'
               }`}
             >
               <ShieldIcon className="size-4 shrink-0" />

@@ -1,43 +1,37 @@
 /**
- * 主题清单。
+ * 主题清单 —— 对齐 Codex。
  *
- * 四档对应 VSCode 的四个内置默认主题（workbenchThemeService.ts 的
- * ThemeSettingDefaults）。名字同时是三处的键，必须一致：
+ * Codex 只有明暗两档,且**没有应用内选择器**:它订阅宿主上报的系统外观,
+ * 在 <html> 上切 electron-light / electron-dark。原先这里的四档
+ * (含 hc-dark / hc-light)是照 VSCode 内置主题设计的,Codex 没有对应物,
+ * 已移除。
  *
- *   `<html data-theme="...">`  → tokens.css 里的选择器
- *   shiki / Monaco 的主题名     → vscode-themes/<name>.json 里的 `name`
- *
- * 这三处任意一处对不上，表现都是"某一档主题下颜色全错"，所以这里做成单一来源。
+ * 两档的语义 token 不是明暗对调那么简单 —— Codex 的颜色是运行时从四个种子
+ * 生成的,两套的对比度参数本身就不同(light 45 / dark 60),所以
+ * assets/codex/runtime-{light,dark}.css 是各自捕获的两份实测值。
  */
 import darkTheme from './vscode-themes/dark.json'
 import lightTheme from './vscode-themes/light.json'
-import hcDarkTheme from './vscode-themes/hc-dark.json'
-import hcLightTheme from './vscode-themes/hc-light.json'
 
-export const THEME_NAMES = ['dark', 'light', 'hc-dark', 'hc-light'] as const
+/** 与 <html> 上的 electron-* 类名一一对应 */
+export const THEME_VARIANTS = ['light', 'dark'] as const
 
-export type ThemeName = (typeof THEME_NAMES)[number]
+export type ThemeVariant = (typeof THEME_VARIANTS)[number]
 
-/** 用户可选的主题偏好；`system` 表示跟随操作系统 */
-export type ThemePreference = ThemeName | 'system'
-
-/** 生成物，供 shiki 加载后再交给 Monaco */
-export const VSCODE_THEMES: Record<ThemeName, unknown> = {
-  dark: darkTheme,
-  light: lightTheme,
-  'hc-dark': hcDarkTheme,
-  'hc-light': hcLightTheme
+/** <html> 上的类名 */
+export function themeClassName(variant: ThemeVariant): `electron-${ThemeVariant}` {
+  return `electron-${variant}`
 }
 
 /**
- * 跟随系统时解析出实际主题。
+ * Monaco 的主题。
  *
- * 先看对比度再看明暗：系统开了高对比度的用户，拿到普通深色主题等于没生效。
+ * TODO(Phase 3): Codex 不用 Monaco —— 它的代码渲染是 shiki 输出 .hljs-* 类、
+ * 由 CSS 上色(见 assets/codex/highlight.css),diff 也是自研的。Monaco 会带进
+ * 它自己的 DOM、滚动条和字体,是当前与 Codex 差异最大的一块。移除 Monaco 时
+ * 这两个 VSCode 主题 JSON 一并删除。
  */
-export function resolveSystemTheme(): ThemeName {
-  if (typeof window === 'undefined' || !window.matchMedia) return 'dark'
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const contrast = window.matchMedia('(prefers-contrast: more)').matches
-  if (contrast) return dark ? 'hc-dark' : 'hc-light'
-  return dark ? 'dark' : 'light'
+export const VSCODE_THEMES: Record<ThemeVariant, unknown> = {
+  light: lightTheme,
+  dark: darkTheme
 }

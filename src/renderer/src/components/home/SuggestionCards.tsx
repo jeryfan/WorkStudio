@@ -11,10 +11,10 @@ const iconByColor: Record<SuggestionColor, ComponentType<IconProps>> = {
 }
 
 const textColorByColor: Record<SuggestionColor, string> = {
-  blue: 'text-icon-blue',
-  purple: 'text-icon-purple',
-  green: 'text-icon-green',
-  orange: 'text-icon-orange'
+  blue: 'text-(--color-accent-blue)',
+  purple: 'text-(--color-accent-purple)',
+  green: 'text-(--color-accent-green)',
+  orange: 'text-(--color-accent-orange)'
 }
 
 /**
@@ -31,12 +31,12 @@ export function SuggestionCards(): React.JSX.Element {
           <button
             key={s.id}
             type="button"
-            className="flex h-full min-h-[104px] flex-col items-stretch rounded-2xl border border-card-border bg-card px-4 py-3 text-left shadow-card hover:bg-[#f2f2f4]"
+            className="flex h-full min-h-[104px] flex-col items-stretch rounded-2xl border border-token-border-default bg-token-main-surface-primary px-4 py-3 text-left shadow-token-main-surface-primary hover:bg-[#f2f2f4]"
           >
             <span className={`flex size-6 items-start justify-start ${textColorByColor[s.color]}`}>
               <Icon className="size-5" />
             </span>
-            <span className="mt-auto flex min-h-10 flex-col justify-end text-[13px] font-medium leading-5 text-primary">
+            <span className="mt-auto flex min-h-10 flex-col justify-end text-[13px] font-medium leading-5 text-token-text-primary">
               {s.label}
             </span>
           </button>

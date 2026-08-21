@@ -2,7 +2,13 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { useOverlay, type MenuId } from '../../state/OverlayContext'
 import { ChevronIcon } from '../icons'
 
-/** sider/2.html .icon-btn（第 380-404 行）：24px 方钮，svg 14px */
+/**
+ * 分节标题右侧的控制按钮 —— Codex 实测 24×24。
+ *
+ * 注意 hover **不给背景**(enabled:hover:bg-transparent),只靠
+ * sidebar-hover-icon-button-tint 变色:平时前景色 50% 透明,hover/focus 转实色。
+ * 这是 Codex 侧栏所有图标按钮的统一手法,给背景会显得比 Codex 重。
+ */
 export function IconButtonSm({
   className = '',
   children,
@@ -11,7 +17,7 @@ export function IconButtonSm({
   return (
     <button
       type="button"
-      className={`flex size-6 shrink-0 items-center justify-center rounded-[10px] border border-transparent bg-transparent p-1 text-ink-50 hover:text-ink [&_svg]:size-3.5 ${className}`}
+      className={`no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 flex rounded-full electron:rounded-md enabled:hover:bg-transparent data-[state=open]:bg-transparent hover:text-token-foreground border-transparent electron:p-1 flex items-center justify-center p-0.5 outline-hidden cursor-interaction sidebar-icon-button sidebar-hover-icon-button-tint ${className}`}
       {...rest}
     >
       {children}
@@ -33,8 +39,17 @@ interface SectionHeaderProps {
 }
 
 /**
- * sider/2.html .section-header + .section-toggle-btn（第 297-368 行）：
- * 点击标题折叠/展开分区；chevron 平时透明，hover 显现，收起时旋转 -90°。
+ * 分节标题行 —— 对齐 Codex 实测(324×25)。
+ *
+ * 几处以实测为准、别改回直觉写法:
+ *
+ * - toggle 是 **cursor-default**,不是 pointer。整行可点但不给"可点"的光标暗示。
+ * - chevron 14×14(icon-2xs),**默认 opacity-0**,靠 group-hover/section-toggle 与
+ *   group-focus-visible/section-toggle 显现;展开 rotate-0、折叠 -rotate-90,
+ *   过渡 transform 0.15s cubic-bezier(0.4,0,0.2,1)。
+ * - 标题文字 14px/500/21px,色用 token-input-placeholder-foreground 再叠 opacity-75。
+ * - 命名 group 用 /nav-section-title 与 /section-toggle 两层,分别驱动控制按钮组和
+ *   chevron —— 用同一个匿名 group 会让两者一起亮。
  */
 export function SectionHeader({
   title,
@@ -47,37 +62,81 @@ export function SectionHeader({
   const controlsOpen = menuId !== undefined && menu?.id === menuId
 
   return (
-    <div className="group flex items-center justify-between gap-2 pl-2 pr-0.5">
-      <div className="min-w-0 flex-1 text-sm font-medium text-desc opacity-75">
+    <div className="group/nav-section-title flex items-center justify-between gap-2 pe-0.5 ps-2">
+      <div className="min-w-0 flex-1 text-base font-medium text-token-input-placeholder-foreground opacity-75">
+        {/* Codex 在 toggle 外面还有一层 div.flex.min-w-0.flex-1 —— 它是拖拽把手的
+            挂载点(Codex 的分节标题本身可排序),省掉这层以后接 dnd 时得重排 DOM */}
         <div className="flex min-w-0 flex-1">
           <button
             type="button"
             aria-expanded={!collapsed}
+            data-app-action-sidebar-section-toggle=""
             onClick={onToggle}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md py-0.5 pl-0 pr-1 text-left text-sm font-medium leading-[21px]"
+            className="group/section-toggle flex min-w-0 flex-1 items-center gap-1 rounded-md py-0.5 pe-1 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 cursor-default"
           >
-            <span className="min-w-0 truncate">{title}</span>
-            <span
-              className={`flex size-3 shrink-0 items-center justify-center transition-[transform,opacity] duration-150 ${
-                controlsOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              } ${collapsed ? '-rotate-90' : ''}`}
-            >
-              <ChevronIcon className="size-3" />
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="min-w-0 truncate">{title}</span>
             </span>
+            <ChevronIcon
+              aria-hidden="true"
+              className={`icon-2xs shrink-0 transition-transform group-hover/section-toggle:opacity-100 group-focus-visible/section-toggle:opacity-100 sidebar-hover-icon-tint opacity-0 ${
+                collapsed ? '-rotate-90' : 'rotate-0'
+              }`}
+            />
           </button>
         </div>
       </div>
       {controls && (
-        <div
-          className={`flex items-center gap-1 transition-opacity duration-100 ${
-            controlsOpen
-              ? 'opacity-100'
-              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
-          }`}
-        >
-          {controls}
+        <div className="flex shrink-0 items-center gap-1">
+          {/*
+           * Codex 的显隐条件里有 has-[[data-state=open]] —— 菜单打开时鼠标已经移到
+           * 菜单上,:hover 会丢,靠这个选择器把按钮组钉住,不需要把菜单状态回传到 React。
+           * 另外 Codex 这层**没有 transition**:淡入淡出是瞬时的,加过渡会比 Codex 慢半拍。
+           */}
+          <div
+            className={`shrink-0 pointer-events-none opacity-0 group-focus-within/nav-section-title:pointer-events-auto group-focus-within/nav-section-title:opacity-100 group-hover/nav-section-title:pointer-events-auto group-hover/nav-section-title:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100${
+              controlsOpen ? ' pointer-events-auto opacity-100' : ''
+            }`}
+          >
+            <div className="flex items-center gap-1">{controls}</div>
+          </div>
         </div>
       )}
     </div>
+  )
+}
+
+interface SidebarSectionProps {
+  heading: string
+  collapsed: boolean
+  children: ReactNode
+  header: ReactNode
+}
+
+/**
+ * 分节外壳 —— Codex 用 <section> 而不是 div,并靠三个 data 属性对外暴露状态:
+ *   data-app-action-sidebar-section / -section-collapsed / -section-heading
+ *
+ * 折叠时 **内容区整个不渲染**(不是 CSS 隐藏)—— Codex 折叠的那一节 DOM 里
+ * 只有标题行一个子元素。内容区常驻但 height:0 会留下可聚焦的隐藏元素。
+ */
+export function SidebarSection({
+  heading,
+  collapsed,
+  header,
+  children
+}: SidebarSectionProps): React.JSX.Element {
+  return (
+    <section
+      className="relative px-row-x"
+      data-app-action-sidebar-section=""
+      data-app-action-sidebar-section-collapsed={collapsed ? 'true' : 'false'}
+      data-app-action-sidebar-section-heading={heading}
+    >
+      <div className="flex flex-col">
+        {header}
+        {!collapsed && <div className="overflow-hidden">{children}</div>}
+      </div>
+    </section>
   )
 }

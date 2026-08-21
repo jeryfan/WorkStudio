@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './assets/main.css'
-import './chat/theme/tokens.css'
-import './chat/theme/widget-tokens.css'
 import '@vscode/codicons/dist/codicon.css'
 import { ChatList } from './chat/ChatList'
 import { TodoListPart } from './chat/parts/TodoListPart'
 import { ThemeProvider } from './chat/theme/ThemeProvider'
 import { useTheme } from './chat/theme/themeContext'
-import { THEME_NAMES } from './chat/theme/themes'
+import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
 import { WorkspaceProvider } from './state/WorkspaceContext'
 import { PanelProvider } from './state/PanelContext'
 import type { ChatRow } from './chat/model/rows'
@@ -329,7 +327,7 @@ const rows: ChatRow[] = [
 ]
 
 function ThemeSwitcher(): React.JSX.Element {
-  const { theme, setPreference } = useTheme()
+  const { variant } = useTheme()
   return (
     <div
       style={{
@@ -343,13 +341,23 @@ function ThemeSwitcher(): React.JSX.Element {
         fontSize: 12
       }}
     >
-      {THEME_NAMES.map((name) => (
+      {THEME_VARIANTS.map((v) => (
         <button
-          key={name}
-          onClick={() => setPreference(name)}
-          style={{ fontWeight: theme === name ? 700 : 400, padding: '2px 6px' }}
+          key={v}
+          /*
+           * 直接改 <html> 的类:应用里外观只跟随系统(与 Codex 一致,没有
+           * 应用内选择器),但预览页必须能强制两档都走一遍,否则暗色下的
+           * 回归只能靠改系统设置来验。仅限 harness。
+           */
+          onClick={() => {
+            for (const other of THEME_VARIANTS) {
+              document.documentElement.classList.toggle(themeClassName(other), other === v)
+            }
+            document.documentElement.style.colorScheme = v
+          }}
+          style={{ fontWeight: variant === v ? 700 : 400, padding: '2px 6px' }}
         >
-          {name}
+          {v}
         </button>
       ))}
     </div>
@@ -387,7 +395,7 @@ function Preview(): React.JSX.Element {
        * flex 容器会得到完全不同的宽度（flex 下 auto 外边距会关掉 stretch）。
        * 预览页若用一个普通 div 撑高，就测不出应用里真实的布局。
        */}
-      <main className="relative flex h-full w-full min-w-0 flex-col bg-surface">
+      <main className="relative flex h-full w-full min-w-0 flex-col bg-token-main-surface-primary">
         <div className="flex h-full min-h-0 flex-col pt-11">
           <ChatList
             rows={empty ? [] : rows}

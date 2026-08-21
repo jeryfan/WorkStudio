@@ -44,7 +44,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
     // 右侧面板顶部 44px 与 TopBar 的窗口拖拽区（app-region: drag）重叠，
     // 需要像侧栏一样 pt-11 让位，否则标签条按钮会被拖拽区吃掉点击；
     // 底部面板在窗口中部、不接触 TopBar，无需让位。
-    <div className={`flex h-full w-full flex-col bg-surface ${docked === 'right' ? 'pt-11' : ''}`}>
+    <div className={`flex h-full w-full flex-col bg-token-main-surface-primary ${docked === 'right' ? 'pt-11' : ''}`}>
       {/* tab strip */}
       <div className="flex h-11 shrink-0 items-center gap-[3px] px-2">
         {tabs.map((tab) => {
@@ -58,13 +58,13 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
               onClick={() => activateTab(docked, tab.id)}
               onKeyDown={(e) => e.key === 'Enter' && activateTab(docked, tab.id)}
               className={`group relative flex h-7 min-w-[90px] max-w-40 flex-1 cursor-default items-center gap-2 overflow-hidden rounded-lg px-2 text-[13px] ${
-                active ? 'bg-[#f2f3f4] text-ink' : 'text-[#54585f] hover:bg-[#f2f3f4]'
+                active ? 'bg-[#f2f3f4] text-token-foreground' : 'text-[#54585f] hover:bg-[#f2f3f4]'
               }`}
             >
               {/* t-icon（panel/1.html）：文件 glyph，激活时颜色加深 */}
               <span
                 className={`flex shrink-0 items-center justify-center [&_svg]:size-4 ${
-                  active ? 'text-ink' : 'text-[#71767d]'
+                  active ? 'text-token-foreground' : 'text-[#71767d]'
                 }`}
               >
                 {tab.kind === 'browser' ? <ChromeIcon /> : <FileGlyph name={tab.title} />}
@@ -77,7 +77,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
                   e.stopPropagation()
                   closeTab(docked, tab.id)
                 }}
-                className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-desc opacity-0 hover:bg-[#f2f3f5] group-hover:opacity-100 [&_svg]:size-3.5"
+                className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-token-description-foreground opacity-0 hover:bg-[#f2f3f5] group-hover:opacity-100 [&_svg]:size-3.5"
               >
                 <CloseIcon />
               </button>
@@ -95,7 +95,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
               dock: docked
             })
           }
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-desc hover:bg-row-hover"
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-token-description-foreground hover:bg-token-list-hover-background"
         >
           <PlusIcon />
         </button>
@@ -106,7 +106,7 @@ export function PanelShell({ docked }: PanelShellProps): React.JSX.Element {
         {activeTab && ActiveRenderer ? (
           <ActiveRenderer tab={activeTab} dock={docked} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-desc">No tabs</div>
+          <div className="flex h-full items-center justify-center text-sm text-token-description-foreground">No tabs</div>
         )}
       </div>
     </div>

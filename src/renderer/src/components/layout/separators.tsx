@@ -8,8 +8,8 @@ import { Separator } from 'react-resizable-panels'
 export function VerticalSeparator(): React.JSX.Element {
   return (
     <Separator className="group/sep relative z-20 -mx-[5px] w-[10px] shrink-0 cursor-col-resize outline-none">
-      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line" />
-      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-primary/25 to-transparent opacity-0 transition-opacity group-hover/sep:opacity-100" />
+      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-token-border" />
+      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-token-text-primary/25 to-transparent opacity-0 transition-opacity group-hover/sep:opacity-100" />
     </Separator>
   )
 }
@@ -18,8 +18,8 @@ export function VerticalSeparator(): React.JSX.Element {
 export function HorizontalSeparator(): React.JSX.Element {
   return (
     <Separator className="group/sep relative z-20 -my-[5px] h-[10px] shrink-0 cursor-row-resize outline-none">
-      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
-      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-primary/25 to-transparent opacity-0 transition-opacity group-hover/sep:opacity-100" />
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-token-border" />
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-token-text-primary/25 to-transparent opacity-0 transition-opacity group-hover/sep:opacity-100" />
     </Separator>
   )
 }

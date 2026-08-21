@@ -25,6 +25,13 @@ interface RpcBridge {
   subscribe(handler: (message: RpcMessage) => void): () => void
 }
 
+/** 宿主能力桥,方法名与 Codex 的 electronBridge 一致 */
+interface CodexBridge {
+  windowType: 'electron'
+  getSystemThemeVariant(): Promise<'light' | 'dark'>
+  subscribeToSystemThemeVariant(handler: (variant: 'light' | 'dark') => void): () => void
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -33,6 +40,7 @@ declare global {
     rpcBridge: RpcBridge
     /** 首屏同步快照，preload 阶段已取好 */
     bootstrap: { get(): BootstrapPayload }
+    codexBridge: CodexBridge
   }
 }
 

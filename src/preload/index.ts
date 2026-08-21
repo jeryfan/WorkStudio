@@ -61,6 +61,25 @@ const api = {
   homeDir: homedir()
 }
 
+/**
+ * 宿主能力桥 —— 方法名沿用 Codex 的 electronBridge。
+ *
+ * 保持同名不是形式主义:渲染层订阅外观的那段代码可以和 Codex 逐行对照,
+ * 将来 Codex 改了行为,diff 一眼就能看出来。
+ */
+const codexBridge = {
+  windowType: 'electron' as const,
+  getSystemThemeVariant: (): Promise<'light' | 'dark'> =>
+    ipcRenderer.invoke('theme:getSystemVariant'),
+  subscribeToSystemThemeVariant: (handler: (variant: 'light' | 'dark') => void): (() => void) => {
+    const listener = (_e: unknown, variant: 'light' | 'dark'): void => handler(variant)
+    ipcRenderer.on('theme:systemVariantChanged', listener)
+    return () => {
+      ipcRenderer.removeListener('theme:systemVariantChanged', listener)
+    }
+  }
+}
+
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
@@ -71,6 +90,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('fileApi', fileApi)
     contextBridge.exposeInMainWorld('rpcBridge', rpcBridge)
     contextBridge.exposeInMainWorld('bootstrap', bootstrap)
+    contextBridge.exposeInMainWorld('codexBridge', codexBridge)
   } catch (error) {
     console.error(error)
   }
@@ -85,4 +105,6 @@ if (process.contextIsolated) {
   window.rpcBridge = rpcBridge
   // @ts-ignore (define in dts)
   window.bootstrap = bootstrap
+  // @ts-ignore (define in dts)
+  window.codexBridge = codexBridge
 }

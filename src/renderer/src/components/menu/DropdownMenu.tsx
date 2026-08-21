@@ -50,8 +50,18 @@ export function DropdownMenu({
         ref={ref}
         role="menu"
         aria-orientation="vertical"
-        className="fixed z-50 flex select-none flex-col overflow-y-auto rounded-[15px] border-[0.5px] border-menu-line bg-dropdown p-1 text-ink shadow-[0_0_0_0.5px_rgb(26_28_31/0.08),0_8px_16px_-4px_rgb(0_0_0/0.12)] outline-none backdrop-blur-[8px]"
-        style={{ left: pos.left, top: pos.top, minWidth, width, maxWidth: 240 }}
+        /*
+         * 对齐 Codex 实测(profile 菜单): 卡片 324×103, 圆角 15px,
+         * bg 白色 90% 透明 + backdrop-blur(8px), **无 border** —— 边缘由
+         * box-shadow 的 0.5px ring 给出。之前叠了 border-[0.5px] 又叠 ring,
+         * 边缘比 Codex 重一层。
+         */
+        className="fixed z-50 flex select-none flex-col overflow-y-auto rounded-[15px] bg-token-dropdown-background/90 p-1 text-token-foreground shadow-[0_0_0_0.5px_rgb(26_28_31/0.08),0_8px_16px_-4px_rgb(0_0_0/0.12)] outline-none backdrop-blur-[8px]"
+        /*
+         * 不能钳 maxWidth。原来写死 240,把 menuDefs 里声明的 width 283 直接压掉,
+         * 声明值形同无效 —— Codex 的 profile 菜单是 324 宽。
+         */
+        style={{ left: pos.left, top: pos.top, minWidth, width }}
       >
         {entries.map((entry, i) =>
           isSeparator(entry) ? (
@@ -59,7 +69,7 @@ export function DropdownMenu({
               key={`sep-${i}`}
               className={entry.separator === 'thin' ? 'w-full px-2 py-1' : 'w-full px-2 pb-2 pt-1'}
             >
-              <div className="h-px w-full bg-menu-line" />
+              <div className="h-px w-full bg-token-menu-border" />
             </div>
           ) : (
             <button
@@ -71,8 +81,8 @@ export function DropdownMenu({
                 onSelect?.(entry.id)
                 onClose()
               }}
-              className={`group/mi flex w-full flex-col rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-ink ${
-                entry.disabled ? 'cursor-default opacity-50' : 'hover:bg-row-hover'
+              className={`group/mi flex w-full flex-col rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground ${
+                entry.disabled ? 'cursor-default opacity-50' : 'hover:bg-token-list-hover-background'
               }`}
             >
               <span className="flex w-full items-center gap-1.5">
@@ -81,10 +91,10 @@ export function DropdownMenu({
                 )}
                 <span className="min-w-0 flex-1 truncate">{entry.label}</span>
                 {entry.shortcut && (
-                  <span className="ml-2 shrink-0 text-xs text-desc">{entry.shortcut}</span>
+                  <span className="ml-2 shrink-0 text-xs text-token-description-foreground">{entry.shortcut}</span>
                 )}
                 {entry.submenu && (
-                  <SubmenuChevronIcon className="size-4 shrink-0 text-desc opacity-75" />
+                  <SubmenuChevronIcon className="size-4 shrink-0 text-token-description-foreground opacity-75" />
                 )}
               </span>
             </button>
