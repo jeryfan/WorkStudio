@@ -34,6 +34,28 @@ footer 层级归位 + 透明 + 发丝线、会话行(跑马灯标题 / 静态状
 项目行(命名 group `/folder-row` / DnD 放置区 / `button.sr-only`)、
 两个悬浮面板 + 内联改名、浮层层级 `overlay-light|heavy`、dnd-kit 接入。
 
+**右/底面板(2026-08-23 收尾)** — 旧 `PanelContext` + `DockedTabPanel` 已删,全面切到
+Codex 架构:`state/AppShellContext.tsx`(controller 工厂 + tab 描述符 + 槽位注册 KP)
++ `panel/AppShellTabs.tsx`(KCr)/ `AppShellTab` / `AppShellTabPanel`(QCr error boundary)/
+`RightPanelTabs`(uDr)/ `BottomPanelTabs`(ewr)/ `slots.tsx` + `layout/RightPanel.tsx`(EJr,
+常驻 + UPr 开合弹簧)+ `layout/BottomPanel.tsx`(YPr)。
+行为逐项对齐:末 tab 关闭连带关面板、preview 继承 dndId/双击 pin/面板交互 pin(豁免区)、
+updateTab 防反 pin、activeTabReactKey 重挂载键、workspace-ready 门控、expand 全宽 =
+mainContentWidth 整宽、宽度 ratio 持久化(`app-shell:right-panel-width:v3`,拖过 160 不持久化)、
+headerLeftWidth 占位(全宽且侧栏隐藏)、launcher 动画(xr/Sr/Cr + ease [0.19,1,0.22,1] +
+reduced-motion 全禁)、「+」菜单(title 属性 + defer-on-close + 右面板 0 tab 不渲染)、
+DndContext 上移到 MainContentSurface(右/底共用)。
+Browser tab 工具栏/地址栏/空态/进度条按实测重写;Files tab 换了 Codex 的面包屑 nav
+(`s0a`)+ 空态 + 树列边界(树本体还是 react-arborist,下轮)。
+
+**踩坑新条目:**
+- **Electron 窗口隐藏时 framer-motion 停摆**(`document.hidden` → 帧循环挂起,
+  动画卡在中途值;CDP 输入事件也要 ~5s 才消化)。验证动画/拖拽前先 `Page.bringToFront`。
+- **CDP 多 target 陷阱**:Codex 开 Browser tab 后出现第二个 page target(被控浏览器),
+  `cdp-eval.mjs`/`cdp-mouse.mjs` 需 `CDP_URL_FILTER=8214` 锁定 Codex 页面。
+- **槽位注册的 children 必须是稳定引用**(模块级常量),否则 registerSlot → setState →
+  重渲染 → 再注册的死循环(Codex 靠 React Compiler memo cache 钉住,WS 手工钉)。
+
 ## 关键陷阱(踩过的)
 
 1. **`@theme` 会被提进 layer,无层级规则恒压它** —— `app-theme.css` 必须剔除 `@theme` 已有的键,

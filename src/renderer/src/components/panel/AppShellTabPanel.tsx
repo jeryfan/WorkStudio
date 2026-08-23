@@ -1,8 +1,5 @@
 import { Component, type ReactNode } from 'react'
-import type {
-  AppShellTabDescriptor,
-  AppShellTabPanelController
-} from '../../state/AppShellContext'
+import type { AppShellTabDescriptor, AppShellTabPanelController } from '../../state/AppShellContext'
 
 /**
  * AppShellTabPanel —— Codex 里这个名字属于 **tab 内容区的 error boundary**

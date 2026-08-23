@@ -14,7 +14,7 @@ import { SidebarItem } from './SidebarItem'
 import { SidebarModeSwitcher } from './SidebarModeSwitcher'
 import { ResizeHandle } from '../layout/ResizeHandle'
 import { usePanelResize } from '../../utils/usePanelResize'
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/PanelContext'
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/AppShellContext'
 import { IconButtonSm, SectionHeader, SidebarSection } from './SectionHeader'
 import { SidebarProjectRow } from './SidebarProjectRow'
 import { SidebarRowList, SidebarSortableItem, SidebarThreadDragItem } from './SidebarSortableRow'
@@ -45,7 +45,7 @@ type SectionId = 'pinned' | 'projects' | 'recents'
  *
  * Pinned 两者都空时整个分区隐藏（实测：取消最后一个置顶后 section 消失）；
  * 另两个分区始终显示，空时给空态文案。
- * 宽度由 PanelContext 的 sidebarWidth 经 props 传入,写在 aside 的内联 style 上(Codex 同做法)。
+ * 宽度由 AppShellContext 的 sidebarWidth 经 props 传入,写在 aside 的内联 style 上(Codex 同做法)。
  */
 /**
  * 侧栏对外的入口 —— 只做一件事:把整个侧栏包进**一个** DnD 上下文,

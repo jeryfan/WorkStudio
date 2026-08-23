@@ -88,12 +88,11 @@ export function AppShellTab({
       >
         <div
           ref={bodyRef}
-          role="button"
-          tabIndex={0}
-          aria-disabled={false}
-          data-tab-id={tab.tabId}
+          // dnd-kit 的 attributes 自带 role=button / tabIndex=0 / aria-disabled /
+          // aria-roledescription=sortable —— 与 Codex 实测的属性集一致,不重复写
           {...attributes}
           {...listeners}
+          data-tab-id={tab.tabId}
           onDoubleClick={() => tab.isPreview && controller.pinTab(tab.tabId)}
           onMouseDownCapture={(e) => {
             // 中键关闭(Codex:onMouseDownCapture 里 e.button===1)
@@ -129,10 +128,10 @@ export function AppShellTab({
               <span className="flex size-full items-center justify-center">{tab.icon}</span>
             </span>
             <span className="relative min-w-0 flex-1 overflow-hidden">
+              {/* 实测:内层只有 class + dir,没有 data-state */}
               <span
                 className={`block w-full min-w-0 whitespace-nowrap text-start${tab.isPreview ? ' italic' : ''}`}
                 dir="auto"
-                data-state="closed"
               >
                 {tab.title}
               </span>

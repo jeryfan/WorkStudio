@@ -1,6 +1,7 @@
-import { usePanels } from '../../state/PanelContext'
+import { useAppShell } from '../../state/AppShellContext'
 import { useWorkspace } from '../../state/WorkspaceContext'
-import { baseName, resolveInProjects } from '../../utils/workspacePath'
+import { resolveInProjects } from '../../utils/workspacePath'
+import { createFilesTabDescriptor } from '../../components/panel/filesTabDescriptor'
 
 /**
  * 活动行里的文件引用 —— 照 Codex 的 agent-activity file link 实现。
@@ -36,7 +37,7 @@ import { baseName, resolveInProjects } from '../../utils/workspacePath'
  */
 export function InlineAnchor({ path, label }: { path: string; label?: string }): React.JSX.Element {
   const { projects, currentProject } = useWorkspace()
-  const { openTab } = usePanels()
+  const { rightPanelController } = useAppShell()
 
   // `src/a.ts:12` 里的行号单独拆出来做后缀
   const match = /^(.*?):(\d+)$/.exec(path)
@@ -46,10 +47,11 @@ export function InlineAnchor({ path, label }: { path: string; label?: string }):
   const open = (): void => {
     const resolved = resolveInProjects(filePath, projects, currentProject?.id)
     if (!resolved) return
-    openTab('right', {
-      kind: 'file',
-      title: baseName(resolved.relPath),
-      payload: { projectId: resolved.projectId, path: resolved.relPath }
+    // 会话里的文件引用 → 预览 tab(Codex HY:外部打开带 isPreview;
+    // launcher/「+」打开的空 Files tab 才不是预览)
+    rightPanelController.openTab({
+      ...createFilesTabDescriptor(rightPanelController, resolved.relPath, resolved.projectId),
+      isPreview: true
     })
   }
 

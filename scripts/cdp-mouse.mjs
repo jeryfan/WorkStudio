@@ -19,7 +19,10 @@ const PORT = process.env.CDP_PORT ?? '9333'
 const plan = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 
 const targets = await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json())
-const page = targets.find((t) => t.type === 'page')
+// 同 cdp-eval:多 page target 时用 CDP_URL_FILTER 锁定(如 Codex 用 8214)
+const filter = process.env.CDP_URL_FILTER
+const pages = targets.filter((t) => t.type === 'page')
+const page = filter ? pages.find((t) => t.url.includes(filter)) : pages[0]
 if (!page) {
   console.error('没有 page target')
   process.exit(1)
@@ -70,6 +73,17 @@ for (const step of plan.steps) {
     if (!pt) { console.error('evalFind 未返回坐标:', step.evalFind.slice(0, 60)); continue }
     cursor = pt
     await mouse('mouseMoved', pt.x, pt.y)
+    continue
+  }
+  if (step.clickFind) {
+    // 定位并直接点击(省去手工抄坐标);未找到则报错并跳过
+    const pt = await evaluate(step.clickFind)
+    if (!pt) { console.error('clickFind 未返回坐标:', step.clickFind.slice(0, 60)); continue }
+    await mouse('mouseMoved', pt.x, pt.y)
+    await sleep(40)
+    await mouse('mousePressed', pt.x, pt.y, 'left', 1)
+    await mouse('mouseReleased', pt.x, pt.y, 'left', 1)
+    cursor = pt
     continue
   }
   if (step.move) {

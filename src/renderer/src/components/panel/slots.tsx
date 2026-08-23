@@ -46,10 +46,8 @@ export function BottomPanelOutlet({ children }: { children: ReactNode }): null {
   return null
 }
 
-export function BottomPanelTabListBefore({ children }: { children: ReactNode }): null {
-  useRegisterAppShellSlot('bottomPanelTabListBefore', children)
-  return null
-}
+/* Codex 的底部面板没有 TabListBefore 槽(AppShell 模块导出词表实测:底部只有
+   TabsEmptyState / Outlet / TabListAfter{,Sticky} 四个),不要补。 */
 
 export function BottomPanelTabListAfter({ children }: { children: ReactNode }): null {
   useRegisterAppShellSlot('bottomPanelTabListAfter', children)

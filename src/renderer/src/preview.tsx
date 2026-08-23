@@ -20,7 +20,7 @@ import { useTheme } from './chat/theme/themeContext'
 import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
 import { setTheme as publishTheme } from './chat/theme/themeStore'
 import { WorkspaceProvider } from './state/WorkspaceContext'
-import { PanelProvider } from './state/PanelContext'
+import { AppShellProvider } from './state/AppShellContext'
 import type { ThreadRow } from './chat/model/rows'
 
 /** 临时预览页：在浏览器里核对对话区的视觉，不进产物 */
@@ -212,7 +212,8 @@ const rows: ThreadRow[] = [
           data: {
             kind: 'inputOutput',
             blocks: [],
-            structuredJson: '{\n  "issues": [\n    { "id": "WS-12", "title": "对齐活动行" }\n  ]\n}',
+            structuredJson:
+              '{\n  "issues": [\n    { "id": "WS-12", "title": "对齐活动行" }\n  ]\n}',
             error: null,
             rawJson: '{\n  "invocation": { "tool": "list_issues" }\n}'
           }
@@ -637,10 +638,10 @@ function PreviewTurnBody({
 createRoot(document.getElementById('root')!).render(
   // InlineAnchor（文件改动里的路径胶囊）需要这两个 Provider 才能挂载
   <WorkspaceProvider>
-    <PanelProvider>
+    <AppShellProvider>
       <ThemeProvider>
         <Preview />
       </ThemeProvider>
-    </PanelProvider>
+    </AppShellProvider>
   </WorkspaceProvider>
 )

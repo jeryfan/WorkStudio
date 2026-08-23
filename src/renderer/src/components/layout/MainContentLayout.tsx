@@ -1,5 +1,51 @@
 import type { ReactNode } from 'react'
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import type { AppShellTabPanelController } from '../../state/AppShellContext'
+import { useAppShell } from '../../state/AppShellContext'
 import { AppShellHeader } from './AppShellHeader'
+
+/**
+ * 右/底面板的 tab 拖拽共用一个 DndContext,挂在 main(codex-MainContentSurface)里 ——
+ * Codex 就是这样(dnd-kit 的 DndDescribedBy 播报节点实测是 MainContentSurface 的
+ * 直接子代;跨面板拖拽也以此为基础)。droppable strip 的 data 带 controller
+ * ({controller, kind: 'app-shell-tab-strip'}),dragEnd 据此路由到对应 controller。
+ */
+function usePanelDnd(): {
+  sensors: ReturnType<typeof useSensors>
+  onDragEnd(e: DragEndEvent): void
+} {
+  const { rightPanelController, bottomPanelController } = useAppShell()
+  const sensors = useSensors(
+    // 拖动阈值 4px:点击仍走 activate,不触发拖拽
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+  )
+  const onDragEnd = ({ active, over }: DragEndEvent): void => {
+    if (over == null || active.id === over.id) return
+    // over 是 strip(空白尾区)→ 落到该 strip 末尾;over 是 tab → 落到那个 tab 的位置
+    const overData = over.data.current as
+      { controller?: AppShellTabPanelController; kind?: string } | undefined
+    let controller = overData?.kind === 'app-shell-tab-strip' ? overData.controller : undefined
+    if (controller == null) {
+      // tab 上没带 data —— 扫两个 controller 找 dndId 归属
+      for (const c of [rightPanelController, bottomPanelController]) {
+        if (c.tabs.some((t) => t.dndId === String(over.id))) {
+          controller = c
+          break
+        }
+      }
+    }
+    if (controller == null) return
+    const toId =
+      overData?.kind === 'app-shell-tab-strip'
+        ? (controller.tabs[controller.tabs.length - 1]?.dndId ?? null)
+        : String(over.id)
+    if (toId == null) return
+    const fromTabId = controller.tabs.find((t) => t.dndId === String(active.id))?.tabId
+    const toTabId = controller.tabs.find((t) => t.dndId === toId)?.tabId
+    if (fromTabId != null && toTabId != null) controller.reorderTab(fromTabId, toTabId)
+  }
+  return { sensors, onDragEnd }
+}
 
 /**
  * 主内容区 —— 对齐 Codex 的 main 壳层。Codex 的完整层级:
@@ -57,6 +103,7 @@ export function MainContentLayout({
   rightPanel?: ReactNode
   bottomPanel?: ReactNode
 }): React.JSX.Element {
+  const { sensors, onDragEnd } = usePanelDnd()
   return (
     <main
       /* 模块类自带 isolate/flex/flex-col/flex-1/min-height:0/relative(components.css:2183)。
@@ -78,67 +125,71 @@ export function MainContentLayout({
        *          style: min-width/width 与 aside 同值
        * 内层用 absolute + 同值 min-width/width,是为了宽度动画时内容不跟着重排。
        */}
-      <div className="relative isolate flex min-h-0 flex-1 overflow-hidden">
-        <div
-          className="codex-MainContentViewport"
-          data-app-shell-main-content-layout={layout}
-          data-app-shell-right-panel-full-width={rightPanelFullWidth ? 'true' : 'false'}
-        >
+      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <div className="relative isolate flex min-h-0 flex-1 overflow-hidden">
           <div
-            className="codex-MainContentFrame"
-            data-app-shell-thread-edge-divider={threadEdgeDivider ? 'true' : 'false'}
+            className="codex-MainContentViewport"
+            data-app-shell-main-content-layout={layout}
+            data-app-shell-right-panel-full-width={rightPanelFullWidth ? 'true' : 'false'}
           >
-            <div className="relative flex min-h-0 flex-1">
-              {topFade !== 'hidden' && (
-                <div
-                  aria-hidden="true"
-                  className="codex-MainContentTopFade"
-                  data-app-shell-main-content-top-fade={topFade}
-                />
-              )}
-              <div className="h-full min-h-0 min-w-0 flex-1">
-                {/* data-vscode-context 是 Codex 给内嵌 VS Code 组件传上下文用的,
+            <div
+              className="codex-MainContentFrame"
+              data-app-shell-thread-edge-divider={threadEdgeDivider ? 'true' : 'false'}
+            >
+              <div className="relative flex min-h-0 flex-1">
+                {topFade !== 'hidden' && (
+                  <div
+                    aria-hidden="true"
+                    className="codex-MainContentTopFade"
+                    data-app-shell-main-content-top-fade={topFade}
+                  />
+                )}
+                <div className="h-full min-h-0 min-w-0 flex-1">
+                  {/* data-vscode-context 是 Codex 给内嵌 VS Code 组件传上下文用的,
                     tabindex=0 让主区可以整体接收键盘焦点 */}
-                {/*
-                 * Codex 在 data-vscode-context **之上**有两层路由容器,
-                 * 首页与 thread 的类名各自不同(实测):
-                 *
-                 *   首页   div.relative.min-h-0.flex-1   > div.h-full.min-h-0 > div.flex.h-full.flex-col
-                 *   thread div.relative.h-full.min-h-0  > div.h-full.min-h-0 > div.relative.flex.h-full.flex-col.min-h-0
-                 *
-                 * 注意顺序:**外两层是路由容器,data-vscode-context 在最里面**。
-                 * 我一开始写反了(把 data-vscode-context 放最外),结果 thread 态
-                 * 高度链断掉 —— 滚动容器量到 0 高。
-                 *
-                 * 这两层归 MainContentLayout 而非各视图:视图切换时它们不重建,
-                 * 滚动位置和动画上下文才保得住。
-                 */}
-                <div
-                  className={
-                    routeLayout === 'thread' ? 'relative h-full min-h-0' : 'relative min-h-0 flex-1'
-                  }
-                >
-                  <div className="h-full min-h-0">
-                    <div
-                      className={
-                        routeLayout === 'thread'
-                          ? 'relative flex h-full flex-col min-h-0'
-                          : 'flex h-full flex-col'
-                      }
-                      data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
-                      tabIndex={0}
-                    >
-                      {children}
+                  {/*
+                   * Codex 在 data-vscode-context **之上**有两层路由容器,
+                   * 首页与 thread 的类名各自不同(实测):
+                   *
+                   *   首页   div.relative.min-h-0.flex-1   > div.h-full.min-h-0 > div.flex.h-full.flex-col
+                   *   thread div.relative.h-full.min-h-0  > div.h-full.min-h-0 > div.relative.flex.h-full.flex-col.min-h-0
+                   *
+                   * 注意顺序:**外两层是路由容器,data-vscode-context 在最里面**。
+                   * 我一开始写反了(把 data-vscode-context 放最外),结果 thread 态
+                   * 高度链断掉 —— 滚动容器量到 0 高。
+                   *
+                   * 这两层归 MainContentLayout 而非各视图:视图切换时它们不重建,
+                   * 滚动位置和动画上下文才保得住。
+                   */}
+                  <div
+                    className={
+                      routeLayout === 'thread'
+                        ? 'relative h-full min-h-0'
+                        : 'relative min-h-0 flex-1'
+                    }
+                  >
+                    <div className="h-full min-h-0">
+                      <div
+                        className={
+                          routeLayout === 'thread'
+                            ? 'relative flex h-full flex-col min-h-0'
+                            : 'flex h-full flex-col'
+                        }
+                        data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
+                        tabIndex={0}
+                      >
+                        {children}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+          {rightPanel}
         </div>
-        {rightPanel}
-      </div>
-      {bottomPanel}
+        {bottomPanel}
+      </DndContext>
     </main>
   )
 }

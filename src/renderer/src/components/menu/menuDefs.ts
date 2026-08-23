@@ -1,6 +1,5 @@
 import type { MenuId } from '../../state/OverlayContext'
 import {
-  AddReviewIcon,
   ApiKeyIcon,
   ArchiveAllIcon,
   ArchiveTasksIcon,
@@ -90,14 +89,7 @@ export const menuDefs: Record<MenuId, { entries: MenuEntry[]; minWidth?: number;
         { id: 'shortcuts', label: 'Keyboard shortcuts', icon: KeyboardIcon },
         { id: 'help', label: 'Help', icon: HelpIcon }
       ]
-    },
-    // panel/1.html #menu-add-tab（设计文件在第 359 行截断，仅 Review 一项可考，
-    // Browser 项为保持现有新建标签能力所加；Review tab 类型未实现，暂置灰）
-    'add-tab': {
-      width: 280,
-      entries: [
-        { id: 'review', label: 'Review', icon: AddReviewIcon, shortcut: '⌃⇧G', disabled: true },
-        { id: 'browser', label: 'Browser', icon: ChromeIcon }
-      ]
     }
+    // 右面板「+」菜单不在此处 —— Codex 的 `Or` 是 strip sticky 区的 Radix 菜单
+    //(panel/OpenSidePanelTabMenu),内容与 launcher 空态同一个 actions hook
   }

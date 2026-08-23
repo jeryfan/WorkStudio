@@ -6,6 +6,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from 'react'
@@ -164,13 +165,23 @@ export interface AppShellTabRenderProps<S = unknown> {
 
 /**
  * Tab 描述符 —— 对齐 Codex 的 tab descriptor。
- * renderPanel 是面板内容的渲染入口(Codex 里是被 N() 包成 createElement 的组件)。
+ * renderPanel 是面板内容的渲染入口(Codex 里是被 N() 包成 createElement 的组件,
+ * N 还会把描述符的 props 展开进面板 props;WS 用闭包捕获等价表达,不单列 props 字段)。
+ *
+ * 泛型 S 默认 any:Codex 的 store 是无类型的,一个 dock 里混放不同 state 形状的 tab,
+ * 严格 unknown 泛型会被 TS 逆变卡住;边界上放弃这层静态安全(store 值本来就是 unknown)。
  */
-export interface AppShellTabDescriptor<S = unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 见上方注释
+export interface AppShellTabDescriptor<S = any> {
   /** Codex 实测:review=`diff`;file=`file:local:<path>`(空 path 时为 `file:local:`);browser=随机 UUID */
   tabId: string
-  /** dnd 用的稳定 id(Codex `dndId`),默认同 tabId */
+  /** dnd 用的稳定 id(Codex `dndId`),默认同 tabId;preview 被替换时新 tab 继承它 */
   dndId: string
+  /**
+   * Codex `kind`(如 `workspaceFile:local`):activeTabReactKey 的基底 ——
+   * key = `${kind ?? tabId}-${stateKey}`,同 kind 的 tab 之间切换**不重挂载**面板。
+   */
+  kind?: string
   title: string
   icon?: ReactNode
   /** 预览 tab:斜体标题;再开别的预览 tab 会替换它;双击 tab 或在面板内交互即 pin 转正 */
@@ -180,11 +191,14 @@ export interface AppShellTabDescriptor<S = unknown> {
   requiresWorkspaceReady?: boolean
   /** tabState 初始值(Codex `defaultState`) */
   defaultState?: () => S
+  /** Codex `resetState`:resetTabState 时在现有值上收敛(如清滚动位置);没有则回 defaultState */
+  resetState?: (prev: S) => S
   renderPanel(props: AppShellTabRenderProps<S>): ReactNode
 }
 
 /** openTab 的输入:tabId/dndId/isPreview/isClosable 可省(按 Codex 规则补默认) */
-export type AppShellTabDescriptorInput<S = unknown> = Omit<
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 同 AppShellTabDescriptor
+export type AppShellTabDescriptorInput<S = any> = Omit<
   AppShellTabDescriptor<S>,
   'tabId' | 'dndId' | 'isPreview' | 'isClosable'
 > & {
@@ -209,20 +223,30 @@ interface DockState {
 /**
  * appShellTabPanelController 的 React 移植。
  * Codex 还有 closeOtherTabs / closeTabsToRight / moveTabTo / activateAdjacentTab /
- * recordTabMoved / receiveMovedTab(tab 右键菜单与跨面板移动用),本轮未接,先不实现。
+ * recordTabMoved / receiveMovedTab(tab 右键菜单与跨面板移动用;右键菜单触发点未取证),
+ * 本轮未接,先不实现。
  */
 export interface AppShellTabPanelController {
   panelId: PanelDock
   tabs: AppShellTabDescriptor[]
   activeTabId: string | null
   activeTab: AppShellTabDescriptor | null
-  /** 打开 tab(同 tabId 去重并激活;预览 tab 会被新预览 tab 替换);同时展开目标面板 */
+  /**
+   * Codex `activeTabReactKey$` = `${kind ?? tabId}-${tabState.key}`:
+   * 用作 tabpanel 的 React key —— resetTabState 或跨 kind/tabId 切换时重挂载,
+   * 同 kind 的 tab 之间切换保持挂载(文件树选中不丢滚动等内部状态就靠这个)。
+   */
+  activeTabReactKey: string | null
+  /**
+   * 打开 tab(同 tabId 去重并激活;预览 tab 会被新预览 tab 替换)。
+   * **仅当 activate !== false 时才展开目标面板**(Codex openTab 里 `s && n(t, !0)`)。
+   */
   openTab(
     descriptor: AppShellTabDescriptorInput,
     opts?: { activate?: boolean; insertAfterTabId?: string }
   ): string
   closeTab(tabId: string): void
-  /** 关闭当前激活 tab(⌘W 系命令走它) */
+  /** 关闭当前激活 tab(⌘W 系命令走它);面板关闭中或 tab 不可关时不动作(Codex `T`) */
   closeActiveTab(): void
   activateTab(tabId: string): void
   /** 把预览 tab 转正(双击 / 面板内交互触发) */
@@ -231,8 +255,46 @@ export interface AppShellTabPanelController {
   reorderTab(fromId: string, toId: string): void
   /** 更新 tab 元信息;允许改 tabId(Files tab 选中文件后 id 跟随路径,实测行为) */
   updateTab(tabId: string, patch: Partial<AppShellTabDescriptor>): void
+  /** Codex `resetTabState`:key 自增(触发 tabpanel 重挂载)+ 值收敛 */
+  resetTabState(tabId: string): void
   tabStateById: Record<string, TabStateEntry>
   setTabState(tabId: string, next: unknown | ((prev: unknown) => unknown)): void
+}
+
+/* ==================== 底部面板高度(Codex `LPr`/`BPr`/`VPr`) ====================
+ *
+ * 默认 280(BPr);clamp:max(160, min(h, mainContentHeight * 0.5))(LPr);
+ * 拖过 WHn(160) = 80 直接关面板;onResizeEnd 持久化(zPr)。
+ * 持久化 key 不版本化:`app-shell:bottom-panel-height`,存像素(Codex 同)。
+ */
+export const BOTTOM_PANEL_DEFAULT_HEIGHT = 280
+export const BOTTOM_PANEL_MIN_HEIGHT = 160
+export const BOTTOM_PANEL_COLLAPSE_AT = BOTTOM_PANEL_MIN_HEIGHT * 0.5
+const BOTTOM_PANEL_HEIGHT_STORAGE_KEY = 'app-shell:bottom-panel-height'
+
+/** Codex `LPr`:高度 clamp */
+export function clampBottomPanelHeight(desired: number, mainContentHeight: number): number {
+  if (!Number.isFinite(desired)) return BOTTOM_PANEL_DEFAULT_HEIGHT
+  return Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.min(desired, mainContentHeight * 0.5))
+}
+
+function readStoredBottomHeight(): number | null {
+  try {
+    const raw = localStorage.getItem(BOTTOM_PANEL_HEIGHT_STORAGE_KEY)
+    if (raw == null) return null
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredBottomHeight(height: number): void {
+  try {
+    localStorage.setItem(BOTTOM_PANEL_HEIGHT_STORAGE_KEY, String(height))
+  } catch {
+    /* 静默 */
+  }
 }
 
 /* ==================== 槽位注册(Codex `KP`,app-initial:228814) ==================== */
@@ -249,7 +311,6 @@ export type AppShellSlotKey =
   | 'rightPanelTabListAfterSticky'
   | 'bottomPanelTabsEmptyState'
   | 'bottomPanelOutlet'
-  | 'bottomPanelTabListBefore'
   | 'bottomPanelTabListAfter'
   | 'bottomPanelTabListAfterSticky'
 
@@ -277,6 +338,12 @@ interface AppShellContextValue {
   commitRightPanelWidth(): void
   /** 主内容区可用宽(shell − sidebar),右面板 max 公式的输入 */
   mainContentWidth: number
+  /** 底部面板高度(Codex `bottomPanelHeight` 语义;拖拽中实时) */
+  bottomPanelHeight: number
+  /** 底部面板拖拽;拖过折叠阈值(80)直接关面板 */
+  setBottomPanelHeight(desired: number): void
+  /** 拖拽结束:持久化高度(Codex `zPr`) */
+  commitBottomPanelHeight(): void
   /** header 左右槽的实测宽(Codex `headerLeftWidth`/`headerRightWidth`),AppShellHeader 量了写进来 */
   headerLeftWidth: number
   headerRightWidth: number
@@ -326,16 +393,45 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
   }))
   const mainContentWidth = Math.max(0, shellSize.w - sidebarWidth)
 
+  /*
+   * 右面板宽度(kJr,app-initial:226886):
+   * **full 模式 = mainContentWidth 全宽**(`n ? t : PHn(r, t, u)` —— 不读 ratio);
+   * regular 模式 = 持久化 ratio 重解 > 默认公式。
+   */
   const [rightPanelRatio, setRightPanelRatio] = useState<number>(() => readStoredRatio() ?? -1)
   const rightPanelWidth =
-    rightPanelRatio >= 0
-      ? rightPanelRatioToWidth(rightPanelRatio, mainContentWidth, rightPanelWidthMode)
-      : defaultRightPanelWidth(mainContentWidth, shellSize.h)
+    rightPanelWidthMode === 'full'
+      ? mainContentWidth
+      : rightPanelRatio >= 0
+        ? rightPanelRatioToWidth(rightPanelRatio, mainContentWidth, rightPanelWidthMode)
+        : defaultRightPanelWidth(mainContentWidth, shellSize.h)
 
   // header 槽实测宽(Codex 的 headerLeftWidth/headerRightWidth)
   const [headerSlotWidths, setHeaderSlotWidths] = useState({ start: 0, end: 0 })
   const setHeaderSlotWidth = useCallback((side: 'start' | 'end', width: number): void => {
     setHeaderSlotWidths((prev) => (prev[side] === width ? prev : { ...prev, [side]: width }))
+  }, [])
+
+  // 底部面板高度:持久化像素 > 默认 280;clamp 随窗口高度走(Codex LPr 的 r = mainContentHeight)
+  const [bottomPanelHeight, setBottomPanelHeightState] = useState(() =>
+    clampBottomPanelHeight(
+      readStoredBottomHeight() ?? BOTTOM_PANEL_DEFAULT_HEIGHT,
+      window.innerHeight
+    )
+  )
+  const setBottomPanelHeight = useCallback((desired: number): void => {
+    // Codex setSize:t < WHn(160) → rD(a, !1) 直接关面板
+    if (desired < BOTTOM_PANEL_COLLAPSE_AT) {
+      setBottomPanelOpen(false)
+      return
+    }
+    setBottomPanelHeightState(clampBottomPanelHeight(desired, window.innerHeight))
+  }, [])
+  const commitBottomPanelHeight = useCallback((): void => {
+    setBottomPanelHeightState((h) => {
+      writeStoredBottomHeight(clampBottomPanelHeight(h, window.innerHeight))
+      return h
+    })
   }, [])
 
   // 槽位注册表
@@ -348,31 +444,30 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     setSlots((prev) => ({ ...prev, [key]: null }))
   }, [])
 
-  // 窗口尺寸跟踪(mainContentWidth / 默认宽公式的输入)
+  /*
+   * 窗口尺寸跟踪 + 断点联动(app-initial:228173-228189):窗口 ≤720(HYr)自动收右面板
+   * 并记下「是自动收的」,回宽 >720 时自动恢复(用户手动关过就不恢复);
+   * ≤960(VYr)联动的是侧栏,不在本轮范围。
+   * 全部在 resize 事件回调里做(外部系统同步),effect body 里不放 setState。
+   */
+  const rightPanelAutoClosedRef = useRef(false)
   useEffect(() => {
-    const onResize = (): void => setShellSize({ w: window.innerWidth, h: window.innerHeight })
+    const onResize = (): void => {
+      setShellSize({ w: window.innerWidth, h: window.innerHeight })
+      if (window.innerWidth <= 720) {
+        if (rightPanelOpen) {
+          setRightPanelOpen(false)
+          setRightPanelWidthMode('regular')
+          rightPanelAutoClosedRef.current = true
+        }
+      } else if (rightPanelAutoClosedRef.current) {
+        rightPanelAutoClosedRef.current = false
+        setRightPanelOpen(true)
+      }
+    }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  /*
-   * 窗口断点(app-initial:228173-228189):窗口 ≤720(HYr)自动收右面板,
-   * 并记下「是自动收的」;回宽到 >720 时自动恢复。用户手动关过就不恢复。
-   * ≤960(VYr)联动的是侧栏,不属于本文件本轮范围。
-   */
-  const [rightPanelAutoClosed, setRightPanelAutoClosed] = useState(false)
-  useEffect(() => {
-    if (shellSize.w <= 720) {
-      if (rightPanelOpen) {
-        setRightPanelOpen(false)
-        setRightPanelWidthMode('regular')
-        setRightPanelAutoClosed(true)
-      }
-    } else if (rightPanelAutoClosed) {
-      setRightPanelAutoClosed(false)
-      setRightPanelOpen(true)
-    }
-  }, [shellSize.w, rightPanelOpen, rightPanelAutoClosed])
+  }, [rightPanelOpen])
 
   const setSidebarWidth = useCallback((desired: number): void => {
     const next = resolveSidebarWidth(desired)
@@ -414,7 +509,8 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
   }, [lastSidebarWidth])
 
   const toggleRightPanel = useCallback((): void => {
-    setRightPanelAutoClosed(false)
+    // 手动开关后不再参与「窗口变宽自动恢复」
+    rightPanelAutoClosedRef.current = false
     setRightPanelOpen((v) => {
       if (v) setRightPanelWidthMode('regular')
       return !v
@@ -430,15 +526,28 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
 
   /* ---------- controller 方法(写 docks state;两个 dock 共用一套) ---------- */
 
+  /** 关闭面板(right/bottom 各走各的;Codex iD(e,false):$E=false 退出全宽) */
+  const closePanel = useCallback((dock: PanelDock): void => {
+    if (dock === 'right') {
+      setRightPanelOpen(false)
+      setRightPanelWidthMode('regular')
+    } else {
+      setBottomPanelOpen(false)
+    }
+  }, [])
+
   const openTab = useCallback(
     (
       dock: PanelDock,
       descriptor: AppShellTabDescriptorInput,
       opts?: { activate?: boolean; insertAfterTabId?: string }
     ): string => {
-      // 打开 tab 时确保目标面板展开(Codex:openTab 配 panelOpen$/setPanelOpen)
-      if (dock === 'right') setRightPanelOpen(true)
-      else setBottomPanelOpen(true)
+      const activate = opts?.activate ?? true
+      // Codex openTab:只有激活时才展开面板(`s && (g(t, R, P), n(t, !0), …)`)
+      if (activate) {
+        if (dock === 'right') setRightPanelOpen(true)
+        else setBottomPanelOpen(true)
+      }
 
       const tabId = descriptor.tabId ?? newBrowserTabId()
       const full: AppShellTabDescriptor = {
@@ -448,7 +557,6 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         tabId,
         dndId: descriptor.dndId ?? tabId
       }
-      const activate = opts?.activate ?? true
 
       setDocks((prev) => {
         const state = prev[dock]
@@ -457,11 +565,21 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
           return activate ? { ...prev, [dock]: { ...state, activeTabId: existing.tabId } } : prev
         }
         let tabs = state.tabs
+        let tabStateById = state.tabStateById
         if (full.isPreview) {
-          // Codex/VSCode 预览语义:同时只有一个预览 tab,新预览替换旧预览
+          // Codex/VSCode 预览语义:同时只有一个预览 tab,新预览替换旧预览(Codex `h`)
           const previewIdx = tabs.findIndex((t) => t.isPreview)
-          tabs =
-            previewIdx >= 0 ? tabs.map((t, i) => (i === previewIdx ? full : t)) : [...tabs, full]
+          if (previewIdx >= 0) {
+            const replaced = tabs[previewIdx]
+            // 新 tab **继承被替换 tab 的 dndId**(Codex:`c = s == null ? o : { ...o, dndId: s.dndId }`),
+            // 位置与拖拽身份都不变;旧 tab 的 state 一并清掉(Codex `w` 里 set(o, tabId, null))
+            const descriptor2 = { ...full, dndId: replaced.dndId }
+            tabs = tabs.map((t, i) => (i === previewIdx ? descriptor2 : t))
+            tabStateById = { ...tabStateById }
+            delete tabStateById[replaced.tabId]
+          } else {
+            tabs = [...tabs, full]
+          }
         } else if (opts?.insertAfterTabId != null) {
           const at = tabs.findIndex((t) => t.tabId === opts.insertAfterTabId)
           tabs = at >= 0 ? [...tabs.slice(0, at + 1), full, ...tabs.slice(at + 1)] : [...tabs, full]
@@ -470,7 +588,12 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         }
         return {
           ...prev,
-          [dock]: { ...state, tabs, activeTabId: activate ? tabId : state.activeTabId }
+          [dock]: {
+            ...state,
+            tabs,
+            tabStateById,
+            activeTabId: activate ? tabId : state.activeTabId
+          }
         }
       })
       return tabId
@@ -478,17 +601,29 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     []
   )
 
-  const closeTab = useCallback((dock: PanelDock, tabId: string): void => {
-    setDocks((prev) => {
-      const state = prev[dock]
-      const tabs = state.tabs.filter((t) => t.tabId !== tabId)
-      const tabStateById = { ...state.tabStateById }
-      delete tabStateById[tabId]
-      const activeTabId =
-        state.activeTabId === tabId ? (tabs[tabs.length - 1]?.tabId ?? null) : state.activeTabId
-      return { ...prev, [dock]: { ...state, tabs, activeTabId, tabStateById } }
-    })
-  }, [])
+  const closeTab = useCallback(
+    (dock: PanelDock, tabId: string): void => {
+      let closedLast = false
+      setDocks((prev) => {
+        const state = prev[dock]
+        const closedIndex = state.tabs.findIndex((t) => t.tabId === tabId)
+        if (closedIndex === -1) return prev
+        const tabs = state.tabs.filter((t) => t.tabId !== tabId)
+        const tabStateById = { ...state.tabStateById }
+        delete tabStateById[tabId]
+        // 下一个激活 tab(Codex `f1n` = opener 链 ?? `p1n`):p1n = **右邻居优先**,否则左邻居
+        const activeTabId =
+          state.activeTabId === tabId
+            ? (state.tabs[closedIndex + 1]?.tabId ?? state.tabs[closedIndex - 1]?.tabId ?? null)
+            : state.activeTabId
+        // Codex `S`:h.length === 0 && setPanelOpen(false) —— 关掉最后一个 tab 会连面板一起关
+        closedLast = tabs.length === 0
+        return { ...prev, [dock]: { ...state, tabs, activeTabId, tabStateById } }
+      })
+      if (closedLast) closePanel(dock)
+    },
+    [closePanel]
+  )
 
   const activateTab = useCallback((dock: PanelDock, tabId: string): void => {
     setDocks((prev) => ({ ...prev, [dock]: { ...prev[dock], activeTabId: tabId } }))
@@ -521,11 +656,16 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     (dock: PanelDock, tabId: string, patch: Partial<AppShellTabDescriptor>): void => {
       setDocks((prev) => {
         const state = prev[dock]
-        const nextId = patch.tabId ?? tabId
+        const current = state.tabs.find((t) => t.tabId === tabId)
+        if (current == null) return prev
+        // Codex `p`:patch 带 isPreview:true 而 tab 已非 preview 时强制剥掉 —— updateTab 不能反 pin
+        const safePatch =
+          patch.isPreview === true && !current.isPreview ? { ...patch, isPreview: false } : patch
+        const nextId = safePatch.tabId ?? tabId
         // tabId 变更(Files tab 选中文件后 id 跟随路径 —— 实测行为):
         // 若新 id 已被别的 tab 占用,先收掉那个(去重语义与 openTab 一致;此分支实测不到,属推断)
         let tabs = state.tabs.filter((t) => t.tabId === tabId || t.tabId !== nextId)
-        tabs = tabs.map((t) => (t.tabId === tabId ? { ...t, ...patch, tabId: nextId } : t))
+        tabs = tabs.map((t) => (t.tabId === tabId ? { ...t, ...safePatch, tabId: nextId } : t))
         const tabStateById = { ...state.tabStateById }
         if (nextId !== tabId && tabStateById[tabId]) {
           tabStateById[nextId] = tabStateById[tabId]
@@ -571,23 +711,57 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     []
   )
 
+  /** Codex `A`:resetTabState —— key 自增 + 值收敛(resetState ?? defaultState) */
+  const resetTabState = useCallback((dock: PanelDock, tabId: string): void => {
+    setDocks((prev) => {
+      const state = prev[dock]
+      const tab = state.tabs.find((t) => t.tabId === tabId)
+      if (!tab) return prev
+      const entry = state.tabStateById[tabId]
+      const value =
+        entry != null && tab.resetState != null
+          ? tab.resetState(entry.value as never)
+          : (tab.defaultState?.() ?? null)
+      return {
+        ...prev,
+        [dock]: {
+          ...state,
+          tabStateById: {
+            ...state.tabStateById,
+            [tabId]: { key: (entry?.key ?? 0) + 1, value }
+          }
+        }
+      }
+    })
+  }, [])
+
   const closeActiveTab = useCallback(
     (dock: PanelDock): void => {
-      const active = docks[dock].activeTabId
-      if (active != null) closeTab(dock, active)
+      // Codex `T`:面板未开 / 无 active / active 不可关 → 不动作
+      const open = dock === 'right' ? rightPanelOpen : bottomPanelOpen
+      const active = docks[dock].tabs.find((t) => t.tabId === docks[dock].activeTabId)
+      if (!open || active == null || !active.isClosable) return
+      closeTab(dock, active.tabId)
     },
-    [docks, closeTab]
+    [docks, closeTab, rightPanelOpen, bottomPanelOpen]
   )
 
   /** 组装单个 dock 的 controller(Codex `d1n` 工厂的产物) */
   const buildController = useCallback(
     (dock: PanelDock): AppShellTabPanelController => {
       const state = docks[dock]
+      const activeTab = state.tabs.find((t) => t.tabId === state.activeTabId) ?? null
+      // Codex activeTabReactKey$ = `${kind ?? tabId}-${tabState.key ?? null}`
+      const activeTabReactKey =
+        activeTab == null
+          ? null
+          : `${activeTab.kind ?? activeTab.tabId}-${state.tabStateById[activeTab.tabId]?.key ?? null}`
       return {
         panelId: dock,
         tabs: state.tabs,
         activeTabId: state.activeTabId,
-        activeTab: state.tabs.find((t) => t.tabId === state.activeTabId) ?? null,
+        activeTab,
+        activeTabReactKey,
         openTab: (descriptor, opts) => openTab(dock, descriptor, opts),
         closeTab: (tabId) => closeTab(dock, tabId),
         closeActiveTab: () => closeActiveTab(dock),
@@ -595,6 +769,7 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         pinTab: (tabId) => pinTab(dock, tabId),
         reorderTab: (fromId, toId) => reorderTab(dock, fromId, toId),
         updateTab: (tabId, patch) => updateTab(dock, tabId, patch),
+        resetTabState: (tabId) => resetTabState(dock, tabId),
         tabStateById: state.tabStateById,
         setTabState: (tabId, next) => setTabState(dock, tabId, next)
       }
@@ -608,6 +783,7 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       pinTab,
       reorderTab,
       updateTab,
+      resetTabState,
       setTabState
     ]
   )
@@ -631,6 +807,9 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setRightPanelWidth,
       commitRightPanelWidth,
       mainContentWidth,
+      bottomPanelHeight,
+      setBottomPanelHeight,
+      commitBottomPanelHeight,
       headerLeftWidth: headerSlotWidths.start,
       headerRightWidth: headerSlotWidths.end,
       setHeaderSlotWidth,
@@ -655,6 +834,9 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setRightPanelWidth,
       commitRightPanelWidth,
       mainContentWidth,
+      bottomPanelHeight,
+      setBottomPanelHeight,
+      commitBottomPanelHeight,
       headerSlotWidths,
       setHeaderSlotWidth,
       rightPanelController,

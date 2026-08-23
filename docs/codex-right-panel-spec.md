@@ -178,36 +178,57 @@ DOM:`div.flex.h-full.min-h-0.flex-col.overflow-x-hidden.overflow-y-auto.p-2.sele
 
 ## 八、与 WS 现状的差距(逐条)
 
-**架构级**
-1. `PanelContext` 是「docks + tabs 数组 + kind 注册表」;Codex 是「controller + tab 描述符(renderPanel/isPreview/…)+ 槽位注册」。DOM 可对齐,但 tab 模型要换成描述符(支持 `isPreview`/`dndId`/`tooltip`/`trailingContent`/`requiresWorkspaceReady`)。
-2. 无 launcher 空态;Codex 无 tab 时渲染 actions 列表。
-3. 无 preview/pin 语义(斜体标题、双击 pin、面板交互 pin)。
-4. 无 tab dnd 重排 / 中键关闭 / 关闭宽度锁动画。
-5. 无 framer-motion:panel 开合动画、launcher stagger 都没有。
+> **2026-08-23 第二轮更新:1–11 已全部落地**(AppShellProvider 接管、DockedTabPanel/PanelContext 已删)。
+> 本轮新逆向补进 spec 的要点见下方「十、第二轮实测修正」。
 
-**strip 级(当前 `AppShellTabPanel` 全错)**
-6. `h-11` → Codex `h-toolbar`(46px,且 strip 就顶在窗口 header 下,无 `pt-11`;当前 FileTab 里还有 `pt-11` 注释,实测 Codex 面板顶部没有 44/46px 让位——strip 本身就是 46)。
-7. tab 样式全错:硬编码 `#f2f3f4`/`#54585f`、h-7 max-w-40、自绘关闭钮;Codex 是 `--app-shell-tab-background` color-mix + 容器查询 + separator + icon-2xs 关闭钮。
-8. 缺:「+」Radix 菜单、Expand panel、70px header spacer、两端渐隐 mask、scroll-padding-inline-end。
+**剩余差距:**
 
-**resize/模式**
-9. `RIGHT_PANEL_MIN_WIDTH=240` 错 → **320**,死区 160..320,<160 拖关,最大 `max(320, main-352)`。
-10. `panelMaximized`(隐藏主区)是自创 → Codex 是 full-width 模式(viewport 挤 0 + `data-app-shell-right-panel-full-width` + aside 去掉投影/边框/手柄)。
-11. 无持久化(Codex:`app-shell:right-panel-width:v3` 存 ratio)。
-
-**tab 内容**
-12. Files tab:方向对(树在右)但结构是 prototype 稿;Codex 面包屑是 `nav[aria-label="File path"]` + `ol`,树是虚拟化 `file-tree-container`,有过滤框,树宽 250/max 60%,预览空态结构不同。react-arborist 需移除(Codex 自绘虚拟树)。
-13. Browser tab:WS 用 `<webview>` + 自绘工具栏;Codex 工具栏结构不同(h-toolbar-pane、group/address-bar、ring-1 rounded-[10px]),内容由独立受控 browser 渲染。**在 Electron 里 webview 是合理载体,DOM 对齐 Codex 即可**。
+12. Files tab:外壳/面包屑/空态/树列边界已对齐;**树本体仍是 react-arborist 原型** —— Codex 是过滤框(`input#workspace-directory-tree-search`,placeholder "Filter files…" + sr-only label "Filter files")+ `<file-tree-container data-file-tree-virtualized="true" style="--trees-item-height:28px">` 自绘虚拟树(带 `data-tab-preview-pin-exempt`,点树不 pin 预览 tab)。面包屑中间段在 Codex 里是可点进目录的链接(c0a),WS 暂为纯文本。文件打开态的 nav 右侧控制组(MSo:options menu/git blame/word wrap 等)未取证。
+13. Browser tab:工具栏/地址栏/空态/进度条已对齐。Annotate 按钮按实测空闲态渲染(disabled、容器 opacity-0),标注能力未实现;Browser options 菜单未实现(8 项全是宿主功能);切换 browser tab 会重载 webview(Codex 由独立受控 browser 进程保活,WS 无对应物)。
 14. Review tab:整缺。需要 git diff 数据源(WS 有 main 进程,可加 git 服务)。
 15. Terminal tab:整缺。需要 PTY(node-pty 或等价物)+ 终端渲染(xterm.js)。
+16. Side chat:整缺(需要第二条会话管线)。
+17. tab 右键菜单未取证(controller 有 closeOtherTabs/closeTabsToRight,触发点未找到)。
+18. 命令注册表(⌘T/⌘P/⌃⇧G/⌘⌥B 等快捷键 + xM/TM 命令分发)未实现 —— header 按钮直接调 toggle。
+
 
 ## 九、建议实施顺序
 
-1. **框架**:tab 描述符模型 + controller 语义(可留在 PanelContext 内,接口换成 `openTab/closeTab/activateTab/pinTab/closeActiveTab` + `isPreview`)+ launcher 空态 + strip 全量重写(clamp 宽、separator、mask、「+」菜单、Expand、spacer)+ resize 规则(320/160/max公式/ratio 持久化)+ full-width 模式。
-2. **framer-motion** 接入:aside 开合、tab 关闭锁宽、launcher stagger。
-3. **Files tab** 对齐(含自绘虚拟树替 react-arborist、过滤框、面包屑)。
-4. **Browser tab** DOM 对齐(工具栏/地址栏/空态;载体仍 webview)。
-5. **Review tab**(git diff 数据 + header + 文件树 + 列表骨架)。
-6. **Terminal tab**(PTY + xterm)。
+~~1. 框架(描述符 + controller + 槽位)~~ ~~2. framer-motion 开合~~ ~~Browser tab~~ 均已完成。
 
-未取证项:Terminal 的 DOM(本实例无法创建)、tab 右键菜单项、tab 过多溢出时的滚动行为细节、browser tab 加载态进度条触发条件。
+3. **Files tab** 完整对齐(自绘虚拟树替 react-arborist、过滤框、面包屑目录链接、文件打开态 nav 控制组)。
+4. **Review tab**(git diff 数据 + header + 文件树 + 列表骨架)。
+5. **Terminal tab**(PTY + xterm)。
+6. **Side chat**(第二会话管线)。
+7. tab 右键菜单 + 命令注册表 + 快捷键。
+
+未取证项:Terminal 的 DOM(本实例无法创建)、tab 右键菜单项、tab 过多溢出时的滚动行为细节、文件打开态的 Files nav 控制组、底部面板在 Codex 的真实 DOM(本机点不开)。
+
+
+
+## 十、第二轮实测修正(2026-08-23,bundle + 运行时双证)
+
+**结构修正:**
+
+1. **EJr(aside)的内容表达式是 `children + (activeTab == null ? outlet槽 : <RightPanelTabs/>)`** —— 不是「无 tab 渲染 outlet」。thread chrome(`Ar`)把 `<RightPanelTabs/>` 注册进 `RightPanelOutlet`(dUn)槽,所以两条路径默认渲染同一套;outlet 槽的存在是让 DetailPanel(`SXr`/`CXr`)能**覆写**整个右面板内容。`RightPanel`/`BottomPanel` 导出(eXr/sXr)本身渲染 null。
+2. thread chrome 的注册清单:`<RightPanelOutlet><RightPanelTabs/></RightPanelOutlet>` 恒注册;ready 时注册 `RightPanelTabsEmptyState`(launcher)+ `RightPanelTabListAfterSticky`(「+」菜单);底部同构 + `BottomPanelTabListAfter`(Close 按钮)。**底部没有 TabListBefore 槽**。
+3. **DndContext 在 MainContentSurface 层**(dnd-kit 播报节点 DndDescribedBy 是它的直接子代),右/底面板共用(跨面板拖拽的前提);strip 行里没有播报节点。droppable strip 的 data = `{controller, kind: 'app-shell-tab-strip'}`。
+4. **`activeTabReactKey$` = `${kind ?? tabId}-${tabState.key}`** 是 tabpanel 的 React key:resetTabState 或跨 kind 切换才重挂载,同 kind(file tab 的 `workspaceFile:local`)之间切换不重挂载。
+
+**行为修正(全部实测过):**
+
+5. **关掉最后一个 tab → 整个面板关闭**(`S`:`h.length===0 && setPanelOpen(false)`;实测:关唯一 tab 后 aside 从 DOM 消失)。
+6. openTab 仅当 `activate !== false` 才展开面板;**preview 替换时新 tab 继承被替换者的 dndId**;`updateTab` 不能反 pin(patch 的 isPreview:true 会被剥掉)。
+7. closeTab 的接替激活 = opener 链(y1n) ?? **右邻居优先、否则左邻居**(p1n:`e[i+1] ?? e[i-1]`)。
+8. **full-width 时面板宽 = mainContentWidth 整宽**(kJr:`n ? main : PHn(ratio,…)`)—— 不是把 ratio 重映射到 full 区间。
+9. aside 开合动画:progress(0..1)弹簧 `{type:'spring',duration:0.5,bounce:0.1}`,**width = clamp01(progress) × 全宽 + opacity = progress**;`isMounted = isVisible || progress > 0`,animationComplete 后再评估卸载(UPr)。reduced-motion 直接 set。
+10. Expand panel 按钮:full 态 `color: 'secondary'`(实测类 `text-token-foreground bg-token-foreground/5 enabled:hover:bg-token-foreground/10`),外包 Tooltip(delayOpen);「Toggle file tree」(Files nav)同样是 secondary/ghost 随状态切。
+11. `RightPanelTabs` 的 beforeList:**full-width 且侧栏隐藏时**左端插 `headerLeftWidth` 宽占位(div.pointer-events-none.h-full.shrink-0)。
+12. header 的 Toggle side panel(`jr`):**面板关 ∧ 0 tab ∧ 只剩 1 个可用 action → 直接执行该 action** 而不是开面板;按钮带 `aria-pressed`。
+13. launcher 动画:容器 `initial={false} animate="open"`,variants xr(容器 y:-8→0/0.09s)/ Sr(ul stagger 0.016 + delay 0.012)/ Cr(li y:-6→0/0.075s),ease 恒 `[0.19,1,0.22,1]`(`Te.ease` = Qj);reduced-motion(`Ym`)全禁。kbd = `Nh`(inline-flex !rounded-md !border-0 !bg-current/10 !px-1.5 !py-0.5 !leading-none)。
+14. 「+」菜单(`Or`):trigger 用 **title** 属性(非 aria-label)+ `outline-hidden data-[state=open]:!bg-token-foreground/5 data-[state=open]:!text-token-foreground`;`if (target==='right' && tabs===0) return null`(底部无此限制);带 `deferSelectionUntilDropdownClose` 的 action(open-file/browser)在 onCloseAutoFocus 才执行。
+15. 底部面板(YPr/NYr):`motion.div[data-app-shell-focus-area=bottom-panel].relative.z-30`,高默认 280(BPr)、clamp `max(160, min(h, main*0.5))`(LPr)、拖 <80 关面板、持久化 `app-shell:bottom-panel-height`(像素,不版本化)。内容 NYr:`activeTab ? KCr(pane) : outlet`。
+16. file tab(`HY`):tabId `file:local:<path>`、kind `workspaceFile:local`、defaultState `{scrollLeft:null,scrollTop:null}`、title 无 path 时 "Open file"(`review.fileSource.browser.tabTitle`)、icon 按文件类型(MV)、`onSelectFile` 换文件 = 开新 tab,**当前 tab 是空壳(无 path)时顺手关掉自己**。
+17. Browser tab:新 tab**不加载主页**,空 URL = 空态("Start browsing / Enter a URL to open a page",无 h2),`data-browser-sidebar-primary-focus-target=address`(实测新 tab 地址栏自动聚焦)。
+
+**环境陷阱(测 WS dev 必看):** Electron 窗口被遮挡/隐藏时 `document.hidden=true`,framer-motion 的帧循环**挂起**(弹簧会停在半 overshoot 值),CDP `Input.dispatchMouseEvent` 每个事件 ~5s 才消化。验证动画/拖拽前先 `Page.bringToFront` 并保持窗口可见。

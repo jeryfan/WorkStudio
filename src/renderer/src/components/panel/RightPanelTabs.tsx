@@ -1,17 +1,29 @@
 import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
 import { ExpandPanelIcon, RestorePanelIcon } from '../icons'
-import { APP_SHELL_BUTTON_CLASS } from './appShellButtonClass'
+import { Tooltip } from '../tooltip/Tooltip'
+import { APP_SHELL_BUTTON_CLASS, APP_SHELL_BUTTON_SECONDARY_CLASS } from './appShellButtonClass'
 import { AppShellTabs } from './AppShellTabs'
 
 /**
  * RightPanelTabs —— Codex bundle 里的 `uDr`(app-initial:211210):
  * 读取右面板的四个槽位,渲染共享的 AppShellTabs(KCr),
- * headerHeight='toolbar'、controller=右面板 controller;afterList 固定追加
- * Expand panel 按钮(aDr)+ 70px header 让位 spacer(data-testid
+ * headerHeight='toolbar'、controller=右面板 controller。
+ *
+ * afterList 固定追加 Expand panel 按钮(aDr)+ header 让位 spacer(data-testid
  * right-panel-tab-bar-header-spacer,宽 = headerRightWidth 实测值)。
+ *
+ * beforeList 开头还有一个占位:**full-width 且侧栏隐藏时**(`$E && !oD`),
+ * strip 一直顶到窗口左缘,要给 header 左槽(红绿灯 + 侧栏按钮)让出
+ * headerLeftWidth 宽 —— `div.pointer-events-none.h-full.shrink-0[aria-hidden]`。
  */
 export function RightPanelTabs(): React.JSX.Element {
-  const { rightPanelController, headerRightWidth } = useAppShell()
+  const {
+    rightPanelController,
+    headerLeftWidth,
+    headerRightWidth,
+    rightPanelWidthMode,
+    sidebarOpen
+  } = useAppShell()
   const afterList = useAppShellSlot('rightPanelTabListAfter')
   const afterListSticky = useAppShellSlot('rightPanelTabListAfterSticky')
   const beforeList = useAppShellSlot('rightPanelTabListBefore')
@@ -21,7 +33,18 @@ export function RightPanelTabs(): React.JSX.Element {
     <AppShellTabs
       controller={rightPanelController}
       headerHeight="toolbar"
-      beforeList={beforeList}
+      beforeList={
+        <>
+          {rightPanelWidthMode === 'full' && !sidebarOpen && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none h-full shrink-0"
+              style={{ width: headerLeftWidth }}
+            />
+          )}
+          {beforeList}
+        </>
+      }
       afterListSticky={afterListSticky}
       emptyState={emptyState}
       afterList={
@@ -40,21 +63,32 @@ export function RightPanelTabs(): React.JSX.Element {
   )
 }
 
-/** Expand panel / Restore panel width(Codex `aDr`;toggleMaximizeSidePanel 命令) */
+/**
+ * Expand panel / Restore panel width(Codex `aDr`;命令 `toggleMaximizeSidePanel`)。
+ * full 态切 color=secondary(实测类),外裹 Tooltip(delayOpen;该命令无默认快捷键)。
+ * Codex 点开后若 active tab 是空 URL 的 browser tab 会聚焦其地址栏 —— WS 未接。
+ */
 function ExpandPanelButton(): React.JSX.Element {
   const { rightPanelWidthMode, toggleRightPanelFullWidth } = useAppShell()
   const full = rightPanelWidthMode === 'full'
+  const label = full ? 'Restore panel width' : 'Expand panel'
   return (
-    <span className="contents" data-state="closed">
-      <button
-        type="button"
-        aria-label={full ? 'Restore panel width' : 'Expand panel'}
-        aria-pressed={full}
-        onClick={toggleRightPanelFullWidth}
-        className={APP_SHELL_BUTTON_CLASS}
-      >
-        {full ? <RestorePanelIcon className="icon-xs" /> : <ExpandPanelIcon className="icon-xs" />}
-      </button>
-    </span>
+    <Tooltip tooltipContent={label} delayOpen>
+      <span className="contents" data-state="closed">
+        <button
+          type="button"
+          aria-label={label}
+          aria-pressed={full}
+          onClick={toggleRightPanelFullWidth}
+          className={full ? APP_SHELL_BUTTON_SECONDARY_CLASS : APP_SHELL_BUTTON_CLASS}
+        >
+          {full ? (
+            <RestorePanelIcon className="icon-xs" />
+          ) : (
+            <ExpandPanelIcon className="icon-xs" />
+          )}
+        </button>
+      </span>
+    </Tooltip>
   )
 }

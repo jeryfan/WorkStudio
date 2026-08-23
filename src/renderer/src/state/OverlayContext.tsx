@@ -1,8 +1,8 @@
 /* eslint-disable react-refresh/only-export-components -- Context 文件：Provider 与 hook 同文件是标准模式 */
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 
-/** 下拉菜单身份：sider/2.html 的四个菜单 + panel/1.html 的加号新标签菜单 */
-export type MenuId = 'project-options' | 'project-actions' | 'settings' | 'help' | 'add-tab'
+/** 下拉菜单身份：sider/2.html 的四个菜单 */
+export type MenuId = 'project-options' | 'project-actions' | 'settings' | 'help'
 
 export interface MenuState {
   id: MenuId
@@ -10,8 +10,6 @@ export interface MenuState {
   anchor: DOMRect
   /** project-actions 菜单需要知道作用于哪个项目 */
   projectId?: string
-  /** add-tab 菜单需要知道作用于哪个停靠面板 */
-  dock?: 'right' | 'bottom'
 }
 
 interface OverlayContextValue {

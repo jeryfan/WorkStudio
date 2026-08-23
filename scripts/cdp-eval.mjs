@@ -12,9 +12,13 @@ import process from 'node:process'
 
 const PORT = process.env.CDP_PORT ?? '9333'
 const targets = await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json())
-const page = targets.find((t) => t.type === 'page')
+// Codex 打开 Browser tab 后会出现第二个 page target(被控浏览器,about:blank),
+// 默认取第一个会打错 —— 用 CDP_URL_FILTER 按 URL 子串锁定目标(如 8214)。
+const filter = process.env.CDP_URL_FILTER
+const pages = targets.filter((t) => t.type === 'page')
+const page = filter ? pages.find((t) => t.url.includes(filter)) : pages[0]
 if (!page) {
-  console.error('没有 page target —— 应用没在 dev 模式下运行?')
+  console.error('没有匹配的 page target —— 应用没在 dev 模式下运行?(可用 CDP_URL_FILTER 过滤)')
   process.exit(1)
 }
 

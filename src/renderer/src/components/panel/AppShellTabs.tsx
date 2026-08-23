@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import {
-  DndContext,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent
-} from '@dnd-kit/core'
+import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import type { AppShellTabPanelController } from '../../state/AppShellContext'
 import { AppShellTab } from './AppShellTab'
@@ -40,6 +33,12 @@ import { AppShellTabPanel } from './AppShellTabPanel'
  *   └ 有 activeTab → AppShellTabPanel(tabpanel + error boundary)
  *     无 activeTab → div.relative.min-h-0.flex-1 > emptyState
  *
+ *   有 activeTab 且(ready 或 tab 不要求 ready)→ AppShellTabPanel(key = activeTabReactKey)
+ *   ready 但无 activeTab → div.relative.min-h-0.flex-1 > emptyState
+ *   未 ready 且 tab 要求 ready → “Available when the worktree is ready”
+ *   (Codex `KCr` 的 `g = l != null && (h || l.requiresWorkspaceReady === false)` 分支;
+ *    ready 态 `h` 来自 worktree 状态 `bbr` —— WS 无 worktree provisioning,恒 ready)
+ *
  * tab 的宽区间:Codex 实测 min 90 / max 160 / gap 3。
  */
 
@@ -72,8 +71,6 @@ export function AppShellTabs({
 
   /** sticky 区实测宽(scroll-padding 与 clamp 的中间值都靠它;无内容时是 0 —— 实测一致) */
   const [stickyWidth, setStickyWidth] = useState(0)
-  /** strip 内容区宽(判断 clamp 是否塌缩成固定 px) */
-  const [stripWidth, setStripWidth] = useState(0)
   const [maskAtStart, setMaskAtStart] = useState(false)
   const [maskAtEnd, setMaskAtEnd] = useState(false)
 
@@ -82,7 +79,6 @@ export function AppShellTabs({
     const sticky = stickyInnerRef.current
     if (!strip) return
     const ro = new ResizeObserver(() => {
-      setStripWidth(strip.clientWidth)
       setStickyWidth(sticky?.getBoundingClientRect().width ?? 0)
     })
     ro.observe(strip)
@@ -114,47 +110,57 @@ export function AppShellTabs({
   useEffect(() => {
     if (activeTab == null) return
     stripRef.current
-      ?.querySelector(`[data-app-shell-tab-controller][data-tab-id="${CSS.escape(activeTab.tabId)}"]`)
+      ?.querySelector(
+        `[data-app-shell-tab-controller][data-tab-id="${CSS.escape(activeTab.tabId)}"]`
+      )
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [activeTab])
 
   /*
-   * tab 容器宽:Codex 是 JS 算好写进内联 style。
-   * min = n*90+(n-1)*3,max = n*160+(n-1)*3,preferred = 100% − sticky。
-   * 实测:可用宽 ≤ min 时直接写死 min px(不再挂 clamp)。
+   * tab 容器宽(Codex `BCr`,app-initial:207866):
+   *   I = max(tabs.length, 关闭前的数量)   ← 关闭动画期间 tab 数不掉
+   *   L = max(0, I-1) * 3(gap 总额)
+   *   常态恒为 `clamp(${I*90+L}px, calc(100% - ${sticky}px), ${I*160+L}px)`;
+   *   有关闭在进行(lockedWidth,strip 在 capture 阶段锁下被关 tab 的 offsetWidth)
+   *   → 写死 `${I * lockedWidth + L}px`(此时全部 tab 等宽,恰为当前容器宽,
+   *   其余 tab 在关闭动画期间不重排)。
+   *   之前误记的「可用宽 ≤ min 时塌缩成固定 px」其实就是关闭中的锁宽态。
    */
-  const tabsWidth = useMemo(() => {
-    const n = tabs.length
-    const min = n > 0 ? n * TAB_MIN_WIDTH + (n - 1) * TAB_GAP : 0
-    const max = n > 0 ? n * TAB_MAX_WIDTH + (n - 1) * TAB_GAP : 0
-    const available = stripWidth - stickyWidth
-    if (n > 0 && stripWidth > 0 && min >= available) return `${min}px`
-    const preferred = stickyWidth === 0 ? '100% + 0px' : `calc(100% - ${stickyWidth}px)`
-    return `clamp(${min}px, ${preferred}, ${max}px)`
-  }, [tabs.length, stripWidth, stickyWidth])
-
-  const sensors = useSensors(
-    // 拖动阈值 4px:点击仍走 activate,不触发拖拽
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
-  )
-  // strip 本身是 droppable(Codex id:`app-shell-tab-strip:{panelId}`),拖到空白尾区 = 落到末尾
-  const { setNodeRef: setDroppableRef } = useDroppable({
-    id: `app-shell-tab-strip:${controller.panelId}`
-  })
-
-  const onDragEnd = (e: DragEndEvent): void => {
-    const { active, over } = e
-    if (over == null || active.id === over.id) return
-    // over 可能是 strip 本身(拖到空白尾区):落到末尾
-    const toId =
-      over.id === `app-shell-tab-strip:${controller.panelId}`
-        ? (tabs[tabs.length - 1]?.dndId ?? null)
-        : String(over.id)
-    if (toId == null) return
-    const fromTabId = tabs.find((t) => t.dndId === String(active.id))?.tabId
-    const toTabId = tabs.find((t) => t.dndId === toId)?.tabId
-    if (fromTabId != null && toTabId != null) controller.reorderTab(fromTabId, toTabId)
+  const [lockedWidth, setLockedWidth] = useState<number | null>(null)
+  const [prevTabCount, setPrevTabCount] = useState(tabs.length)
+  /* Codex:`c.length > b && x(c.length)`(渲染期调整);tab 数变化 = 关闭动画完成 → 解锁。
+     这是 React 官方的「渲染期调整派生 state」模式(带条件,不会循环)。 */
+  if (tabs.length !== prevTabCount) {
+    setPrevTabCount(tabs.length)
+    setLockedWidth(null)
   }
+  const tabCountForWidth = Math.max(tabs.length, prevTabCount)
+
+  const tabsWidth = useMemo(() => {
+    const n = tabCountForWidth
+    const gapTotal = Math.max(0, n - 1) * TAB_GAP
+    if (lockedWidth != null) return `${n * lockedWidth + gapTotal}px`
+    const min = n * TAB_MIN_WIDTH + gapTotal
+    const max = n * TAB_MAX_WIDTH + gapTotal
+    return `clamp(${min}px, calc(100% - ${stickyWidth}px), ${max}px)`
+  }, [tabCountForWidth, lockedWidth, stickyWidth])
+
+  // strip 本身是 droppable(Codex:id `app-shell-tab-strip:{panelId}`,
+  // data { controller, kind: 'app-shell-tab-strip' } —— zCr 里的 O/k 实测)。
+  // **DndContext 不在这里**:Codex 把它放在 MainContentSurface 层(右/底面板共用一个,
+  // 跨面板拖拽的前提),所以 dnd-kit 的 DndDescribedBy 播报节点也不会落在 strip 行里。
+  // onDragEnd 由 MainContentLayout 统一派发(按 droppable data 里的 controller)。
+  const { setNodeRef: setDroppableRef } = useDroppable({
+    id: `app-shell-tab-strip:${controller.panelId}`,
+    data: { controller, kind: 'app-shell-tab-strip' }
+  })
+  const { active: draggingActive } = useDndContext()
+  const isDraggingAny = draggingActive != null
+
+  // Codex `bbr` = worktree provisioning 状态;WS 没有 worktree,恒 'ready'
+  const workspaceReady = true
+  const activeRenderable =
+    activeTab != null && (workspaceReady || activeTab.requiresWorkspaceReady === false)
 
   return (
     <div
@@ -167,72 +173,96 @@ export function AppShellTabs({
         <div className="my-auto flex shrink-0 items-center" role="presentation">
           {beforeList}
         </div>
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <div
+          ref={(el) => {
+            stripRef.current = el
+            setDroppableRef(el)
+          }}
+          data-app-shell-tab-strip-controller={controller.panelId}
+          className="relative isolate hide-scrollbar flex h-full min-w-0 flex-1 scroll-px-1 items-center overflow-x-auto overflow-y-hidden [contain:layout_paint]"
+          style={{ scrollPaddingInlineEnd: `${stickyWidth}px` }}
+        >
           <div
-            ref={(el) => {
-              stripRef.current = el
-              setDroppableRef(el)
+            aria-hidden="true"
+            className={`sticky start-0 z-10 h-full w-0 after:absolute transition-opacity after:pointer-events-none duration-basic after:start-0 after:top-0 after:bottom-0 after:w-10 after:bg-linear-to-l after:from-transparent after:to-token-main-surface-primary after:content-[''] ${
+              maskAtStart ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+          <span aria-hidden="true" ref={startSentinelRef} />
+          {/* 拖拽中 z-20(Codex `BCr`:`V ? 'z-20' : 'z-0'`,V = dnd dragState 非空) */}
+          <div
+            className={`relative flex shrink-0 ${isDraggingAny ? 'z-20' : 'z-0'}`}
+            style={{ gap: TAB_GAP, width: tabsWidth }}
+            onMouseDownCapture={(e) => {
+              // Codex `te`:中键点击或点关闭钮 → 锁下被关 tab 的当前像素宽
+              if (!(e.target instanceof Element)) return
+              if (e.button !== 1 && e.target.closest('[data-app-shell-tab-close-button]') == null)
+                return
+              const tabEl = e.target.closest('[data-app-shell-tab-controller]')
+              if (tabEl != null) setLockedWidth((tabEl as HTMLElement).offsetWidth)
             }}
-            data-app-shell-tab-strip-controller={controller.panelId}
-            className="relative isolate hide-scrollbar flex h-full min-w-0 flex-1 scroll-px-1 items-center overflow-x-auto overflow-y-hidden [contain:layout_paint]"
-            style={{ scrollPaddingInlineEnd: `${stickyWidth}px` }}
           >
-            <div
-              aria-hidden="true"
-              className={`sticky start-0 z-10 h-full w-0 after:absolute transition-opacity after:pointer-events-none duration-basic after:start-0 after:top-0 after:bottom-0 after:w-10 after:bg-linear-to-l after:from-transparent after:to-token-main-surface-primary after:content-[''] ${
-                maskAtStart ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-            <span aria-hidden="true" ref={startSentinelRef} />
-            <div className="relative flex shrink-0 z-0" style={{ gap: TAB_GAP, width: tabsWidth }}>
-              <div role="tablist" className="contents">
-                <SortableContext
-                  items={tabs.map((t) => t.dndId)}
-                  strategy={horizontalListSortingStrategy}
-                >
-                  {tabs.map((tab, i) => (
-                    <AppShellTab
-                      key={tab.tabId}
-                      controller={controller}
-                      tab={tab}
-                      index={i}
-                      isActive={tab.tabId === controller.activeTabId}
-                      isBeforeActive={tabs[i + 1]?.tabId === controller.activeTabId}
-                      isLast={i === tabs.length - 1}
-                    />
-                  ))}
-                </SortableContext>
-              </div>
-              <div
-                className="sticky w-0 shrink-0 z-10"
-                style={{
-                  insetInlineEnd: `${stickyWidth}px`,
-                  marginInlineStart: tabs.length > 0 ? -3 : 0
-                }}
+            <div role="tablist" className="contents">
+              <SortableContext
+                items={tabs.map((t) => t.dndId)}
+                strategy={horizontalListSortingStrategy}
               >
-                <div ref={stickyInnerRef} className="w-max bg-token-main-surface-primary">
-                  {afterListSticky}
-                </div>
+                {tabs.map((tab, i) => (
+                  <AppShellTab
+                    key={tab.tabId}
+                    controller={controller}
+                    tab={tab}
+                    index={i}
+                    isActive={tab.tabId === controller.activeTabId}
+                    isBeforeActive={tabs[i + 1]?.tabId === controller.activeTabId}
+                    isLast={i === tabs.length - 1}
+                  />
+                ))}
+              </SortableContext>
+            </div>
+            <div
+              className="sticky w-0 shrink-0 z-10"
+              style={{
+                insetInlineEnd: `${stickyWidth}px`,
+                marginInlineStart: tabs.length > 0 ? -3 : 0
+              }}
+            >
+              <div ref={stickyInnerRef} className="w-max bg-token-main-surface-primary">
+                {afterListSticky}
               </div>
             </div>
-            <span aria-hidden="true" ref={endSentinelRef} />
-            <div
-              aria-hidden="true"
-              className={`sticky z-10 h-full w-0 after:absolute transition-opacity duration-basic after:pointer-events-none after:end-0 after:inset-y-0 after:w-10 after:bg-linear-to-r after:from-transparent after:to-token-main-surface-primary after:content-[''] ${
-                maskAtEnd ? 'opacity-100' : 'opacity-0'
-              }`}
-              style={{ insetInlineEnd: `${stickyWidth}px` }}
-            />
           </div>
-        </DndContext>
+          <span aria-hidden="true" ref={endSentinelRef} />
+          <div
+            aria-hidden="true"
+            className={`sticky z-10 h-full w-0 after:absolute transition-opacity duration-basic after:pointer-events-none after:end-0 after:inset-y-0 after:w-10 after:bg-linear-to-r after:from-transparent after:to-token-main-surface-primary after:content-[''] ${
+              maskAtEnd ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={{ insetInlineEnd: `${stickyWidth}px` }}
+          />
+        </div>
         <div className="my-auto flex shrink-0 items-center" role="presentation">
           {afterList}
         </div>
       </div>
-      {activeTab != null ? (
-        <AppShellTabPanel controller={controller} tab={activeTab} />
-      ) : (
+      {/*
+        Codex `KCr` 的内容区三分支:
+          g(tab 可渲染) → QCr(tabpanel + error boundary),key = activeTabReactKey$
+          ready 且无 tab → emptyState 容器
+          未 ready → worktree provisioning 占位
+      */}
+      {activeRenderable && activeTab != null ? (
+        <AppShellTabPanel
+          key={controller.activeTabReactKey ?? activeTab.tabId}
+          controller={controller}
+          tab={activeTab}
+        />
+      ) : workspaceReady ? (
         <div className="relative min-h-0 flex-1">{emptyState}</div>
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center text-sm text-token-text-secondary">
+          Available when the worktree is ready
+        </div>
       )}
     </div>
   )

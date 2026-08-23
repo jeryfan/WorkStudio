@@ -1,13 +1,6 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-/*
- * 用 PanelContext 而不是 AppShellContext —— 后者虽然是它的超集,但
- * `AppShellProvider` 目前**没有挂载**(AppShell.tsx 挂的仍是 PanelProvider),
- * 从未挂载的 context 取值会直接抛 "useAppShell must be used within
- * AppShellProvider"。这一行原先 import 了 useAppShell 却仍在下面调 usePanels,
- * 两边都不成立,于是渲染时崩在 `usePanels is not defined`。
- * 等右面板那套迁移收尾、AppShellProvider 挂上之后再换过来。
- */
-import { usePanels } from '../../state/PanelContext'
+import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useAppShell } from '../../state/AppShellContext'
+import { useSidePanelTabActions } from '../panel/useSidePanelTabActions'
 import { ArrowIcon, BottomPanelIcon, SidebarHideIcon, SidePanelIcon } from '../icons'
 
 /**
@@ -57,31 +50,30 @@ function HeaderSlot({
 }): React.JSX.Element {
   const pad = side === 'start' ? 'ps-[max(var(--spacing-token-safe-header-left),0.5rem)]' : 'pe-2'
   /*
-   * 测量副本 → 真实槽宽,这一步原先**缺了**,是右上角按钮看不见的根因。
+   * 测量副本 → 真实槽宽(Codex `upsertHeaderSlotElement`)。
    *
    * 真实槽是 `shrink-0` + `[container-type:inline-size]`:容器查询要求它的宽度
    * **不能由内容决定**,所以它自己不会被内容撑开 —— 不给宽度时宽度就只剩 padding。
    * 实测(1200 视口):右槽 `pe-2` → 宽 8px,里面两个 28px 按钮溢出到
-   * x=1192 / 1226,而视口只到 1200,于是"右上角的图标从来没出现过"。
-   * 左槽因为 `ps-88`(红绿灯安全区)碰巧有 88px,溢出的按钮落在 88..180,
-   * 还在视口里,所以只有左边看得见 —— 这就是"只显示了侧边栏的 logo"。
+   * x=1192 / 1226,而视口只到 1200,于是“右上角的图标从来没出现过”。
    *
-   * Codex 的做法就是先量一遍(bundle 里 `headerLeftWidth` / `headerRightWidth` /
-   * `upsertHeaderSlotElement`):把不可见副本的宽度写回真实槽。实测右槽宽 70
-   * **正好等于**右副本的 70。副本必须存在的理由也在这里 —— 不是装饰。
+   * Codex 的做法就是先量一遍(bundle 里 `headerLeftWidth` / `headerRightWidth`),
+   * 把不可见副本的宽度写回真实槽,**同时发布到 AppShell store** ——
+   * 右面板 strip 的 header 让位 spacer 和全宽时的左侧占位都读这个值。
+   * 副本必须带 `[&_*]:![view-transition-name:none]`,否则视图过渡时同名元素出现两份。
    */
+  const { setHeaderSlotWidth } = useAppShell()
   const measureRef = useRef<HTMLDivElement | null>(null)
-  const [width, setWidth] = useState<number | null>(null)
 
   useEffect(() => {
     const el = measureRef.current
     if (el == null) return
-    const apply = (): void => setWidth(el.getBoundingClientRect().width)
+    const apply = (): void => setHeaderSlotWidth(side, el.getBoundingClientRect().width)
     apply()
     const ro = new ResizeObserver(apply)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [side, setHeaderSlotWidth])
 
   return (
     <>
@@ -94,16 +86,35 @@ function HeaderSlot({
           {children}
         </div>
       </div>
-      <div
-        data-test-id="header-shell-slot"
-        className={`pointer-events-none relative h-full shrink-0 [container-type:inline-size] ${pad}`}
-        style={width == null ? undefined : { width: `${width}px` }}
-      >
-        <div className="inline-flex h-full items-center gap-1.5 pointer-events-none w-full">
-          {children}
-        </div>
-      </div>
+      {/* 宽度 = start 槽:headerLeftWidth / end 槽:headerRightWidth,从 AppShell store 读回 */}
+      <HeaderSlotReal side={side} pad={pad}>
+        {children}
+      </HeaderSlotReal>
     </>
+  )
+}
+
+function HeaderSlotReal({
+  side,
+  pad,
+  children
+}: {
+  side: 'start' | 'end'
+  pad: string
+  children: ReactNode
+}): React.JSX.Element {
+  const { headerLeftWidth, headerRightWidth } = useAppShell()
+  const width = side === 'start' ? headerLeftWidth : headerRightWidth
+  return (
+    <div
+      data-test-id="header-shell-slot"
+      className={`pointer-events-none relative h-full shrink-0 [container-type:inline-size] ${pad}`}
+      style={width === 0 ? undefined : { width: `${width}px` }}
+    >
+      <div className="inline-flex h-full items-center gap-1.5 pointer-events-none w-full">
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -118,9 +129,28 @@ function HeaderSlot({
  * 中间那层是给 thread 标题和它右侧动作用的,首页态为空但结构要在。
  */
 export function AppShellHeader(): React.JSX.Element {
-  // 只取 sidebarOpen —— 它只用来切 aria-label。Codex 不给按钮激活态,
-  // 所以 rightPanelOpen / bottomPanelOpen / panelMaximized 在 header 里都不需要。
-  const { sidebarOpen, toggleSidebar, toggleRightPanel, toggleBottomPanel } = usePanels()
+  const {
+    sidebarOpen,
+    toggleSidebar,
+    rightPanelOpen,
+    toggleRightPanel,
+    bottomPanelOpen,
+    toggleBottomPanel,
+    rightPanelController
+  } = useAppShell()
+  // Codex `jr`:面板关 && 无 tab && 只剩 1 个可用 action → 直接执行它,不开面板
+  const sidePanelActions = useSidePanelTabActions(rightPanelController)
+  const onToggleSidePanel = (): void => {
+    if (
+      !rightPanelOpen &&
+      rightPanelController.tabs.length === 0 &&
+      sidePanelActions.length === 1
+    ) {
+      sidePanelActions[0].onSelect()
+      return
+    }
+    toggleRightPanel()
+  }
 
   return (
     <header
@@ -183,14 +213,23 @@ export function AppShellHeader(): React.JSX.Element {
          */}
         <div className="no-drag pointer-events-auto flex shrink-0 items-center ms-auto">
           <span className="contents" data-state="closed">
-            <HdrButton aria-label="Toggle bottom panel" onClick={toggleBottomPanel}>
+            {/* Codex 的两个 panel toggle 都是 `bn`(ThreadPanelToggleButton):带 aria-pressed */}
+            <HdrButton
+              aria-label="Toggle bottom panel"
+              aria-pressed={bottomPanelOpen}
+              onClick={toggleBottomPanel}
+            >
               <BottomPanelIcon className="icon-xs" />
             </HdrButton>
           </span>
         </div>
         <div className="no-drag pointer-events-auto flex shrink-0 items-center">
           <span className="contents" data-state="closed">
-            <HdrButton aria-label="Toggle side panel" onClick={toggleRightPanel}>
+            <HdrButton
+              aria-label="Toggle side panel"
+              aria-pressed={rightPanelOpen}
+              onClick={onToggleSidePanel}
+            >
               <SidePanelIcon className="icon-xs rotate-180" />
             </HdrButton>
           </span>

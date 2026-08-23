@@ -17,11 +17,14 @@ export function usePanelResize({
   onResize,
   onResizeEnd
 }: {
-  /** 'right' = 拖右缘,指针右移变宽(侧栏);'left' = 拖左缘,指针右移变窄(右面板/文件树) */
-  edge: 'left' | 'right'
+  /** 'right' = 拖右缘,指针右移变宽(侧栏);'left' = 拖左缘,指针右移变窄(右面板/文件树);
+   *  'top' = 拖上缘,指针下移变矮(底部面板);'bottom' = 拖下缘 */
+  edge: 'left' | 'right' | 'top' | 'bottom'
   size: number
   onResize(next: number): void
-  onResizeEnd?(): void
+  /** 收手时回传**最后一次拖拽出的目标尺寸**(Codex Tkr 的 onResizeEnd(e));
+   *  拖过折叠阈值时调用方据此跳过持久化 */
+  onResizeEnd?(finalSize: number): void
 }): {
   isResizing: boolean
   onPointerDown: React.PointerEventHandler<HTMLDivElement>
@@ -42,16 +45,26 @@ export function usePanelResize({
     abortRef.current = ac
 
     const startX = e.clientX
+    const startY = e.clientY
     const startSize = size
     const pointerId = e.pointerId
+    let lastSize = startSize
     setIsResizing(true)
 
     window.addEventListener(
       'pointermove',
       (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return
-        const delta = edge === 'right' ? ev.clientX - startX : startX - ev.clientX
-        onResize(startSize + delta)
+        const delta =
+          edge === 'right'
+            ? ev.clientX - startX
+            : edge === 'left'
+              ? startX - ev.clientX
+              : edge === 'top'
+                ? startY - ev.clientY
+                : ev.clientY - startY
+        lastSize = startSize + delta
+        onResize(lastSize)
       },
       { signal: ac.signal }
     )
@@ -60,7 +73,7 @@ export function usePanelResize({
       ac.abort()
       abortRef.current = null
       setIsResizing(false)
-      onResizeEnd?.()
+      onResizeEnd?.(lastSize)
     }
     window.addEventListener('pointerup', finish, { signal: ac.signal })
     window.addEventListener('pointercancel', finish, { signal: ac.signal })
