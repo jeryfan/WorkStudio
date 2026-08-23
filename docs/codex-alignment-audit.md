@@ -757,7 +757,87 @@ aria-haspopup / aria-expanded",一直是个死按钮。顺带纠正一点:
 说明贡献来自别处(可能是那一行里还有别的行内盒或 vertical-align 差异)。
 下一轮从这几个已排除项之后接着查,不用从头再来。
 
-### 分析:「Worked for xx s + 过程折叠」在这份构建里查不到
+### 已实测:turn 的三段式 +「Worked for xx s」过程折叠
+
+> **纠正**:上一轮我按字符串搜 `Worked for` 得到 0 命中,就断言"这份构建里没有"
+> —— **错了**。它在 DOM 里确实存在(实测 `Worked for 1m 28s`),字符串搜不到
+> 只说明它是运行时拼的 / 在 `app-initial` 之外的 chunk 里。
+>
+> 更值得记的是**方法错误**:我之前扫会话只筛 CSS Module 类(`/^_[A-Za-z]/`),
+> 于是 14 条会话全报"只有 markdown"。而**过程段、工具活动行、折叠头全是
+> 纯 Tailwind 工具类,一个模块类都没有** —— 筛选条件本身把要找的东西滤掉了。
+> 以后扫构件要看**全部**类名,不能只看模块类。
+
+**turn 是三段 + 两个空隔离元素**(`div.w-full[aria-hidden="true"]`):
+
+```
+div[data-turn-key].[&_[data-virtualized-turn-content]]:[content-visibility:visible]
+└ div.contents[data-content-search-turn-key]
+  └ div.flex.flex-col.gap-0
+    ├ ① div.flex.flex-col                                        用户消息
+    │   └ div.scroll-mt-4[data-content-search-unit-key][data-local-conversation-user-anchor="true"]
+    │     └ div.flex.flex-col.items-end.gap-2
+    │       ├ h4.sr-only.select-none «You said:»
+    │       └ div.group.flex.w-full.flex-col.items-end.justify-end.gap-1
+    │         ├ div[data-user-message-bubble="true"][tabindex="0"]
+    │         │   .bg-token-foreground/5.max-w-[77%].min-w-0.overflow-hidden.break-words.rounded-2xl.px-3.py-2
+    │         └ div.flex.flex-row-reverse.items-center.gap-1     hover 才显的操作
+    │           └ div.me-1.ms-1.flex.items-center.gap-2.opacity-0.group-focus-within:opacity-100.group-hover:opacity-100
+    │             ├ span.flex.opacity-0… > span.text-xs.text-token-text-tertiary «Friday 12:01 AM»
+    │             └ div.flex.items-center.gap-0.5 > button[aria-label="Copy message"] + button[aria-label="Edit message"]
+    ├ div.w-full[aria-hidden="true"]
+    ├ ② div.flex.flex-col                                        **过程段(可折叠)**
+    │   ├ div.text-size-chat.text-token-text-secondary
+    │   │ └ button[type="button"][aria-expanded]
+    │   │     .inline-flex.items-center.gap-1.rounded-md.border.border-transparent.text-size-chat
+    │   │     .focus-visible:ring-2.focus-visible:ring-token-focus-border.focus-visible:outline-none
+    │   │   └ span > span.text-token-conversation-body «Worked for 1m 28s»
+    │   ├ div.pt-1.text-size-chat.text-token-text-secondary
+    │   │ └ div.w-full.border-t.border-token-border              折叠态只剩这条发丝线
+    │   └ [展开时才有的第三个兄弟] div
+    │     ├ div.w-full[aria-hidden="true"]
+    │     └ div.flex.flex-col.gap-[var(--conversation-item-gap,16px)]
+    │       └ div        ← 每个过程条目外面一层匿名 div
+    │         ├ 推理文字 → 与最终回复**同一套结构**(见下)
+    │         └ 工具活动 → div.min-w-0.text-size-chat.relative.overflow-visible.py-0
+    │                      └ div.flex.min-w-0.flex-col
+    │                        └ button|div.group/activity-header.inline-flex.min-w-0.max-w-full
+    │                            .self-start.items-center.gap-1.p-0  [aria-expanded?]
+    │                          └ span.inline-flex.min-w-0.gap-1.5.items-center.shrink.truncate.text-size-chat
+    ├ div.w-full[aria-hidden="true"]
+    └ ③ div.flex.flex-col[data-local-conversation-final-assistant="true"]   最终回复
+        └ div[data-content-search-unit-key]
+          └ div.group.flex.min-w-0.flex-col[data-response-annotation-conversation][data-response-annotation-target="item-N"]
+            ├ h4.sr-only.select-none «ChatGPT said:»
+            └ div._MarkdownRoot_…[data-markdown-text-style="assistant-message"][data-selected-text-overlay-target][dir="auto"]
+```
+
+**用户那条猜测逐项核对**:
+
+| 猜测 | 实测 |
+|---|---|
+| 发完消息出现 "Worked for xx s" | ✅ 存在,`Worked for 1m 28s` |
+| 前面的思考、工具调用都会出现 | ✅ 都在过程段里 |
+| 工作结束后过程折叠 | ✅ 重新打开已完成会话时 `aria-expanded="false"`,折叠态正文只剩一条 `border-t` 发丝线 |
+| 只有最终输出展示 | ✅ 最终回复是过程段的**兄弟**(带 `data-local-conversation-final-assistant="true"`),不在折叠范围内 |
+
+**三个只有实测才知道的点**:
+
+1. **中间推理文字与最终回复用的是完全同一套结构** ——
+   都是 `div.group.flex.min-w-0.flex-col[data-response-annotation-*]` +
+   `h4.sr-only «ChatGPT said:»` + `div._MarkdownRoot_[data-markdown-text-style="assistant-message"]`。
+   唯一区别是最终那段的父级带 `data-local-conversation-final-assistant="true"`。
+   所以**不需要**为"中间回复"另做一种组件。
+2. **工具活动行的标签是 `button` 还是 `div`,取决于它有没有可展开的细节** ——
+   有细节的是 `button[aria-expanded="false"]`,没有的(例如只写
+   "Searched the web")就是普通 `div`。两者都带 `group/activity-header`。
+3. 过程条目之间的间距走 `--conversation-item-gap`(默认 16px),不是写死的 gap。
+
+**这解决了 #15 的取证阻塞**:工具活动行 → `group/activity-header` 那套;
+推理文字 → 已经迁好的 `codex-MarkdownRoot`;折叠头 → 上面那个 button。
+下一轮可以直接照这份结构改 parts,不用再找。
+
+### 分析(已被上面推翻):「Worked for xx s + 过程折叠」在这份构建里查不到
 
 结论先说:**这份 Codex 构建里没有 "Worked for" 这个文案**。逐个搜过:
 
