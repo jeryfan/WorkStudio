@@ -1,4 +1,12 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { type ButtonHTMLAttributes, type ReactNode } from 'react'
+/*
+ * 用 PanelContext 而不是 AppShellContext —— 后者虽然是它的超集,但
+ * `AppShellProvider` 目前**没有挂载**(AppShell.tsx 挂的仍是 PanelProvider),
+ * 从未挂载的 context 取值会直接抛 "useAppShell must be used within
+ * AppShellProvider"。这一行原先 import 了 useAppShell 却仍在下面调 usePanels,
+ * 两边都不成立,于是渲染时崩在 `usePanels is not defined`。
+ * 等右面板那套迁移收尾、AppShellProvider 挂上之后再换过来。
+ */
 import { usePanels } from '../../state/PanelContext'
 import { ArrowIcon, BottomPanelIcon, SidebarHideIcon, SidePanelIcon } from '../icons'
 

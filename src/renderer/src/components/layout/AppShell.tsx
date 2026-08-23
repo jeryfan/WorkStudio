@@ -8,7 +8,7 @@ import { PanelProvider, usePanels } from '../../state/PanelContext'
 import { LeftPanel } from '../sidebar/LeftPanel'
 import { MainContentLayout } from './MainContentLayout'
 import { RightPanel } from './RightPanel'
-import { AppShellTabPanel } from '../panel/AppShellTabPanel'
+import { DockedTabPanel } from '../panel/DockedTabPanel'
 import { OverlayLayer } from '../overlay/OverlayLayer'
 import { TooltipProvider } from '../tooltip/Tooltip'
 import { AppPortals } from '../overlay/AppPortals'
@@ -88,11 +88,11 @@ function Shell(): React.JSX.Element {
           rightPanel={
             rightPanelOpen ? (
               <RightPanel width={rightPanelWidth} onResize={setRightPanelWidth}>
-                <AppShellTabPanel docked="right" />
+                <DockedTabPanel docked="right" />
               </RightPanel>
             ) : undefined
           }
-          bottomPanel={bottomPanelOpen ? <AppShellTabPanel docked="bottom" /> : undefined}
+          bottomPanel={bottomPanelOpen ? <DockedTabPanel docked="bottom" /> : undefined}
         >
           <MainView />
         </MainContentLayout>
