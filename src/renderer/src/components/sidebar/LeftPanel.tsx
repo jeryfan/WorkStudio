@@ -4,7 +4,6 @@ import { useWorkspace } from '../../state/WorkspaceContext'
 import {
   AddProjectIcon,
   BranchIcon,
-  ChevronIcon,
   DotsIcon,
   NewChatIcon,
   PluginsIcon,
@@ -12,6 +11,7 @@ import {
   SearchIcon
 } from '../icons'
 import { SidebarItem } from './SidebarItem'
+import { SidebarModeSwitcher } from './SidebarModeSwitcher'
 import { ResizeHandle } from '../layout/ResizeHandle'
 import { usePanelResize } from '../../utils/usePanelResize'
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/PanelContext'
@@ -279,32 +279,8 @@ function LeftPanelBody({
                  * 概念,所以先不挂菜单,几何与状态类名(data-state)按 Codex 留好。
                  */}
                 <div className="ms-2 flex items-center pe-1">
-                  <button
-                    type="button"
-                    aria-label="Switch mode, current mode: Codex"
-                    data-state="closed"
-                    className="no-drag -ms-2 flex h-8 min-w-0 cursor-interaction select-none items-center gap-1 whitespace-nowrap rounded-xl border border-transparent px-2 font-medium !text-[17px] !leading-6 text-token-foreground outline-hidden focus:outline-none enabled:hover:bg-token-list-hover-background data-[state=open]:bg-token-list-hover-background"
-                  >
-                    {/*
-                     * Codex 实测构成:文字 span(font-openai-sans font-semibold, 50×24)
-                     * + 右侧 14×14 的 chevron(icon-2xs, 占位符前景色)。**没有 logo**。
-                     * 8 + 50 + gap 4 + 14 + 8 + 边框 2 = 86,与 Codex 一致。
-                     */}
-                    <span className="truncate font-openai-sans font-semibold">Codex</span>
-                    <ChevronIcon className="icon-2xs shrink-0 text-token-input-placeholder-foreground" />
-                  </button>
-                  {/*
-                   * Codex 把右侧图标按钮组包在 div.ms-auto.flex.items-center.gap-1 里,
-                   * 再各套一层 span.contents 当 tooltip 触发器。ms-auto 属于这个容器,
-                   * 不是按钮 —— 以后加第二个图标按钮时才不会错位。
-                   *
-                   * 类名逐字照抄,只去掉一个 `electron:[&>svg]:icon-sm` —— 全项目唯一
-                   * 一处刻意不抄的 token,理由有实测依据:Codex 的编译产物里含 icon-sm
-                   * 的选择器**只有 `.icon-sm`** 一条,那个组合类从未被编译,是死类名,
-                   * 实际生效的是 svg 自带的 icon-xs → 16px、按钮 26×26。WS 的 Tailwind
-                   * 会把它编出来且特异性更高,照抄会顶成 svg 18px / 按钮 28×28。
-                   * 渲染一致优先于抄一个上游无效的 token。SectionHeader 同理。
-                   */}
+                  {/* 模式切换器 —— 触发器 + 菜单都在 SidebarModeSwitcher 里 */}
+                  <SidebarModeSwitcher />
                   <div className="ms-auto flex items-center gap-1">
                     <span className="contents" data-state="closed">
                       <button

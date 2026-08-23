@@ -725,9 +725,41 @@ WS 原先拆成 `pinnedProjectIds` + `pinnedChatIds` 两个数组分别渲染,DO
 ### 未完成(按原修复顺序)
 8. **D 剩余项**:D16;分节标题的 sortable 只补了 aria 契约,还没接进 DnD 上下文
    (Codex 的 Projects / Recents 分节可互相重排,Pinned 固定在最上)。
-9. **顶部区域点击** —— 用户反馈"侧边栏顶部 logo 无法点击",尚未定位。
-   怀疑是 header 的 `-webkit-app-region: drag` 盖住了下层,或 `no-drag` 缺失,
-   需要按 hit-test 实测(`document.elementFromPoint`)确认。
+### 已完成:侧栏顶部模式切换器(D6)
+
+用户反馈"侧边栏顶部 logo 无法点击"。hit-test 实测排除了遮挡:
+`elementFromPoint` 命中的就是那个 button 本身,`-webkit-app-region: none`、
+`pointer-events: auto`,header 那层是 `pointer-events-none` 不吃事件
+(它自己的按钮能点,空白处的点击穿透到下层 aside/main —— 那是 Codex 的设计)。
+真正原因是**它没挂 handler**:D6 早就记了"不是 Radix trigger、缺
+aria-haspopup / aria-expanded",一直是个死按钮。顺带纠正一点:
+那不是 logo —— Codex 侧栏顶部**没有 logo**,只有「当前模式 + chevron」。
+
+点开 Codex 的菜单抓到完整契约并实现(`SidebarModeSwitcher.tsx`):
+菜单 `div[role=menu][data-radix-menu-content][data-side=bottom][data-align=start]`,
+`w-[240px]` + `m-px` + `rounded-xl` + `ring-[0.5px]` + `shadow-xl-spread` +
+`backdrop-blur-sm`;两个两行菜单项(`ChatGPT Work / Create, learn, and explore`、
+`Codex / Build, debug, and ship`),当前项尾部一个 `icon-xs opacity-75` 的勾。
+几何实测:菜单相对按钮 dx=+1 / 距按钮底 +5,其中各 1px 来自菜单自己的 `m-px`,
+所以定位参数是 `side="bottom" align="start" sideOffset={4}` —— WS 实测
+`translate(8px, 82px)` 与 Codex 的 (8, 82) 完全一致。触发器的基类也照 D6 补齐
+(`disabled:cursor-not-allowed` / `disabled:opacity-40` / `py-0.5` /
+`leading-[18px]` / `rounded-full` / `text-sm`,含 Codex 那些被后续类压掉的重复)。
+
+**刻意偏离**:WS 没有 ChatGPT Work 模式,选它只关菜单不做别的 —— 不假装
+一个还不存在的能力,DOM 与文案保持一致,接入模式概念时只换 onSelect。
+
+**残留 2px 未解**:菜单高 WS 102.28 / Codex 104.25,差值来自每个菜单项第一行的
+行盒(Codex 19.56 / WS 18.57)。已排除的因素:两侧 `OpenAI Sans` 字体面完全相同
+(400 unloaded / 500 loaded,`check('600 13px')` 都为 true)、
+菜单项继承字重都是 445、font-size 13px、line-height 18.5714px 全等;
+反常的是 Codex 的**内层** span 反而更矮(15 vs 15.5)却把外层行盒撑得更高,
+说明贡献来自别处(可能是那一行里还有别的行内盒或 vertical-align 差异)。
+下一轮从这几个已排除项之后接着查,不用从头再来。
+
+### 未完成(按原修复顺序)
+9. **模式菜单的键盘导航**:Codex 是 Radix menu(↑↓ 选择、Home/End、typeahead),
+   目前只实现了 Escape 与点击外部关闭。
 
 ### 既有 lint 债(非本次改动引入)
 
