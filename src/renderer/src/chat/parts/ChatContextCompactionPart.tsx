@@ -1,13 +1,28 @@
+import { ActivityCompactionIcon } from '../../components/icons'
+import { ActivityHeaderRow } from './activity'
+import { ACTIVITY_ICON_CLASS } from './tool/ToolActivityIcon'
+
 /**
- * 上下文压缩分隔线。
+ * 上下文压缩 —— Codex **有**这个条目类型(`context-compaction`),而且它就是
+ * 一条普通的活动行:
  *
- * 上游没有这个 part —— VSCode 的上下文管理不向用户暴露。本项目的协议会推
- * `contextCompaction` 条目，不显示的话用户会看到 agent "突然忘了前面说过什么"
- * 而没有任何解释。
+ * ```
+ * <ActivityHeaderRow icon={<CompactionIcon aria-hidden className="icon-xs shrink-0 text-token-conversation-body"/>}
+ *                    summary={completed ? 'Context compacted' : 'Compacting context'} />
+ * ```
  *
- * 做成一条带标签的细线而不是卡片：它描述的是会话的结构性事件，不是 agent 的
- * 一次动作，视觉权重应当低于工具调用。
+ * 文案 id 是 `localConversation.contextAutomaticallyCompacted` /
+ * `contextAutomaticallyCompacting`(还有 `contextManually*` 两条,区分是自动
+ * 还是用户手动触发的)。WS 的协议不区分,用自动那两句。
+ *
+ * 之前是自造的 `.chat-context-compaction`(一条带标签的细线),
+ * 那是照 VS Code 的视觉语言编的 —— Codex 有真东西,换过来。
  */
 export function ChatContextCompactionPart(): React.JSX.Element {
-  return <div className="chat-context-compaction">Context compacted</div>
+  return (
+    <ActivityHeaderRow
+      icon={<ActivityCompactionIcon aria-hidden className={ACTIVITY_ICON_CLASS} />}
+      summary="Context compacted"
+    />
+  )
 }

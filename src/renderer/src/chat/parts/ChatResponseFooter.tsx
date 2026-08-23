@@ -1,77 +1,73 @@
 import { useState } from 'react'
+import { CheckIcon, CopyIcon } from '../../components/icons'
 import { copyText } from '../../utils/clipboard'
-import { Codicon } from './Codicon'
+import { cx } from '../../utils/cx'
 
 /**
- * 回复底部的工具栏 —— 对应上游的 `.chat-footer-toolbar`。
+ * 回复的操作条 —— 照 Codex 的 ghost-icon 按钮。
  *
- * 两个可见性规则都来自上游，都有道理：
+ * Codex 的按钮类名由它的 `Button` 组件按 `color` / `size` 组合出来
+ * (app-initial 里那两张表),`color="ghost" size="icon"` 展开是:
  *
- * 1. **只在回复完成后出现**。流式期间正文还在长，此时给"复制"按钮会复制到
- *    半截内容。
- * 2. **最新一条常驻，其余 hover 才出现**。最新一条是用户马上要操作的对象；
- *    历史回复每条都挂一排按钮会让整个会话看起来像个工具箱。
+ * ```
+ * no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none
+ * focus:outline-none disabled:cursor-not-allowed disabled:opacity-40      ← 基座
+ * text-token-text-tertiary enabled:hover:bg-token-list-hover-background
+ * data-[state=open]:bg-token-list-hover-background border-transparent      ← ghost
+ * electron:p-1 electron:[&>svg]:icon-sm flex items-center justify-center p-0.5  ← size=icon
+ * ```
  *
- * 耗时用"翻转"而不是并排显示：两条信息（何时完成、花了多久）大多数时候只关心
- * 一条，并排会让本来就次要的一行更挤。做法是把两行文字叠在同一个 grid 格里，
- * hover 时上下位移互换。
+ * 调用点再补一条 focus ring:
+ * `focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:ring-offset-0`。
+ *
+ * **复制成功后 Codex 换的是整个按钮,不是只换图标** —— 已复制那版没有
+ * `onClick`(点不了)、`aria-label` 是 "Copied"。这样读屏器会在焦点上直接
+ * 读出结果,而不是要用户再去别处找反馈。
+ *
+ * 位置与可见性由 `ThreadAssistantMessage` 的 `actions` 槽决定
+ * (`opacity-0 group-focus-within:opacity-100 group-hover:opacity-100`),
+ * 不在这里管 —— 之前那版自己带 `.chat-footer-toolbar` 的显隐规则,
+ * 与外层的 group hover 重复了一遍。
+ *
+ * 耗时/时间戳也不在这里:Codex 把发送时间放在
+ * `span[data-assistant-message-sent-time]`,是 actions 的**兄弟**,
+ * 已经由 `ThreadAssistantMessage` 渲染。
  */
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const s = ms / 1000
-  if (s < 60) return `${s.toFixed(1)}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${Math.round(s % 60)}s`
-}
+const GHOST_ICON_BUTTON = cx(
+  'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none',
+  'focus:outline-none disabled:cursor-not-allowed disabled:opacity-40',
+  'text-token-text-tertiary enabled:hover:bg-token-list-hover-background border-transparent',
+  'electron:p-1 electron:[&>svg]:icon-sm flex items-center justify-center p-0.5',
+  'rounded-lg',
+  'focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:ring-offset-0'
+)
 
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
-
-export function ChatResponseFooter({
-  text,
-  startedAtMs,
-  completedAtMs
-}: {
-  /** 复制的目标：这条回复的纯文本 */
-  text: string
-  startedAtMs: number | null
-  completedAtMs: number | null
-}): React.JSX.Element {
+export function ChatResponseFooter({ text }: { text: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
 
-  const duration =
-    startedAtMs != null && completedAtMs != null && completedAtMs > startedAtMs
-      ? formatDuration(completedAtMs - startedAtMs)
-      : null
+  if (copied) {
+    return (
+      <button type="button" className={GHOST_ICON_BUTTON} aria-label="Copied">
+        <CheckIcon aria-hidden className="icon-xs" />
+      </button>
+    )
+  }
 
   return (
-    <div className="chat-footer-toolbar">
-      <button
-        type="button"
-        className="chat-footer-action"
-        aria-label={copied ? 'Copied' : 'Copy'}
-        title={copied ? 'Copied' : 'Copy'}
-        onClick={() => {
-          void copyText(text).then((ok) => {
-            if (!ok) return
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1200)
-          })
-        }}
-      >
-        <Codicon name={copied ? 'check' : 'copy'} />
-      </button>
-
-      {completedAtMs != null && (
-        <div className="chat-footer-details" tabIndex={0}>
-          <span className={`chat-response-timing${duration ? ' has-alternate' : ''}`}>
-            <span className="chat-response-completed-at">{formatTime(completedAtMs)}</span>
-            {duration && <span className="chat-response-alternate">{duration}</span>}
-          </span>
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      className={GHOST_ICON_BUTTON}
+      aria-label="Copy message"
+      onClick={() => {
+        void copyText(text).then((ok) => {
+          if (!ok) return
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1200)
+        })
+      }}
+    >
+      <CopyIcon aria-hidden className="icon-xs" />
+    </button>
   )
 }

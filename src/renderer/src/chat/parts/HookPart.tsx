@@ -1,25 +1,36 @@
+import { useState } from 'react'
 import type { ChatHookContent } from '../model/content'
-import { Collapsible } from './Collapsible'
+import { ActivityHeaderRow, DisclosureBody } from './activity'
 
 /**
- * 钩子注入的上下文 —— 对应上游的 chatHookContentPart.ts。
+ * 钩子注入的上下文。
  *
- * 复用上游的折叠外壳与 `.chat-hook-details` / `.chat-hook-message` 结构，
- * 但语义不同：上游那个 part 表达的是钩子**拦截**了操作（Blocked by X hook），
- * 所以用 error/warning 图标；本项目协议的 `hookPrompt` 是钩子往对话里**追加
- * 了提示词**，没有拦截含义，用 `plug` 更贴切——用红色警告图标去标一件正常
- * 发生的事，只会让人以为出了问题。
+ * **Codex 没有对应的条目类型** —— 这是本项目协议特有的 `hookPrompt`
+ * (钩子往对话里追加了提示词)。所以这里不是"复刻 Codex 的某个组件",而是用
+ * Codex 的活动行原语表达一个它没有的语义:一行摘要 + 可展开的正文。
  *
- * 默认收起：注入的提示词往往很长，而且是给模型看的，不是给人看的。
+ * 不给图标:`Fg()` 里没有 hook 这一档,随便挑一个 Codex 图标去代表它会造出
+ * 一个 Codex 里不存在的图标语义。没有图标的活动行是合法形态(推理块就是)。
+ *
+ * 默认收起:注入的提示词往往很长,而且是给模型看的,不是给人看的。
  */
 export function HookPart({ content }: { content: ChatHookContent }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const hasBody = content.body != null && content.body.length > 0
+
   return (
-    <div className="chat-hook-content-part">
-      <Collapsible icon="plug" title={content.title}>
-        <div className="chat-hook-details">
-          <div className="chat-hook-message">{content.body}</div>
-        </div>
-      </Collapsible>
-    </div>
+    <ActivityHeaderRow
+      summary={content.title}
+      disclosure={hasBody ? { expanded, onToggle: () => setExpanded((v) => !v) } : undefined}
+      body={
+        hasBody ? (
+          <DisclosureBody expanded={expanded}>
+            <div className="min-w-0 whitespace-pre-wrap break-words text-size-chat text-token-conversation-body">
+              {content.body}
+            </div>
+          </DisclosureBody>
+        ) : undefined
+      }
+    />
   )
 }

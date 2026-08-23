@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { ChatMarkdownContent } from '../model/content'
 import { CodeBlockPart } from './CodeBlockPart'
 import { InlineAnchor } from './InlineAnchor'
-import { Codicon } from './Codicon'
+import { CheckIcon, CopyIcon } from '../../components/icons'
 import { copyText } from '../../utils/clipboard'
 
 /**
@@ -13,7 +13,7 @@ import { copyText } from '../../utils/clipboard'
  * 而这里要覆盖的构造集合有限且稳定。
  *
  * 相对旧实现的改动：
- *   - 类名换成上游的 `.rendered-markdown` 体系，样式全部由移植的 CSS 提供
+ *   - 类名换成 Codex 的 `codex-MarkdownRoot` / `codex-Paragraph` 一族(提取器生成)
  *   - 标题按真实层级输出 h1/h2/h3，不再一律 h2
  *   - 补上引用块（CSS 早已移植，之前没有对应的解析分支）
  *   - 代码块交给 Monaco（CodeBlockPart）
@@ -155,7 +155,11 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }): React.JSX.
               })
             }}
           >
-            <Codicon name={copied ? 'check' : 'copy'} />
+            {copied ? (
+              <CheckIcon aria-hidden className="icon-xs" />
+            ) : (
+              <CopyIcon aria-hidden className="icon-xs" />
+            )}
           </button>
         </div>
       </div>
@@ -272,8 +276,8 @@ function renderBlocks(text: string): ReactNode[] {
 }
 
 /**
- * `.rendered-markdown` 这个类名是硬要求：用户消息气泡的底色与圆角、链接色、
- * 引用块、表格样式全都挂在它上面。
+ * markdown 根 —— `codex-MarkdownRoot` + `data-markdown-text-style` 选档。
+ * 气泡底色、链接色、引用块、表格样式全都挂在这个类上。
  */
 export function MarkdownPart({
   content,
