@@ -1,9 +1,16 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './assets/main.css'
-import '@vscode/codicons/dist/codicon.css'
 import { ThreadScrollContainer } from './chat/ThreadScrollContainer'
-import { ThreadTurn, ThreadUserMessage, ThreadAssistantMessage } from './chat/ThreadTurn'
+import {
+  ThreadAssistantMessage,
+  ThreadItem,
+  ThreadItems,
+  ThreadProcessSection,
+  ThreadTurn,
+  ThreadTurnGap,
+  ThreadUserMessage
+} from './chat/ThreadTurn'
 import { ChatContentPart } from './chat/parts/ChatContentPart'
 import { MarkdownPart } from './chat/parts/MarkdownPart'
 import { contentKey } from './chat/model/contentKey'
@@ -11,6 +18,7 @@ import { TodoListPart } from './chat/parts/TodoListPart'
 import { ThemeProvider } from './chat/theme/ThemeProvider'
 import { useTheme } from './chat/theme/themeContext'
 import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
+import { setTheme as publishTheme } from './chat/theme/themeStore'
 import { WorkspaceProvider } from './state/WorkspaceContext'
 import { PanelProvider } from './state/PanelContext'
 import type { ThreadRow } from './chat/model/rows'
@@ -59,7 +67,6 @@ const rows: ThreadRow[] = [
     kind: 'response',
     id: 't1',
     content: [
-      { kind: 'progressMessage', id: 'p1', content: '读取 colorRegistry.ts', shimmer: false },
       {
         kind: 'thinking',
         id: 'th1',
@@ -82,6 +89,7 @@ const rows: ThreadRow[] = [
           state: { type: 'completed', success: true, durationMs: 2400 },
           data: {
             kind: 'terminal',
+            commandKind: 'unknown',
             command: 'npm run tokens:gen',
             commandForDisplay: 'npm run tokens:gen',
             cwd: '/Users/me/proj',
@@ -100,6 +108,7 @@ const rows: ThreadRow[] = [
           state: { type: 'completed', success: false, durationMs: 800 },
           data: {
             kind: 'terminal',
+            commandKind: 'unknown',
             command: 'npm test',
             commandForDisplay: 'npm test',
             cwd: null,
@@ -199,7 +208,6 @@ const rows: ThreadRow[] = [
     kind: 'response',
     id: 't2',
     content: [
-      { kind: 'progressMessage', id: 'p2', content: '正在生成 token…', shimmer: true },
       {
         kind: 'thinking',
         id: 'th2',
@@ -258,6 +266,7 @@ const rows: ThreadRow[] = [
           },
           data: {
             kind: 'terminal',
+            commandKind: 'unknown',
             command: 'rm -rf build',
             commandForDisplay: 'rm -rf build',
             cwd: '/Users/me/repo',
@@ -358,6 +367,18 @@ function ThemeSwitcher(): React.JSX.Element {
               document.documentElement.classList.toggle(themeClassName(other), other === v)
             }
             document.documentElement.style.colorScheme = v
+            /*
+             * 必须同时发一次 themeStore —— 光切 <html> 的类只换了 CSS 变量,
+             * **Monaco 不会跟着换主题**(它订阅的是 themeStore),代码块会在
+             * 深色页面上留一块白底。这是预览页专属的坑:真应用里 ThemeProvider
+             * 会一起做这两件事,预览页的开关是直接改 DOM 抄近路。
+             *
+             * data-theme(给 .hljs-* 选档的那个)仍然由 useTheme() 的 context 决定,
+             * 而 context 只跟系统外观走 —— 所以预览页切深色时代码块的
+             * data-theme 仍是 light。这是预览页的已知限制,不是产品行为。
+             */
+            publishTheme(v)
+            document.documentElement.style.colorScheme = v
           }}
           style={{ fontWeight: variant === v ? 700 : 400, padding: '2px 6px' }}
         >
@@ -413,7 +434,7 @@ function Preview(): React.JSX.Element {
                     { title: '删掉旧的 session 视图', status: 'not-started' }
                   ]}
                 />
-                <div style={{ padding: 12, border: '1px dashed var(--vscode-chat-requestBorder)' }}>
+                <div className="rounded-lg border border-dashed border-token-border p-3 text-size-chat text-token-description-foreground">
                   输入区占位（应用里是 Composer）
                 </div>
               </>
@@ -422,32 +443,104 @@ function Preview(): React.JSX.Element {
             {empty ? (
               <div className="text-sm text-token-description-foreground">Loading…</div>
             ) : (
-              rows.map((row) =>
-                row.kind === 'request' ? (
-                  <ThreadTurn key={row.id} turnKey={row.id}>
-                    <ThreadUserMessage unitKey={row.id}>
-                      <MarkdownPart content={{ kind: 'markdownContent', content: row.text }} />
-                    </ThreadUserMessage>
-                  </ThreadTurn>
-                ) : (
-                  <ThreadTurn key={row.id} turnKey={row.id}>
-                    <ThreadAssistantMessage unitKey={row.id} targetId={row.id}>
-                      <div
-                        data-markdown-text-style="assistant-message"
-                        className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
-                      >
-                        {row.content.map((content, index) => (
-                          <ChatContentPart key={contentKey(content, index)} content={content} />
-                        ))}
-                      </div>
-                    </ThreadAssistantMessage>
-                  </ThreadTurn>
-                )
-              )
+              /*
+               * 把 request / response 两行合成一个 turn —— 与 ChatView 一致。
+               * 之前是各渲染一个 `<ThreadTurn key={row.id}>`,而 fixture 里
+               * 同一轮的两行 **id 相同**,于是控制台一直在报
+               * "Encountered two children with the same key: t1"。
+               * 更要紧的是结构也不对:Codex 的一个 turn 里必须同时有用户消息
+               * 与回复,分成两个 turn 就测不到段间隔与三段式。
+               */
+              TURN_GROUPS.map((g) => (
+                <ThreadTurn key={g.key} turnKey={g.key}>
+                  {g.request && (
+                    <>
+                      <ThreadUserMessage unitKey={g.key}>
+                        <MarkdownPart
+                          content={{ kind: 'markdownContent', content: g.request.text }}
+                        />
+                      </ThreadUserMessage>
+                      <ThreadTurnGap />
+                    </>
+                  )}
+                  {g.response && <PreviewTurnBody row={g.response} />}
+                </ThreadTurn>
+              ))
             )}
           </ThreadScrollContainer>
         </div>
       </main>
+    </>
+  )
+}
+
+/**
+ * 把 request / response 合成 turn —— 与 ChatView 的线性扫描同一套判据
+ * (同一轮两行 id 相同且相邻,request 在前)。
+ */
+const TURN_GROUPS: {
+  key: string
+  request?: Extract<ThreadRow, { kind: 'request' }>
+  response?: Extract<ThreadRow, { kind: 'response' }>
+}[] = (() => {
+  const groups: {
+    key: string
+    request?: Extract<ThreadRow, { kind: 'request' }>
+    response?: Extract<ThreadRow, { kind: 'response' }>
+  }[] = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (row.kind === 'request') groups.push({ key: row.id, request: row })
+    else if (last && last.key === row.id && !last.response) last.response = row
+    else groups.push({ key: row.id, response: row })
+  }
+  return groups
+})()
+
+/**
+ * 一条回复的三段式 —— 与 ChatView 里的逻辑对齐(过程 / 最终输出)。
+ *
+ * 分段判据刻意简化成"最后一条 markdown 是最终输出":预览页的数据是写死的
+ * fixture,不需要 ChatView 那套跳过尾部推理的逻辑;要测的是**结构**
+ * (折叠头 + 发丝线 + 段间隔 + 活动行),不是分段算法。
+ */
+function PreviewTurnBody({
+  row
+}: {
+  row: Extract<ThreadRow, { kind: 'response' }>
+}): React.JSX.Element {
+  let cut = row.content.length - 1
+  while (cut >= 0 && row.content[cut].kind !== 'markdownContent') cut -= 1
+  const process = cut < 0 ? row.content : row.content.filter((_, i) => i !== cut)
+  const final = cut < 0 ? [] : [row.content[cut]]
+
+  return (
+    <>
+      {process.length > 0 && (
+        <>
+          <ThreadProcessSection summary={`Worked for 1m 28s`}>
+            <ThreadItems>
+              {process.map((content, index) => (
+                <ThreadItem key={contentKey(content, index)}>
+                  <ChatContentPart content={content} />
+                </ThreadItem>
+              ))}
+            </ThreadItems>
+          </ThreadProcessSection>
+          <ThreadTurnGap />
+        </>
+      )}
+      <ThreadAssistantMessage unitKey={row.id} targetId={row.id}>
+        <div
+          data-markdown-text-style="assistant-message"
+          className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
+        >
+          {final.map((content, index) => (
+            <ChatContentPart key={contentKey(content, index)} content={content} />
+          ))}
+        </div>
+      </ThreadAssistantMessage>
+      <ThreadTurnGap />
     </>
   )
 }
