@@ -67,9 +67,7 @@ export function ThreadScrollContainer({
         <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col">
           <div className="min-h-0 flex-1">
             <div className="relative h-full flex-1 [content-visibility:auto]">
-              <div
-                className="thread-scroll-container relative h-full overflow-x-hidden overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--thread-scroll-padding-bottom,0px)] electron:[scrollbar-gutter:stable_both-edges] pt-(--thread-content-top-inset) [container-name:thread-content] [container-type:inline-size] focus:outline-none [&:has([data-thread-scroll-footer='true']:focus-within)]:[scroll-padding-bottom:0px] flex flex-col-reverse"
-              >
+              <div className="thread-scroll-container relative h-full overflow-x-hidden overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--thread-scroll-padding-bottom,0px)] electron:[scrollbar-gutter:stable_both-edges] pt-(--thread-content-top-inset) [container-name:thread-content] [container-type:inline-size] focus:outline-none [&:has([data-thread-scroll-footer='true']:focus-within)]:[scroll-padding-bottom:0px] flex flex-col-reverse">
                 <div className="flex min-h-full shrink-0 flex-col justify-start">
                   <div
                     data-mcp-app-portal-target="true"

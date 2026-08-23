@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { SubmenuChevronIcon } from '../components/icons'
 import { cx } from '../utils/cx'
 
@@ -52,9 +53,41 @@ export function ThreadTurn({
   )
 }
 
-/** turn 内部各段之间的分隔槽 —— Codex 用空的 div.w-full,靠外层 gap 生效 */
-export function ThreadTurnGap(): React.JSX.Element {
-  return <div className="w-full" />
+/**
+ * turn 内部各段之间的分隔槽 —— Codex 的 `ConversationItemGap`(源码 `XC`)。
+ *
+ * ```
+ * <div aria-hidden className="w-full"
+ *      style={{height: variant === 'grouped'
+ *        ? 'var(--conversation-grouped-item-gap, 4px)'
+ *        : 'var(--conversation-item-gap, 16px)'}} />
+ * ```
+ *
+ * **高度是内联给的,不是靠父级的 gap。** 上一轮我只写了 `<div className="w-full"/>`
+ * ——而 turn 的容器是 `flex flex-col gap-0`,于是这些分隔槽的实际高度是 **0**:
+ * 用户消息、过程段、最终回复三段全贴在一起。DOM 结构对了,间距全丢了,
+ * 而且因为节点确实存在,结构 diff 也看不出问题。
+ *
+ * 这也解释了 Codex 为什么把 `gap-0` 显式写在容器上:间距**只能**由这些槽提供,
+ * 容器不许有自己的 gap,否则两套间距会叠加。
+ */
+export function ThreadTurnGap({
+  variant = 'item'
+}: {
+  variant?: 'item' | 'grouped'
+} = {}): React.JSX.Element {
+  return (
+    <div
+      aria-hidden="true"
+      className="w-full"
+      style={{
+        height:
+          variant === 'grouped'
+            ? 'var(--conversation-grouped-item-gap, 4px)'
+            : 'var(--conversation-item-gap, 16px)'
+      }}
+    />
+  )
 }
 
 /**
@@ -239,12 +272,12 @@ export function ThreadItem({
  */
 export function ThreadProcessSection({
   children,
-  durationLabel,
+  summary,
   defaultExpanded = false
 }: {
   children: ReactNode
-  /** 折叠头文案,例如 `Worked for 1m 28s` */
-  durationLabel: string
+  /** 折叠头文案 —— `Worked for 1m 28s` 或 `3 previous messages`,见 workedForLabel */
+  summary: string
   defaultExpanded?: boolean
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -258,12 +291,13 @@ export function ThreadProcessSection({
           className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
         >
           <span>
-            <span className="text-token-conversation-body">{durationLabel}</span>
+            <span className="text-token-conversation-body">{summary}</span>
           </span>
           <SubmenuChevronIcon
             className={cx(
               'icon-2xs text-token-conversation-summary-trailing transition-transform duration-basic',
-              expanded && 'rotate-90'
+              // Codex 折叠时写的是显式的 `rotate-0`,不是"不加类" —— 照抄
+              expanded ? 'rotate-90' : 'rotate-0'
             )}
           />
         </button>
@@ -271,98 +305,24 @@ export function ThreadProcessSection({
       <div className="pt-1 text-size-chat text-token-text-secondary">
         <div className="w-full border-t border-token-border" />
       </div>
-      {expanded && (
-        <div>
-          <div className="w-full" aria-hidden="true" />
-          <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * 工具活动行的表头 —— Codex 的 `group/activity-header`。
- *
- * 实测**两种形态,标签不同**,取决于这条活动有没有可展开的细节:
- *
- * ```
- * // 有细节(如 "Searched the web for …",点开看结果)
- * button.group/activity-header.inline-flex.min-w-0.max-w-full.self-start.items-center.gap-1.p-0
- *       .text-start.cursor-interaction  [aria-expanded]
- * └ span.inline-flex.min-w-0.gap-1.5.items-center.shrink.truncate.text-size-chat
- *   └ span.text-token-conversation-body.flex.min-w-0.max-w-full.items-center.truncate.shrink
- *         .group-hover/activity-header:text-token-foreground
- *     └ span.flex.min-h-4.max-w-full.min-w-0.items-center.truncate
- *       └ span.inline-flex.min-w-0.gap-1.5.items-center.max-w-full.overflow-hidden
- *         └ span.contents.text-token-conversation-body  → svg.icon-xs.shrink-0 + 文字
- *
- * // 无细节(如只写 "Searched the web")
- * div.group/activity-header.inline-flex.min-w-0.max-w-full.self-start.items-center.gap-1.p-0
- *     .text-start.max-w-full            ← 注意 max-w-full 出现两次,且没有 cursor-interaction
- * └ span.inline-flex.min-w-0.gap-1.5.items-center.shrink.truncate.text-size-chat
- *   └ span.contents.text-token-conversation-body   ← **直接到 contents,少三层**
- * ```
- *
- * 差别不是可有可无的:可展开那版多出的三层里,`group-hover/activity-header:…`
- * 那层负责 hover 变色(不可点的那版不该有 hover 反馈),`min-h-4` 那层保证
- * 单行高度稳定。所以按 `onToggle` 有无分流,不要合成一个。
- *
- * 外面还有一层条目壳(实测 `div.min-w-0.text-size-chat.relative.overflow-visible.py-0`
- * → `div.flex.min-w-0.flex-col`),由 ThreadActivityItem 提供。
- */
-export function ThreadActivityHeader({
-  icon,
-  label,
-  expanded,
-  onToggle
-}: {
-  icon?: ReactNode
-  label: ReactNode
-  expanded?: boolean
-  /** 传了才是可展开的那一档(渲染成 button) */
-  onToggle?(): void
-}): React.JSX.Element {
-  const inner = (
-    <span className="contents text-token-conversation-body">
-      {icon}
-      {label}
-    </span>
-  )
-  if (onToggle == null) {
-    return (
-      <div className="group/activity-header inline-flex min-w-0 max-w-full self-start items-center gap-1 p-0 text-start max-w-full">
-        <span className="inline-flex min-w-0 gap-1.5 items-center shrink truncate text-size-chat">
-          {inner}
-        </span>
-      </div>
-    )
-  }
-  return (
-    <button
-      type="button"
-      aria-expanded={expanded ?? false}
-      onClick={onToggle}
-      className="group/activity-header inline-flex min-w-0 max-w-full self-start items-center gap-1 p-0 text-start cursor-interaction"
-    >
-      <span className="inline-flex min-w-0 gap-1.5 items-center shrink truncate text-size-chat">
-        <span className="text-token-conversation-body flex min-w-0 max-w-full items-center truncate shrink group-hover/activity-header:text-token-foreground">
-          <span className="flex min-h-4 max-w-full min-w-0 items-center truncate">
-            <span className="inline-flex min-w-0 gap-1.5 items-center max-w-full overflow-hidden">
-              {inner}
-            </span>
-          </span>
-        </span>
-      </span>
-    </button>
-  )
-}
-
-/** 活动条目的外壳 —— 实测 `div.min-w-0.text-size-chat.relative.overflow-visible.py-0 > div.flex.min-w-0.flex-col` */
-export function ThreadActivityItem({ children }: { children: ReactNode }): React.JSX.Element {
-  return (
-    <div className="min-w-0 text-size-chat relative overflow-visible py-0">
-      <div className="flex min-w-0 flex-col">{children}</div>
+      {/*
+       * 展开的内容是**第三个兄弟**,而且带入场动画 —— Codex 用 AnimatePresence
+       * 包一个 `motion.div`:透明度 0→1、`translateY(-8px)→0`,
+       * 220ms / `cubic-bezier(.33,1,.68,1)`(reduced-motion 时 120ms 且不位移)。
+       * 之前是硬切,展开会"跳"出来。
+       */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0, transform: 'translateY(-8px)' }}
+            animate={{ opacity: 1, transform: 'translateY(0)' }}
+            transition={{ duration: 0.22, ease: [0.33, 1, 0.68, 1] }}
+          >
+            <ThreadTurnGap />
+            <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
