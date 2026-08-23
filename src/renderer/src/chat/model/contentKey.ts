@@ -13,7 +13,6 @@ import type { ChatContent } from './content'
 export function contentKey(content: ChatContent, index: number): string {
   switch (content.kind) {
     case 'thinking':
-    case 'progressMessage':
     case 'hook':
     case 'contextCompaction':
     case 'reviewMode':

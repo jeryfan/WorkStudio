@@ -52,19 +52,6 @@ export interface ChatToolInvocationContent {
 }
 
 /**
- * 进度提示行。
- *
- * `id` 相同的后一条**替换**前一条而不是追加 —— 否则实时进度会一行行堆起来。
- */
-export interface ChatProgressMessageContent {
-  kind: 'progressMessage'
-  id: string
-  content: string
-  /** 是否走流光。静止的进度行不该闪 */
-  shimmer: boolean
-}
-
-/**
  * 钩子注入的上下文。
  *
  * 与上游的 `chatHookContentPart` 语义不完全相同：那边表达的是钩子**拦截**了
@@ -143,7 +130,6 @@ export type ChatContent =
   | ChatMarkdownContent
   | ChatThinkingContent
   | ChatToolInvocationContent
-  | ChatProgressMessageContent
   | ChatHookContent
   | ChatWorkingContent
   | ChatErrorContent

@@ -1,7 +1,6 @@
 import type { ChatContent } from '../model/content'
 import { MarkdownPart } from './MarkdownPart'
 import { ChatErrorPart } from './ChatErrorPart'
-import { ChatProgressMessagePart } from './ChatProgressMessagePart'
 import { ChatContextCompactionPart } from './ChatContextCompactionPart'
 import { ChatReconnectPart } from './ChatReconnectPart'
 import { ChatReviewModePart } from './ChatReviewModePart'
@@ -25,8 +24,6 @@ export function ChatContentPart({ content }: { content: ChatContent }): React.JS
     case 'markdownContent':
       // ChatView 已在助手回复外层套了 codex-MarkdownRoot,这里不能再套一层
       return <MarkdownPart content={content} withRoot={false} />
-    case 'progressMessage':
-      return <ChatProgressMessagePart content={content} />
     case 'working':
       return <ChatWorkingPart content={content} />
     case 'errorDetails':
