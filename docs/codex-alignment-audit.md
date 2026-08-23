@@ -757,6 +757,40 @@ aria-haspopup / aria-expanded",一直是个死按钮。顺带纠正一点:
 说明贡献来自别处(可能是那一行里还有别的行内盒或 vertical-align 差异)。
 下一轮从这几个已排除项之后接着查,不用从头再来。
 
+### 分析:「Worked for xx s + 过程折叠」在这份构建里查不到
+
+结论先说:**这份 Codex 构建里没有 "Worked for" 这个文案**。逐个搜过:
+
+| 搜索串 | 命中 |
+|---|---|
+| `Worked for` | 0 |
+| `Thought for` | 0 |
+| `Reasoned` / `Ran for` / `Completed in` | 0 |
+
+`Thinking` 有 13 处,但唯一那处当标签用的(369180)是
+**@ 提agent 的选择器**:`active → statusSummary ?? 'Thinking'`、
+`waiting → 'Waiting'`、`done → 'Done'`,给搜索打分用,不是会话里的工作指示。
+
+所以这条要么来自比 `app-initial-Biw83Aiz.js` **更新**的 Codex(这个 bundle
+与 8214 上跑的那份同名同源,已核对),要么是 Codex CLI / ChatGPT 的记忆串了。
+**在拿到实测之前不动**。
+
+**能确认的部分**:模型层确实区分"最终回复"与"过程" ——
+状态里有 `finalAssistantStartedAtMs`,运行时 DOM 上有
+`data-local-conversation-final-assistant` / `data-assistant-message-sent-time`,
+turn 层是 `data-turn-key` + `data-content-search-turn-key` / `-unit-key`。
+所以"过程与最终输出被分开对待"这个方向是对的,但**折叠机制本身没查到**。
+
+**"Codex 没有就删掉"这条不能直接套用**:bundle 里明确存在
+`localConversation.automaticApprovalReview.*`(审批控件,7 个 title + 5 个
+actionSummary)与 `localConversation.mcpToolActivity.*`(工具活动,按工具名分档),
+说明工具调用与审批 UI **Codex 是有的**,只是这台机器上的会话里没出现、
+抓不到 DOM。基于"我在一个本来就没有富内容会话的 bundle 里没搜到"就删掉
+20 个组件,风险远大于收益。
+
+**要往下走只有一条路**:在 Codex 里真跑一条会触发工具调用的消息,
+然后抓 DOM。这一步需要用户操作(会在他机器上真实执行命令)。
+
 ### 未完成(按原修复顺序)
 9. **模式菜单的键盘导航**:Codex 是 Radix menu(↑↓ 选择、Home/End、typeahead),
    目前只实现了 Escape 与点击外部关闭。
