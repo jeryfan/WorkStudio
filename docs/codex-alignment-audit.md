@@ -1287,3 +1287,110 @@ folding header 的 chevron 折叠态写的是显式 `rotate-0`(不是"不加类"
 - `eslint`:1 个 error 在 `state/AppShellContext.tsx:367`(effect 里同步 setState)
   + `ProjectRow.tsx` / `SortableProjects.tsx` 的 dnd-kit `react-hooks/refs` 警告
 - 本轮改动的文件全部 lint 干净
+
+
+---
+
+## 后续两轮:滚动弹走 + 代码块换引擎
+
+### 一、折叠/展开时滚动位置弹走
+
+**一条被我自己证伪的假设,记下来省下次的时间。**
+
+症状:点折叠头/活动行,被点的那一行自己往上跳。原因是滚动容器 `flex flex-col-reverse`
+(贴底跟随靠它)—— 反向 flex 的主轴起点在**底部**,内容在位置 P 长高 N 之后
+P **之前**的内容整体上移 N,而表头恰恰在自己展开内容的前面。
+
+同一脚本两侧实测(10 样本):
+
+    Codex   最大位移  3px    scrollTop 自动跟着变 ±48
+    WS      最大位移 183px   scrollTop 纹丝不动
+
+**先怀疑是 Chromium 版本**(Codex 跑 Chrome 151,WS 是 Electron 39 = Chrome 142)。
+写了最小复现(裸 `flex-col-reverse` + `overflow-anchor:none`,中间长高 200px)
+在两个内核上跑 —— **完全一样,都不补偿,都位移 -200**。不是浏览器差异。
+祖先链也逐层比过,两侧一致。**这条假设是错的。**
+
+**第二个坑:探针拦错了 API。** 拦 `scrollTop` 的 setter 抓到 **0 次写入**,
+一度以为是浏览器行为。补上 `scrollTo` / `scrollBy` / `scrollIntoView` 之后才看见:
+Codex 一次展开里调了 **28 次 `scrollTo({behavior:"instant", top})`**。
+以后追这类"谁动了滚动"的问题,四个 API 要一起拦。
+
+**真正的机制**在 `thread-scroll-layout-T6DCT1IT.js`:Codex 有一套滚动控制器,
+以**距底距离**为准(`{scrollHeightPx, distanceFromBottomPx, wheelDistanceFromBottomPx}`),
+`scrollHeight` 一变就重新施加。约 470 行,还管滚轮/触摸/指针的方向跟随与自动贴底。
+
+**这一轮没有整套搬那个控制器**,用的是 Codex 为这件事专门写的另一个函数
+`fWo`(app-initial 导出名 `QD`,`preserveElementViewportPosition`):
+
+```js
+function fWo(el, zoom = 1) {
+  const scroller = el.closest('[data-app-action-timeline-scroll]')
+  if (scroller == null) return
+  const baseline = el.getBoundingClientRect().top
+  // rAF + [data-turn-key] 的 ResizeObserver 双轨,每次用 delta 修 scrollTop
+  // 250ms 后收摊
+}
+```
+
+Codex 自己在**过程段折叠头**(`local-conversation-turn:1229`)与 **turn-diff**
+(`subagent-activity-chip-group:18837`)两处调它。WS 除这两处外,还接到了
+活动行的两种表头上 —— Codex 那边由滚动控制器兜底,这里由同一个函数兜底,
+可观察行为等价。
+
+四个不能省的细节(都写在 `preserveViewportPosition.ts` 的注释里):
+基准必须在**点击的同步阶段**取(等 effect 时布局已经变了);
+观察的是 `[data-turn-key]` **而不是**展开体;rAF 与 ResizeObserver **双轨**
+(RO 只在尺寸真变时触发,而 scrollTop 的写入要等下一帧);增量要**除以 zoom**。
+
+还顺带补上 `data-app-action-timeline-scroll`(Codex 的 `sm.timelineScroll` 选择器,
+实测挂在 `.thread-scroll-container` 上)—— 少了它 `closest()` 找不到滚动容器,
+补偿会**静默失效**,不报错。
+
+修复后:WS 最大位移 **0px**(10 样本);真鼠标复核活动行 0px、折叠头 0px
+(修复前同一脚本同一元素 -51px)。
+
+### 二、代码块:Monaco → highlight.js
+
+`assets/codex/highlight.css` 里那批 `.hljs-*` 规则从提取那天起就没有消费者。
+Codex 的引擎是 highlight.js(`highlight-code-bx-gqOKs.js` 注册 **45 个语言**),
+这一轮把它接上了。
+
+**流式的做法是这件事的关键**,不是"内容一变就整块重高亮":
+
+```js
+const cached = highlighted != null && content.startsWith(highlighted.code) ? highlighted : null
+const lines  = cached?.html.split('\n') ?? null
+const tail   = cached == null ? content : content.slice(cached.code.length)
+```
+
+缓存只在**当前内容以它为前缀**时才用;已高亮部分逐行 `dangerouslySetInnerHTML`
+(行间插真实的 `\n` 文本节点);**没轮到高亮的尾巴按纯文本渲染** —— 于是围栏
+没闭合时不会闪也不会空白。高亮本身 120ms 节流(`Paa`),逐行组件是 `memo` 的
+(`Faa`,少了它每帧要重设几百个 innerHTML)。
+
+**一处刻意差异**:围栏不写语言时 Codex 走 `highlightAuto`,那要求 45 个语言
+全部已注册,与按需加载互斥;这里退回纯文本。
+
+实测:语言表与 Codex 的 45 个键逐字相同(缺 0 / 多 0)、全部可加载;
+会话里 `.monaco-editor` 实例数 **0**;代码块产出 24 个 `.hljs-*` span 且由
+highlight.css 上色(keyword `rgb(166,38,164)`),深浅两套都对。
+
+容器类补齐成 Codex 的 `Iaa`:`text-size-chat overflow-auto p-2` + `dir="ltr"`
+—— `overflow-auto` 给长行横向滚(外层 `overflow-clip`,少了它长行直接被裁),
+`dir="ltr"` 让代码在 RTL 下也从左往右(外层用的 `pe-2/ps-2` 会跟着翻)。
+
+**DiffView 仍是 Monaco**,所以 `monaco-editor` 依赖还在。Codex 的 diff 是自研的
+turn-diff 行(`h-9 border-b border-token-border bg-token-dropdown-background`),
+是独立的一件事。
+
+### 三、底部渐隐一直是个空壳
+
+真应用里第一次打开长会话就撞上:推理文字直接压在 composer 上。
+`ThreadScrollContainer` 的底部渐隐只写了外层定位壳,**里面是空的**。
+Codex 的 `csc` 外层只负责定位,渐变在内层,而且:
+
+- 内层的宽度约束与消息流、输入区**共用同一串**(Codex 抽成了常量 `N3`)——
+  铺满整行会把左右两侧的背景也压出一道色差
+- 渐变是 `from-X via-X` 而**没有 `to-`**(Tailwind 默认 `to-transparent`),
+  下半截实心、上半截淡出;只写 `from-X` 的话中点就开始透明,遮不住紧贴输入区那几行
