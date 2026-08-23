@@ -15,6 +15,7 @@
  *   WaitingForAuthentication  MCP OAuth 流程未接
  *   IObservable               上游用可观察量做局部重渲染，React 里是 state
  */
+import type { McpContentBlock } from './mcpContent'
 
 /** 工具调用所处的阶段 */
 export type ToolState =
@@ -56,14 +57,34 @@ export interface TerminalToolData {
   exitCode: number | null
 }
 
-/** 通用工具的入参/出参（MCP、动态工具） */
+/**
+ * 通用工具的入参/出参（MCP、动态工具）。
+ *
+ * 形状照 Codex 的 `ew`（`subagent-activity-chip-group` 里的 MCP 活动行）：
+ * 展开体里**只有结果，没有入参**。入参走「原始输出」对话框——
+ * 折叠一行的目的是"这次调用干了什么"，请求体是排查时才要的东西，
+ * 常驻占掉半屏会把真正的结果挤下去。
+ *
+ * 结果分三条互斥的通道，判据是**结果长什么样**而不是工具声明了什么：
+ *
+ * | 字段 | 何时有值 | 排版 |
+ * |---|---|---|
+ * | `error` | 工具自己报错 | 危险色提示块 |
+ * | `structuredJson` | 结果是一整段 JSON（`extractStructuredJson`） | 代码块（等宽 + 高亮） |
+ * | `blocks` | 其余 | 逐块散文（`McpContentBlockPart`） |
+ *
+ * 三者都空 → "Tool returned no content"。
+ */
 export interface InputOutputToolData {
   kind: 'inputOutput'
-  /** 已格式化的入参 JSON */
-  input: string
-  output: string | null
-  /** 出参的语言 id，用于代码块着色；纯文本为 null */
-  outputLang: string | null
+  /** 解析后的 MCP 内容块。动态工具的文本被包成单个 text 块 */
+  blocks: McpContentBlock[]
+  /** 结果整体是一段 JSON 时的缩进串；否则 null */
+  structuredJson: string | null
+  /** 工具自己报的错误文案 */
+  error: string | null
+  /** 「原始输出」对话框里的完整 JSON —— 含入参，这是入参唯一的去处 */
+  rawJson: string
 }
 
 /**

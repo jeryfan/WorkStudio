@@ -35,6 +35,8 @@ import { DisclosureBody } from './DisclosureBody'
  */
 export function ToolActivityDisclosure({
   accessory,
+  bodyVariant = 'default',
+  className,
   defaultExpanded = false,
   icon,
   indentContent = true,
@@ -44,6 +46,14 @@ export function ToolActivityDisclosure({
   children
 }: {
   accessory?: ReactNode
+  /**
+   * 展开体的间距档。Codex 的调用方各传各的:命令/补丁走 `default`
+   * (`gap-2 pt-2 pb-1`),MCP 活动行走 `grouped`
+   * (`gap-[var(--conversation-grouped-item-gap,4px)] pt-1`)。
+   */
+  bodyVariant?: 'default' | 'grouped' | 'flush'
+  /** 挂到行的外层容器上。MCP 行用它开 `group` 作用域给 hover 才显的按钮 */
+  className?: string
   defaultExpanded?: boolean
   icon?: ReactNode
   /** 展开体是否缩进到与表头文字对齐(`ps-6`)。默认 true */
@@ -70,6 +80,7 @@ export function ToolActivityDisclosure({
 
   return (
     <ActivityHeaderRow
+      className={className}
       icon={icon}
       accessory={accessory}
       summary={
@@ -83,7 +94,7 @@ export function ToolActivityDisclosure({
       disclosure={hasBody ? { expanded, onToggle } : undefined}
       body={
         hasBody ? (
-          <DisclosureBody expanded={expanded} indent={indentContent}>
+          <DisclosureBody expanded={expanded} indent={indentContent} variant={bodyVariant}>
             {children}
           </DisclosureBody>
         ) : undefined

@@ -70,6 +70,11 @@ const ICONS = [
     name: 'CircleXIcon',
     exportName: 'AA',
     doc: '失败/取消 —— 圆圈里一个叉'
+  },
+  {
+    name: 'RawOutputIcon',
+    exportName: 'xG',
+    doc: 'MCP 活动行右下角「查看原始输出」的触发按钮 —— 尖括号包一条斜杠(`</>`)'
   }
 ]
 

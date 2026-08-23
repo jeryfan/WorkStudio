@@ -159,9 +159,79 @@ const rows: ThreadRow[] = [
           state: { type: 'executing', progress: null },
           data: {
             kind: 'inputOutput',
-            input: '{\n  "title": "迁移 Agent Window 对话 UI",\n  "labels": ["ui"]\n}',
-            output: null,
-            outputLang: null
+            blocks: [],
+            structuredJson: null,
+            error: null,
+            rawJson: '{\n  "invocation": { "tool": "create_issue" }\n}'
+          }
+        }
+      },
+      /*
+       * MCP 结果的三条通道各一条 —— ① 的四样验证要靠它们:
+       * 散文(长 URL 必须换行不能横向溢出)/ 整体 JSON(走代码块)/ 错误。
+       */
+      {
+        kind: 'toolInvocation',
+        invocation: {
+          id: 'tool-mcp-prose',
+          toolId: 'playwright/browser_navigate',
+          invocationMessage: 'Running browser_navigate',
+          pastTenseMessage: 'Ran browser_navigate',
+          state: { type: 'completed', success: true, durationMs: 1840 },
+          data: {
+            kind: 'inputOutput',
+            blocks: [
+              {
+                type: 'text',
+                text: [
+                  '### Ran Playwright code',
+                  '',
+                  '已导航到 https://www.gongkongcat.com/about?utm_source=codex&utm_medium=referral&utm_campaign=alignment-audit-2026&ref=very-long-query-string-that-must-wrap',
+                  '',
+                  '页面标题:工控猫 - 工业自动化产品一站式采购平台。',
+                  '"工控猫"是工控网(北京)电子商务股份有限公司旗下的工业品垂直电商平台,',
+                  '主营 PLC、变频器、伺服、传感器等自动化元器件。'
+                ].join('\n'),
+                annotations: null
+              }
+            ],
+            structuredJson: null,
+            error: null,
+            rawJson: '{\n  "invocation": { "tool": "browser_navigate" }\n}'
+          }
+        }
+      },
+      {
+        kind: 'toolInvocation',
+        invocation: {
+          id: 'tool-mcp-json',
+          toolId: 'linear/list_issues',
+          invocationMessage: 'Running list_issues',
+          pastTenseMessage: 'Ran list_issues',
+          state: { type: 'completed', success: true, durationMs: 420 },
+          data: {
+            kind: 'inputOutput',
+            blocks: [],
+            structuredJson: '{\n  "issues": [\n    { "id": "WS-12", "title": "对齐活动行" }\n  ]\n}',
+            error: null,
+            rawJson: '{\n  "invocation": { "tool": "list_issues" }\n}'
+          }
+        }
+      },
+      {
+        kind: 'toolInvocation',
+        invocation: {
+          id: 'tool-mcp-error',
+          toolId: 'fetch/fetch_url',
+          invocationMessage: 'Running fetch_url',
+          pastTenseMessage: 'Ran fetch_url',
+          state: { type: 'completed', success: false, durationMs: 12000 },
+          data: {
+            kind: 'inputOutput',
+            blocks: [],
+            structuredJson: null,
+            error: 'HTTP 403 Forbidden — 目标站点的 WAF 拦截了直接抓取',
+            rawJson: '{\n  "invocation": { "tool": "fetch_url" }\n}'
           }
         }
       },

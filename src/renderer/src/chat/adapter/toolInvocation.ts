@@ -13,6 +13,12 @@
  */
 import type { Entry } from '@shared/protocol/entities'
 import type { PendingApproval } from '../model/approval'
+import {
+  extractStructuredJson,
+  parseMcpContentBlocks,
+  stringifyJson,
+  type McpContentBlock
+} from '../model/mcpContent'
 import type {
   TerminalToolData,
   ToolInvocation,
@@ -125,20 +131,52 @@ function formatJson(value: unknown): string {
   }
 }
 
-/** MCP / dynamic 工具的出参 → 文本 */
-function mcpResultText(entry: Narrow<'mcpToolCall'>): string | null {
-  if (entry.error) return entry.error.message
-  if (!entry.result) return null
-  // content 是 MCP 的内容块数组，形状由各服务器自定，保持原样序列化
-  const content = entry.result.content
-  if (Array.isArray(content) && content.length > 0) return formatJson(content)
-  return entry.result.structuredContent != null ? formatJson(entry.result.structuredContent) : null
+/**
+ * MCP 结果 → 展开体的三条通道。
+ *
+ * 与 Codex 的 `ew` 里那段 `useMemo` 同构：先把内容块解析出来，再看它是不是
+ * "整体一段 JSON"（`extractStructuredJson`）——是的话内容块清空、走代码块；
+ * 不是的话内容块原样保留、走散文。
+ *
+ * `structuredContent` 是 MCP 规范里与 `content` 并列的另一个字段（服务器给的
+ * 机器可读版本），它天然是 JSON，无条件走代码块。
+ *
+ * 之前这里是 `formatJson(content)` —— 把整个内容块数组序列化成一坨 JSON。
+ * 那样一段普通的说明文字会被 `["{\"type\":\"text\",\"text\":\"…` 裹起来，
+ * 转义字符比正文还多。
+ */
+function mcpResult(entry: Narrow<'mcpToolCall'>): {
+  blocks: McpContentBlock[]
+  structuredJson: string | null
+} {
+  if (!entry.result) return { blocks: [], structuredJson: null }
+  const structured =
+    entry.result.structuredContent != null ? stringifyJson(entry.result.structuredContent) : null
+  const parsed = parseMcpContentBlocks(entry.result.content)
+  const asJson = extractStructuredJson(parsed)
+  if (asJson == null) return { blocks: parsed, structuredJson: structured }
+  // 内容块与 structuredContent 是同一份数据时只留一份，不要并排显示两个一样的代码块
+  if (structured == null || asJson === structured) {
+    return { blocks: [], structuredJson: structured ?? asJson }
+  }
+  return { blocks: parsed, structuredJson: structured }
 }
 
-function dynamicResultText(entry: Narrow<'dynamicToolCall'>): string | null {
+/**
+ * 动态工具的 `contentItems` → 内容块。
+ *
+ * 协议这边只有 `inputText` 一种带正文的项，其余类型没有可展示的载荷，
+ * 用 `[type]` 占位（丢掉它会让"工具明明返回了东西却什么都没有"）。
+ * 拼成**一个** text 块而不是每项一块：它们本来就是一段被切碎的文本，
+ * 分块会在中间插进边框和标题栏。
+ */
+function dynamicResultBlocks(entry: Narrow<'dynamicToolCall'>): McpContentBlock[] {
   const items = entry.contentItems
-  if (!items || items.length === 0) return null
-  return items.map((item) => (item.type === 'inputText' ? item.text : `[${item.type}]`)).join('\n')
+  if (!items || items.length === 0) return []
+  const text = items
+    .map((item) => (item.type === 'inputText' ? item.text : `[${item.type}]`))
+    .join('\n')
+  return text === '' ? [] : [{ type: 'text', text, annotations: null }]
 }
 
 /**
@@ -209,9 +247,14 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
         state: mapStatus(entry.status, entry.durationMs),
         data: {
           kind: 'inputOutput',
-          input: formatJson(entry.arguments),
-          output: mcpResultText(entry),
-          outputLang: null
+          ...mcpResult(entry),
+          error: entry.error ? entry.error.message : null,
+          rawJson: stringifyJson({
+            callId: entry.id,
+            invocation: { server: entry.server, tool: entry.tool, arguments: entry.arguments },
+            durationMs: entry.durationMs,
+            result: entry.error ?? entry.result ?? null
+          })
         }
       }
 
@@ -229,9 +272,15 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
             : state,
         data: {
           kind: 'inputOutput',
-          input: formatJson(entry.arguments),
-          output: dynamicResultText(entry),
-          outputLang: null
+          blocks: dynamicResultBlocks(entry),
+          structuredJson: null,
+          error: null,
+          rawJson: stringifyJson({
+            callId: entry.id,
+            invocation: { tool: name, arguments: entry.arguments },
+            durationMs: entry.durationMs,
+            result: entry.contentItems ?? null
+          })
         }
       }
     }
