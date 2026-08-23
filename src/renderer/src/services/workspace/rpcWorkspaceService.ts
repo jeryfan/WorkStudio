@@ -38,6 +38,18 @@ export class RpcWorkspaceService implements WorkspaceService {
     return rpc.request<WorkspaceSnapshot>(LOCAL.projectSelect, selection)
   }
 
+  setProjectPinned(projectId: string, pinned: boolean): Promise<WorkspaceSnapshot> {
+    return rpc.request<WorkspaceSnapshot>(LOCAL.projectSetPinned, { projectId, pinned })
+  }
+
+  reorderPinnedItems(itemKeys: string[]): Promise<WorkspaceSnapshot> {
+    return rpc.request<WorkspaceSnapshot>(LOCAL.pinnedReorder, { itemKeys })
+  }
+
+  reorderProjectThreads(projectId: string, chatIds: string[]): Promise<WorkspaceSnapshot> {
+    return rpc.request<WorkspaceSnapshot>(LOCAL.projectThreadsReorder, { projectId, chatIds })
+  }
+
   /** 打开系统目录选择框；用户取消时返回空数组 */
   async pickDirectories(): Promise<string[]> {
     const { paths } = await rpc.request<{ paths: string[] }>(LOCAL.projectPickDirectory)

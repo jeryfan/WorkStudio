@@ -51,6 +51,12 @@ export interface WorkspaceService {
   removeProject(projectId: string): Promise<WorkspaceSnapshot>
   reorderProjects(projectIds: string[]): Promise<WorkspaceSnapshot>
   selectProject(selection: ProjectSelection): Promise<WorkspaceSnapshot>
+  /** 项目置顶 —— 与会话置顶各自独立，都落到 Pinned 分节 */
+  setProjectPinned(projectId: string, pinned: boolean): Promise<WorkspaceSnapshot>
+  /** Pinned 分节的混合排序（项目与会话在同一个可排序列表里） */
+  reorderPinnedItems(itemKeys: string[]): Promise<WorkspaceSnapshot>
+  /** 项目内会话的手工顺序 */
+  reorderProjectThreads(projectId: string, chatIds: string[]): Promise<WorkspaceSnapshot>
   /** 打开系统目录选择框；用户取消时返回空数组 */
   pickDirectories(): Promise<string[]>
 }

@@ -2,14 +2,18 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './assets/main.css'
 import '@vscode/codicons/dist/codicon.css'
-import { ChatList } from './chat/ChatList'
+import { ThreadScrollContainer } from './chat/ThreadScrollContainer'
+import { ThreadTurn, ThreadUserMessage, ThreadAssistantMessage } from './chat/ThreadTurn'
+import { ChatContentPart } from './chat/parts/ChatContentPart'
+import { MarkdownPart } from './chat/parts/MarkdownPart'
+import { contentKey } from './chat/model/contentKey'
 import { TodoListPart } from './chat/parts/TodoListPart'
 import { ThemeProvider } from './chat/theme/ThemeProvider'
 import { useTheme } from './chat/theme/themeContext'
 import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
 import { WorkspaceProvider } from './state/WorkspaceContext'
 import { PanelProvider } from './state/PanelContext'
-import type { SidebarThreadRow } from './chat/model/rows'
+import type { ThreadRow } from './chat/model/rows'
 
 /** 临时预览页：在浏览器里核对对话区的视觉，不进产物 */
 
@@ -43,7 +47,7 @@ npm run tokens:gen && npm run tokens:verify
 \`\`\`
 `
 
-const rows: SidebarThreadRow[] = [
+const rows: ThreadRow[] = [
   {
     kind: 'request',
     id: 't1',
@@ -367,9 +371,10 @@ function ThemeSwitcher(): React.JSX.Element {
 /**
  * 预览页外壳。
  *
- * `empty` 开关不是为了好玩：应用里从首页发第一条消息时，ChatList 是**先以空
+ * `empty` 开关不是为了好玩：应用里从首页发第一条消息时，消息流是**先以空
  * 列表挂载、随后才拿到行**的（startChat 先 resetView 再 startTurn）。
- * 虚拟列表在"挂载时 0 项"这条路径上最容易出问题，所以harness 必须能走一遍。
+ * ThreadScrollContainer 的贴底跟随(ResizeObserver)在"挂载时 0 项"这条路径上
+ * 最容易出问题，所以 harness 必须能走一遍。
  */
 function Preview(): React.JSX.Element {
   const [empty, setEmpty] = useState(false)
@@ -390,16 +395,13 @@ function Preview(): React.JSX.Element {
         {empty ? '填充行' : '清空行'}
       </button>
       {/*
-       * 外层用与 MainContentLayout / ChatView 完全一致的类名。
-       * 这不是装饰：`.interactive-session` 带 `margin: auto`，父级是块级还是
-       * flex 容器会得到完全不同的宽度（flex 下 auto 外边距会关掉 stretch）。
-       * 预览页若用一个普通 div 撑高，就测不出应用里真实的布局。
+       * 外层用与 MainContentLayout / ChatView 一致的壳层类名 —— 宽度由
+       * --thread-content-max-width + px-toolbar 决定,用普通 div 撑高就测不出
+       * 应用里真实的布局。
        */}
-      <main className="relative flex h-full w-full min-w-0 flex-col bg-token-main-surface-primary">
-        <div className="flex h-full min-h-0 flex-col pt-11">
-          <ChatList
-            rows={empty ? [] : rows}
-            placeholder={empty ? 'Loading…' : null}
+      <main className="codex-MainContentSurface">
+        <div className="relative flex h-full flex-col min-h-0">
+          <ThreadScrollContainer
             footer={
               <>
                 {/* 计划挂在输入区上方，不进回复流 —— 与上游一致 */}
@@ -416,7 +418,34 @@ function Preview(): React.JSX.Element {
                 </div>
               </>
             }
-          />
+          >
+            {empty ? (
+              <div className="text-sm text-token-description-foreground">Loading…</div>
+            ) : (
+              rows.map((row) =>
+                row.kind === 'request' ? (
+                  <ThreadTurn key={row.id} turnKey={row.id}>
+                    <ThreadUserMessage unitKey={row.id}>
+                      <MarkdownPart content={{ kind: 'markdownContent', content: row.text }} />
+                    </ThreadUserMessage>
+                  </ThreadTurn>
+                ) : (
+                  <ThreadTurn key={row.id} turnKey={row.id}>
+                    <ThreadAssistantMessage unitKey={row.id} targetId={row.id}>
+                      <div
+                        data-markdown-text-style="assistant-message"
+                        className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
+                      >
+                        {row.content.map((content, index) => (
+                          <ChatContentPart key={contentKey(content, index)} content={content} />
+                        ))}
+                      </div>
+                    </ThreadAssistantMessage>
+                  </ThreadTurn>
+                )
+              )
+            )}
+          </ThreadScrollContainer>
         </div>
       </main>
     </>

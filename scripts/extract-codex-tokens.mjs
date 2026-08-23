@@ -227,7 +227,20 @@ const NAMED = [
   'cursor-interaction',
   'no-drag',
   'draggable',
-  'startup-loader'
+  'startup-loader',
+  // Codex 自定义的 shadow 标度 —— Tailwind 生成但不在 @theme 里(它写的是
+  // --tw-shadow 而不是 --shadow-*),所以只能按类名收。首页建议卡在用。
+  'shadow-md-strong',
+  'shadow-md-stronger',
+  'shadow-hairline',
+  // 悬浮卡片(Tooltip variant="rich")的阴影:0.5px 描边 + --shadow-xl 两层叠加
+  'shadow-xl-spread',
+  // ProseMirror 基础层 —— Codex 里是**裸 .ProseMirror** 选择器(不带模块哈希),
+  // 提供 white-space:break-spaces / word-wrap / font-variant-ligatures,
+  // 以及占位符 `.ProseMirror .placeholder:after { content: attr(data-placeholder) }`。
+  // 少了它 ProseMirror 会在控制台告警 "expects the CSS white-space property to be set",
+  // 而且占位符完全不显示。注意是 **:after** 不是 :before。
+  'ProseMirror'
 ]
 const namedRules = []
 for (const f of cssFiles) {

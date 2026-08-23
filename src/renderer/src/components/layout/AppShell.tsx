@@ -10,6 +10,8 @@ import { MainContentLayout } from './MainContentLayout'
 import { RightPanel } from './RightPanel'
 import { AppShellTabPanel } from '../panel/AppShellTabPanel'
 import { OverlayLayer } from '../overlay/OverlayLayer'
+import { TooltipProvider } from '../tooltip/Tooltip'
+import { AppPortals } from '../overlay/AppPortals'
 import { HomeView } from '../../views/HomeView'
 import { ChatView } from '../../chat/ChatView'
 
@@ -36,6 +38,9 @@ import { ChatView } from '../../chat/ChatView'
  */
 function Shell(): React.JSX.Element {
   const { toggleCommand, closeAll } = useOverlay()
+  // 进了会话就是 thread 态 —— 路由容器类名、顶部渐隐、thread 边缘分隔线三处都要跟着切
+  const { activeChatId } = useChatRuntime()
+  const isThread = activeChatId != null
   const {
     sidebarWidth,
     setSidebarWidth,
@@ -43,7 +48,7 @@ function Shell(): React.JSX.Element {
     setRightPanelWidth,
     rightPanelOpen,
     bottomPanelOpen,
-    panelMaximized
+    rightPanelWidthMode
   } = usePanels()
 
   // 全局快捷键：⌘K 命令面板 / Escape 关闭浮层
@@ -76,7 +81,10 @@ function Shell(): React.JSX.Element {
       <div className="relative isolate flex max-h-full min-h-0 w-full flex-1">
         <LeftPanel width={sidebarWidth} onResize={setSidebarWidth} />
         <MainContentLayout
-          rightPanelFullWidth={panelMaximized}
+          routeLayout={isThread ? 'thread' : 'home'}
+          topFade={isThread ? 'full-bleed' : 'visible'}
+          threadEdgeDivider={isThread}
+          rightPanelFullWidth={rightPanelWidthMode === 'full'}
           rightPanel={
             rightPanelOpen ? (
               <RightPanel width={rightPanelWidth} onResize={setRightPanelWidth}>
@@ -90,6 +98,8 @@ function Shell(): React.JSX.Element {
         </MainContentLayout>
       </div>
       <OverlayLayer />
+      {/* body 级 portal 层 —— 必须在 #root 外(这一层有 zoom,会给 fixed 建包含块) */}
+      <AppPortals />
     </div>
   )
 }
@@ -107,7 +117,15 @@ export function AppShell(): React.JSX.Element {
         <ChatRuntimeProvider>
           <OverlayProvider>
             <PanelProvider>
-              <Shell />
+              {/*
+               * tooltip / 悬浮卡片的全局管理器 —— Codex 把它挂在路由之上
+               * (bundle 里 `ltt` 无 props,取默认 700ms 延迟 / 300ms 免延迟窗口)。
+               * 必须在侧栏之上:互斥关闭与「免延迟窗口」是跨行共享的状态,
+               * 每行各自计时的话沿着列表往下扫会每行都等 700ms。
+               */}
+              <TooltipProvider>
+                <Shell />
+              </TooltipProvider>
             </PanelProvider>
           </OverlayProvider>
         </ChatRuntimeProvider>

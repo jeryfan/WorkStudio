@@ -3,7 +3,8 @@ import { usePanels } from '../../state/PanelContext'
 import { CommandPalette } from '../command/CommandPalette'
 import { CreateProjectDialog } from '../dialog/CreateProjectDialog'
 import { DropdownMenu } from '../menu/DropdownMenu'
-import { menuDefs } from '../menu/menuDefs'
+import { menuDefs, projectActionEntries } from '../menu/menuDefs'
+import { useWorkspace } from '../../state/WorkspaceContext'
 
 /**
  * 浮层统一出口：下拉菜单 / ⌘K 命令面板 / 新建项目对话框。
@@ -13,29 +14,36 @@ export function OverlayLayer(): React.JSX.Element {
   const { menu, commandOpen, createProjectOpen, closeMenu, setCommandOpen, setCreateProjectOpen } =
     useOverlay()
   const { openTab } = usePanels()
+  const { pinnedProjects, setProjectPinned } = useWorkspace()
 
   return (
     <>
       {menu && (
         <DropdownMenu
-          entries={menuDefs[menu.id].entries}
+          entries={
+            // Project actions 的首项随置顶状态切文案(Codex 实测 Pin ⇄ Unpin project)
+            menu.id === 'project-actions'
+              ? projectActionEntries(pinnedProjects.some((p) => p.id === menu.projectId))
+              : menuDefs[menu.id].entries
+          }
           anchor={menu.anchor}
           minWidth={menuDefs[menu.id].minWidth}
           width={menuDefs[menu.id].width}
           onClose={closeMenu}
-          onSelect={
-            menu.id === 'add-tab'
-              ? (id) => {
-                  if (id === 'browser') {
-                    openTab(menu.dock ?? 'right', {
-                      kind: 'browser',
-                      title: 'New tab',
-                      payload: { url: '' }
-                    })
-                  }
-                }
-              : undefined
-          }
+          onSelect={(id) => {
+            if (menu.id === 'add-tab' && id === 'browser') {
+              openTab(menu.dock ?? 'right', {
+                kind: 'browser',
+                title: 'New tab',
+                payload: { url: '' }
+              })
+              return
+            }
+            if (menu.id === 'project-actions' && id === 'pin-project' && menu.projectId) {
+              const isPinned = pinnedProjects.some((p) => p.id === menu.projectId)
+              void setProjectPinned(menu.projectId, !isPinned)
+            }
+          }}
         />
       )}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} />}

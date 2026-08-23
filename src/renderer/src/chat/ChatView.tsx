@@ -3,65 +3,140 @@ import { useChatRuntime } from '../state/ChatRuntimeContext'
 import { Composer } from '../components/composer/Composer'
 import { latestTodos, turnsToRows } from './adapter/entryToContent'
 import { ChatActionsProvider } from './ChatActionsContext'
-import { ChatList } from './ChatList'
+import { ThreadScrollContainer } from './ThreadScrollContainer'
+import { ThreadAssistantMessage, ThreadTurn, ThreadTurnGap, ThreadUserMessage } from './ThreadTurn'
+import { ChatContentPart } from './parts/ChatContentPart'
+import { MarkdownPart } from './parts/MarkdownPart'
+import { ChatResponseFooter } from './parts/ChatResponseFooter'
+import { contentKey } from './model/contentKey'
+import { responsePlainText } from './model/responseText'
 import { TodoListPart } from './parts/TodoListPart'
 
 /**
- * 对话视图 —— 新实现的入口，对应旧的 `components/session/SessionView`。
+ * 会话视图 —— 骨架逐层对齐 Codex(见 ThreadScrollContainer / ThreadTurn 里的层级注释)。
  *
- * 这一层很薄：拿轮次、投影成行、交给列表。所有协议知识在 adapter，所有渲染
- * 知识在 parts，这里两边都不碰。
+ * 与之前实现的三处根本差异:
  *
- * 但它是**整页**，不只是消息流：输入区、只读横幅、会话级错误都归它。上游的
- * `.interactive-session` 同样把输入区包在里面（`.interactive-input-part` 是
- * `.interactive-list` 的兄弟），所以 Composer 作为 footer 传给 ChatList，
- * 而不是套在外层——那样高度就得自己算，还会盖住最后一条消息。
+ * 1. **不再是"请求行 + 回复行"的扁平列表**。Codex 以 turn 为单位组织:
+ *    一个 `data-turn-key` 里依次是用户消息 → 中间条目 → 最终回复,
+ *    段间用空的 `div.w-full` 分隔。之前跟着 VS Code Chat 拆成两行是因为要
+ *    虚拟滚动按行测高,而 Codex 不做窗口化,这个约束不存在了。
+ * 2. **去掉 react-virtuoso**。Codex 靠 `[content-visibility:auto]` +
+ *    `[overflow-anchor:none]`,DOM 完整,搜索定位和滚动锚点才能工作。
+ * 3. **输入区在 sticky 底槽里**(`[data-thread-scroll-footer]`),是消息流的兄弟,
+ *    不再作为列表的 footer 传进去。
  *
- * 待决审批作为 `turnsToRows` 的第二个入参，而不是让审批按钮自己去 context 里
- * 取：这样"某条工具调用正等确认"是一个纯函数的输出，可以脱离 React 断言
- * （见 verify-chat-adapter.mjs）。回传决定才走 context——那是副作用，本来就
- * 不属于投影。
+ * adapter 仍然产出 request/response 两种行(那层是协议投影,与渲染无关),
+ * 这里按 id 把相邻的 request+response 合成一个 turn。
  */
 export function ChatView(): React.JSX.Element {
   const { turns, approvals, loading, readOnly, readOnlyReason, error, respondToApproval } =
     useChatRuntime()
   const rows = useMemo(() => turnsToRows(turns, approvals), [turns, approvals])
-  // 当前计划挂在输入框上方，不进回复流——与上游一致，理由见 TodoListPart
+  // 当前计划挂在输入框上方,不进回复流 —— 与上游一致,理由见 TodoListPart
   const todos = useMemo(() => latestTodos(turns), [turns])
+
+  /*
+   * 把扁平的 request/response 行合回 turn。
+   * adapter 保证同一轮的两行 id 相同且相邻(request 在前),所以一次线性扫描即可。
+   */
+  const turnGroups = useMemo(() => {
+    const groups: {
+      key: string
+      request?: (typeof rows)[number]
+      response?: (typeof rows)[number]
+    }[] = []
+    for (const row of rows) {
+      const last = groups[groups.length - 1]
+      if (row.kind === 'request') {
+        groups.push({ key: row.id, request: row })
+      } else if (last && last.key === row.id && !last.response) {
+        last.response = row
+      } else {
+        groups.push({ key: row.id, response: row })
+      }
+    }
+    return groups
+  }, [rows])
+
+  const lastResponseId = useMemo(() => {
+    for (let i = rows.length - 1; i >= 0; i--) if (rows[i].kind === 'response') return rows[i].id
+    return null
+  }, [rows])
 
   return (
     <ChatActionsProvider respondToApproval={respondToApproval}>
-      {/* pt-11：AppShellHeader 是 fixed 的悬浮层，不留出来第一条消息会被压在底下 */}
-      <div className="flex h-full min-h-0 flex-col pt-11">
+      <ThreadScrollContainer
+        footer={
+          <>
+            <TodoListPart todos={todos} />
+            {/*
+             * 会话级错误(resume 失败、连接断了)。轮次自身的失败已经作为
+             * errorDetails 块渲染在正文里,这里只放那些不属于任何一轮的。
+             * 放在输入框上方而不是消息流末尾:它描述的是"现在能不能发"。
+             */}
+            {error && (
+              <div className="mb-2 rounded-lg bg-token-editor-error-foreground/10 px-3 py-2 text-sm text-token-editor-error-foreground">
+                {error}
+              </div>
+            )}
+            <Composer placement="thread" />
+          </>
+        }
+      >
         {readOnly && readOnlyReason && (
-          <div className="mx-auto mt-2 w-full max-w-[950px] shrink-0 px-8">
-            <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700">
-              {readOnlyReason}
-            </div>
+          <div className="rounded-lg bg-token-editor-warning-foreground/10 px-3 py-2 text-sm text-token-editor-warning-foreground">
+            {readOnlyReason}
           </div>
         )}
-
-        <ChatList
-          rows={rows}
-          placeholder={loading ? 'Loading…' : null}
-          footer={
-            <>
-              <TodoListPart todos={todos} />
-              {/*
-               * 会话级错误（resume 失败、连接断了）。轮次自身的失败已经作为
-               * errorDetails 块渲染在正文里，这里只放那些不属于任何一轮的。
-               * 放在输入框上方而不是消息流末尾：它描述的是"现在能不能发"。
-               */}
-              {error && (
-                <div className="mb-2 rounded-lg bg-red-500/10 px-3 py-2 text-[13px] text-red-600">
-                  {error}
-                </div>
+        {turnGroups.length === 0 && loading && (
+          <div className="text-sm text-token-description-foreground">Loading…</div>
+        )}
+        {turnGroups.map((group) => {
+          const req = group.request?.kind === 'request' ? group.request : undefined
+          const res = group.response?.kind === 'response' ? group.response : undefined
+          const text = res ? responsePlainText(res) : ''
+          return (
+            <ThreadTurn key={group.key} turnKey={group.key}>
+              {req && (
+                <ThreadUserMessage unitKey={group.key}>
+                  <MarkdownPart
+                    content={{ kind: 'markdownContent', content: req.text }}
+                    textStyle="user-message"
+                  />
+                </ThreadUserMessage>
               )}
-              <Composer inline />
-            </>
-          }
-        />
-      </div>
+              {req && res && <ThreadTurnGap />}
+              {res && (
+                <ThreadAssistantMessage
+                  unitKey={group.key}
+                  targetId={res.id}
+                  actions={
+                    // 流式期间不给操作条:此时复制会拿到半截内容
+                    res.isComplete && text.length > 0 ? (
+                      <ChatResponseFooter
+                        text={text}
+                        startedAtMs={res.startedAtMs}
+                        completedAtMs={res.completedAtMs}
+                      />
+                    ) : undefined
+                  }
+                >
+                  <div
+                    data-markdown-text-style="assistant-message"
+                    className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
+                  >
+                    {res.content.map((content, index) => (
+                      <ChatContentPart key={contentKey(content, index)} content={content} />
+                    ))}
+                  </div>
+                </ThreadAssistantMessage>
+              )}
+              {res && res.id === lastResponseId && <ThreadTurnGap />}
+            </ThreadTurn>
+          )
+        })}
+      </ThreadScrollContainer>
     </ChatActionsProvider>
   )
 }

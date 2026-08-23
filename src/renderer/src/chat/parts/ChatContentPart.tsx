@@ -23,7 +23,8 @@ import { ToolInvocationPart } from './ToolInvocationPart'
 export function ChatContentPart({ content }: { content: ChatContent }): React.JSX.Element | null {
   switch (content.kind) {
     case 'markdownContent':
-      return <MarkdownPart content={content} />
+      // ChatView 已在助手回复外层套了 codex-MarkdownRoot,这里不能再套一层
+      return <MarkdownPart content={content} withRoot={false} />
     case 'progressMessage':
       return <ChatProgressMessagePart content={content} />
     case 'working':

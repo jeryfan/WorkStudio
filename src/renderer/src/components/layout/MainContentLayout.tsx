@@ -37,6 +37,8 @@ export function MainContentLayout({
   rightPanelFullWidth = false,
   layout = 'default',
   /** 右面板 —— 作为 MainContentViewport 的兄弟渲染 */
+  /** 'home' | 'thread' —— 决定两层路由容器的类名档位(Codex 两态不同) */
+  routeLayout = 'home',
   rightPanel,
   /**
    * 底部面板。**Codex 侧无法取证**:它的 "Toggle bottom panel" 点下去
@@ -51,6 +53,7 @@ export function MainContentLayout({
   threadEdgeDivider?: boolean
   rightPanelFullWidth?: boolean
   layout?: string
+  routeLayout?: 'home' | 'thread'
   rightPanel?: ReactNode
   bottomPanel?: ReactNode
 }): React.JSX.Element {
@@ -96,12 +99,38 @@ export function MainContentLayout({
               <div className="h-full min-h-0 min-w-0 flex-1">
                 {/* data-vscode-context 是 Codex 给内嵌 VS Code 组件传上下文用的,
                     tabindex=0 让主区可以整体接收键盘焦点 */}
+                {/*
+                 * Codex 在 data-vscode-context **之上**有两层路由容器,
+                 * 首页与 thread 的类名各自不同(实测):
+                 *
+                 *   首页   div.relative.min-h-0.flex-1   > div.h-full.min-h-0 > div.flex.h-full.flex-col
+                 *   thread div.relative.h-full.min-h-0  > div.h-full.min-h-0 > div.relative.flex.h-full.flex-col.min-h-0
+                 *
+                 * 注意顺序:**外两层是路由容器,data-vscode-context 在最里面**。
+                 * 我一开始写反了(把 data-vscode-context 放最外),结果 thread 态
+                 * 高度链断掉 —— 滚动容器量到 0 高。
+                 *
+                 * 这两层归 MainContentLayout 而非各视图:视图切换时它们不重建,
+                 * 滚动位置和动画上下文才保得住。
+                 */}
                 <div
-                  className="flex h-full flex-col"
-                  data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
-                  tabIndex={0}
+                  className={
+                    routeLayout === 'thread' ? 'relative h-full min-h-0' : 'relative min-h-0 flex-1'
+                  }
                 >
-                  {children}
+                  <div className="h-full min-h-0">
+                    <div
+                      className={
+                        routeLayout === 'thread'
+                          ? 'relative flex h-full flex-col min-h-0'
+                          : 'flex h-full flex-col'
+                      }
+                      data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
+                      tabIndex={0}
+                    >
+                      {children}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

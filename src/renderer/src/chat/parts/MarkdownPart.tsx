@@ -51,7 +51,11 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
       continue
     }
     if (chunk.startsWith('**') && chunk.endsWith('**') && chunk.length > 3) {
-      out.push(<strong key={key}>{chunk.slice(2, -2)}</strong>)
+      out.push(
+        <strong key={key} className="font-semibold">
+          {chunk.slice(2, -2)}
+        </strong>
+      )
       continue
     }
     const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(chunk)
@@ -113,40 +117,48 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }): React.JSX.
   const [copied, setCopied] = useState(false)
   const plain = [head, ...rows].map((r) => r.join('\t')).join('\n')
   return (
-    <div className="rendered-markdown-table-scroll-wrapper">
-      <table>
-        <thead>
-          <tr>
-            {head.map((cell, i) => (
-              <th key={i}>{renderInline(cell, `th${i}`)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, r) => (
-            <tr key={r}>
-              {row.map((cell, c) => (
-                <td key={c}>{renderInline(cell, `td${r}-${c}`)}</td>
+    <div className="codex-TableContainer" data-markdown-table="true" data-wide-block>
+      <div className="codex-TableScroller horizontal-scroll-fade-mask">
+        <div className="codex-TableWrapper">
+          <table>
+            <thead>
+              <tr>
+                {head.map((cell, i) => (
+                  <th key={i}>{renderInline(cell, `th${i}`)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c}>{renderInline(cell, `td${r}-${c}`)}</td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button
-        type="button"
-        className="rendered-markdown-table-copy"
-        aria-label={copied ? 'Copied' : 'Copy table'}
-        title={copied ? 'Copied' : 'Copy table'}
-        onClick={() => {
-          void copyText(plain).then((ok) => {
-            if (!ok) return
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1200)
-          })
-        }}
-      >
-        <Codicon name={copied ? 'check' : 'copy'} />
-      </button>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {/* Codex 把复制按钮放在 TableActions 里,并用 data-markdown-copy="exclude"
+          把它自己从"复制表格"的文本里排除掉 */}
+      <div className="codex-TableActions" data-markdown-copy="exclude">
+        <div className="sticky top-0 flex flex-col items-start">
+          <button
+            type="button"
+            aria-label={copied ? 'Copied' : 'Copy table'}
+            onClick={() => {
+              void copyText(plain).then((ok) => {
+                if (!ok) return
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1200)
+              })
+            }}
+          >
+            <Codicon name={copied ? 'check' : 'copy'} />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -190,7 +202,9 @@ function renderBlocks(text: string): ReactNode[] {
         i++
       }
       blocks.push(
-        <blockquote key={`q${blocks.length}`}>{renderBlocks(quoted.join('\n'))}</blockquote>
+        <blockquote key={`q${blocks.length}`} className="codex-Blockquote">
+          {renderBlocks(quoted.join('\n'))}
+        </blockquote>
       )
       continue
     }
@@ -210,9 +224,14 @@ function renderBlocks(text: string): ReactNode[] {
       }
       const Tag = ordered ? 'ol' : 'ul'
       blocks.push(
-        <Tag key={`l${blocks.length}`}>
+        <Tag
+          key={`l${blocks.length}`}
+          className={`codex-List ${ordered ? 'codex-OrderedList' : 'codex-UnorderedList'}`}
+        >
           {items.map((item, n) => (
-            <li key={n}>{renderInline(item, `l${blocks.length}-${n}`)}</li>
+            <li key={n} className="codex-ListItem">
+              {renderInline(item, `l${blocks.length}-${n}`)}
+            </li>
           ))}
         </Tag>
       )
@@ -220,7 +239,7 @@ function renderBlocks(text: string): ReactNode[] {
     }
 
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-      blocks.push(<hr key={`hr${blocks.length}`} />)
+      blocks.push(<hr key={`hr${blocks.length}`} className="codex-HorizontalRule" />)
       i++
       continue
     }
@@ -231,14 +250,20 @@ function renderBlocks(text: string): ReactNode[] {
       const level = Math.min(heading[1].length, 3)
       const Tag = `h${level}` as 'h1' | 'h2' | 'h3'
       blocks.push(
-        <Tag key={`h${blocks.length}`}>{renderInline(heading[2], `h${blocks.length}`)}</Tag>
+        <Tag key={`h${blocks.length}`} className="codex-Heading">
+          {renderInline(heading[2], `h${blocks.length}`)}
+        </Tag>
       )
       i++
       continue
     }
 
     if (line.trim()) {
-      blocks.push(<p key={`p${blocks.length}`}>{renderInline(line, `p${blocks.length}`)}</p>)
+      blocks.push(
+        <p key={`p${blocks.length}`} className="codex-Paragraph">
+          {renderInline(line, `p${blocks.length}`)}
+        </p>
+      )
     }
     i++
   }
@@ -250,6 +275,31 @@ function renderBlocks(text: string): ReactNode[] {
  * `.rendered-markdown` 这个类名是硬要求：用户消息气泡的底色与圆角、链接色、
  * 引用块、表格样式全都挂在它上面。
  */
-export function MarkdownPart({ content }: { content: ChatMarkdownContent }): React.JSX.Element {
-  return <div className="rendered-markdown chat-markdown-part">{renderBlocks(content.content)}</div>
+export function MarkdownPart({
+  content,
+  /** 是否自带 codex-MarkdownRoot 外壳(助手回复由 ChatView 自己套,传 false) */
+  withRoot = true,
+  textStyle = 'user-message'
+}: {
+  content: ChatMarkdownContent
+  withRoot?: boolean
+  textStyle?: 'assistant-message' | 'user-message'
+}): React.JSX.Element {
+  /*
+   * Codex 的 markdown 根是 `codex-MarkdownRoot` + 三个边距修正类
+   * + `data-markdown-text-style` 选档(assistant-message / user-message)。
+   *
+   * 助手回复那侧由 ChatView 自己套(它要挂 data-selected-text-overlay-target
+   * 之类的标注属性),所以这里 root 可关 —— 避免嵌两层 MarkdownRoot
+   * 让 [&>*:last-child]:mb-0 之类的选择器打在错误的层上。
+   */
+  if (!withRoot) return <>{renderBlocks(content.content)}</>
+  return (
+    <div
+      data-markdown-text-style={textStyle}
+      className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
+    >
+      {renderBlocks(content.content)}
+    </div>
+  )
 }

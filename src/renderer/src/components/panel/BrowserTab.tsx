@@ -51,7 +51,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
     }
     const onNavigate = (): void => syncNav()
     const onTitle = (e: { title?: string }): void => {
-      if (e.title) updateTab(dock, tab.id, { title: e.title })
+      if (e.title) updateTab(dock, tab.tabId, { title: e.title })
     }
     const onNewWindow = (e: { url?: string }): void => {
       // 弹出窗口一律交给系统浏览器
@@ -78,7 +78,7 @@ export function BrowserTab({ tab, dock }: BrowserTabProps): React.JSX.Element {
       view.removeEventListener('did-stop-loading', onStop)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dock, tab.id])
+  }, [dock, tab.tabId])
 
   const go = (input: string): void => {
     const url = normalizeUrl(input)

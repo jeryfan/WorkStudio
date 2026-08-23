@@ -1,118 +1,106 @@
-import type { ComponentType } from 'react'
-import {
-  usePanels,
-  type PanelDock,
-  type PanelTab,
-  type PanelTabKind
-} from '../../state/PanelContext'
-import { CloseIcon, ChromeIcon, PlusIcon } from '../icons'
-import { FileTab } from './file/FileTab'
-import { BrowserTab } from './BrowserTab'
-import { FileGlyph } from './file/FileGlyph'
-import { useOverlay } from '../../state/OverlayContext'
-
-/* ================= Tab 渲染注册表 =================
- * 新增 tab 类型 = 在此注册一行，AppShellTabPanel 无需改动。
- * FileTab（panel/1.html）与 BrowserTab（webview）均为完整实现。 */
-interface TabRendererProps {
-  tab: PanelTab
-  dock: PanelDock
-}
-
-const TAB_RENDERERS: Record<PanelTabKind, ComponentType<TabRendererProps>> = {
-  file: FileTab,
-  browser: BrowserTab
-}
-
-interface PanelShellProps {
-  docked: PanelDock
-}
+import { Component, type ReactNode } from 'react'
+import type {
+  AppShellTabDescriptor,
+  AppShellTabPanelController
+} from '../../state/AppShellContext'
 
 /**
- * 右侧 / 底部共用面板 —— docked 只是展示属性，tab 数据与停靠无关。
- * 结构 = PanelTabStrip（标签条）+ PanelContent（registry 渲染）。
+ * AppShellTabPanel —— Codex 里这个名字属于 **tab 内容区的 error boundary**
+ * (app-initial:208423 QCr:fallback 文案 "Tab content couldn't render / Try again")。
+ * 之前 WorkStudio 把整条 strip+面板组件叫这个名字,是误用,已由 AppShellTabs 取代。
+ *
+ * tabpanel 层逐层对齐 QCr 实测:
+ *
+ *   div[role=tabpanel][aria-label=标题][data-app-shell-tab-panel-controller][data-tab-id]
+ *     [tabindex=-1].relative.min-h-0.flex-1.outline-none
+ *     onPointerDownCapture / onKeyDownCapture:目标是 [data-tab-preview-pin-exempt]
+ *     子树则豁免,否则 preview tab 立即 pin(Codex 的 JCr 判定)
+ *   └ <ErrorBoundary name="AppShellTabPanel" resetKey={tabId}>  ← tab 崩溃不拖垮整个面板
+ *     └ tab.renderPanel({tabId, isActive, onClose, tabState, setTabState})
  */
-export function AppShellTabPanel({ docked }: PanelShellProps): React.JSX.Element {
-  const { docks, activateTab, closeTab } = usePanels()
-  const { openMenu } = useOverlay()
-  const { tabs, activeTabId } = docks[docked]
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
-  const ActiveRenderer = activeTab ? TAB_RENDERERS[activeTab.kind] : null
+
+/** Codex `ZCr` = "data-tab-preview-pin-exempt"(app-initial:208422) */
+export const TAB_PREVIEW_PIN_EXEMPT = 'data-tab-preview-pin-exempt'
+
+function isPinExempt(e: Event): boolean {
+  return e.target instanceof Element && e.target.closest(`[${TAB_PREVIEW_PIN_EXEMPT}]`) != null
+}
+
+class TabPanelErrorBoundary extends Component<
+  { resetKey: string; children: ReactNode },
+  { error: Error | null }
+> {
+  override state = { error: null as Error | null }
+
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error }
+  }
+
+  override componentDidCatch(error: Error): void {
+    console.error('[AppShellTabPanel] tab content crashed:', error)
+  }
+
+  override componentDidUpdate(prevProps: { resetKey: string }): void {
+    // Codex:resetKey(tabId)变化时重置错误态
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error != null) {
+      this.setState({ error: null })
+    }
+  }
+
+  override render(): ReactNode {
+    if (this.state.error != null) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+          <div className="text-sm text-token-text-primary">Tab content couldn&apos;t render</div>
+          <button
+            type="button"
+            onClick={() => this.setState({ error: null })}
+            className="cursor-interaction rounded-lg px-2 py-1 text-sm text-token-text-secondary hover:bg-token-list-hover-background"
+          >
+            Try again
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export function AppShellTabPanel({
+  controller,
+  tab
+}: {
+  controller: AppShellTabPanelController
+  tab: AppShellTabDescriptor
+}): React.JSX.Element {
+  const pinOnInteract = (e: React.SyntheticEvent): void => {
+    if (isPinExempt(e.nativeEvent)) return
+    if (tab.isPreview) controller.pinTab(tab.tabId)
+  }
+
+  const entry = controller.tabStateById[tab.tabId]
+  const tabState = entry == null ? tab.defaultState?.() : entry.value
 
   return (
-    // 面板边界的 1px 线由 Separator 统一绘制，AppShellTabPanel 不再自带边框。
-    // 右侧面板顶部 44px 与 AppShellHeader 的窗口拖拽区（app-region: drag）重叠，
-    // 需要像侧栏一样 pt-11 让位，否则标签条按钮会被拖拽区吃掉点击；
-    // 底部面板在窗口中部、不接触 AppShellHeader，无需让位。
     <div
-      className={`flex h-full w-full flex-col bg-token-main-surface-primary ${docked === 'right' ? 'pt-11' : ''}`}
+      role="tabpanel"
+      aria-label={tab.title}
+      data-app-shell-tab-panel-controller={controller.panelId}
+      data-tab-id={tab.tabId}
+      tabIndex={-1}
+      onPointerDownCapture={pinOnInteract}
+      onKeyDownCapture={pinOnInteract}
+      className="relative min-h-0 flex-1 outline-none"
     >
-      {/* tab strip */}
-      <div className="flex h-11 shrink-0 items-center gap-[3px] px-2">
-        {tabs.map((tab) => {
-          const active = tab.id === activeTabId
-          return (
-            <div
-              key={tab.id}
-              role="tab"
-              aria-selected={active}
-              tabIndex={0}
-              onClick={() => activateTab(docked, tab.id)}
-              onKeyDown={(e) => e.key === 'Enter' && activateTab(docked, tab.id)}
-              className={`group relative flex h-7 min-w-[90px] max-w-40 flex-1 cursor-default items-center gap-2 overflow-hidden rounded-lg px-2 text-[13px] ${
-                active ? 'bg-[#f2f3f4] text-token-foreground' : 'text-[#54585f] hover:bg-[#f2f3f4]'
-              }`}
-            >
-              {/* t-icon（panel/1.html）：文件 glyph，激活时颜色加深 */}
-              <span
-                className={`flex shrink-0 items-center justify-center [&_svg]:size-4 ${
-                  active ? 'text-token-foreground' : 'text-[#71767d]'
-                }`}
-              >
-                {tab.kind === 'browser' ? <ChromeIcon /> : <FileGlyph name={tab.title} />}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-left">{tab.title}</span>
-              <button
-                type="button"
-                aria-label={`Close ${tab.title} tab`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeTab(docked, tab.id)
-                }}
-                className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-token-description-foreground opacity-0 hover:bg-[#f2f3f5] group-hover:opacity-100 [&_svg]:size-3.5"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          )
+      <TabPanelErrorBoundary resetKey={tab.tabId}>
+        {tab.renderPanel({
+          tabId: tab.tabId,
+          isActive: true,
+          onClose: () => controller.closeTab(tab.tabId),
+          tabState,
+          setTabState: (next) => controller.setTabState(tab.tabId, next)
         })}
-        <button
-          type="button"
-          title="Open side panel tab"
-          aria-haspopup="menu"
-          onClick={(e) =>
-            openMenu({
-              id: 'add-tab',
-              anchor: e.currentTarget.getBoundingClientRect(),
-              dock: docked
-            })
-          }
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-token-description-foreground hover:bg-token-list-hover-background"
-        >
-          <PlusIcon />
-        </button>
-      </div>
-
-      {/* content */}
-      <div className="min-h-0 flex-1">
-        {activeTab && ActiveRenderer ? (
-          <ActiveRenderer tab={activeTab} dock={docked} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-token-description-foreground">
-            No tabs
-          </div>
-        )}
-      </div>
+      </TabPanelErrorBoundary>
     </div>
   )
 }

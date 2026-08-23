@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { useOverlay, type MenuId } from '../../state/OverlayContext'
 import { ChevronIcon } from '../icons'
+import { SidebarCollapseRegion } from './SidebarSortableRow'
 
 /**
  * 分节标题右侧的控制按钮 —— Codex 实测 24×24。
@@ -36,6 +37,13 @@ interface SectionHeaderProps {
    * 该菜单打开期间保持控制按钮组可见（鼠标已在菜单上，:hover 会丢失）。
    */
   menuId?: MenuId
+  /**
+   * 这一节自身可否被拖动重排。
+   *
+   * 实测:Projects 与 Recents 的 toggle 带 `aria-roledescription="sortable"`,
+   * **Pinned 的没有** —— Pinned 固定在最上,不参与分节排序。
+   */
+  sortable?: boolean
 }
 
 /**
@@ -56,7 +64,8 @@ export function SectionHeader({
   collapsed,
   onToggle,
   controls,
-  menuId
+  menuId,
+  sortable = false
 }: SectionHeaderProps): React.JSX.Element {
   const { menu } = useOverlay()
   const controlsOpen = menuId !== undefined && menu?.id === menuId
@@ -71,6 +80,16 @@ export function SectionHeader({
             type="button"
             aria-expanded={!collapsed}
             data-app-action-sidebar-section-toggle=""
+            /*
+             * 分节标题本身是可排序项(实测 Projects / Recents 的 toggle 带
+             * role="button" + aria-roledescription="sortable" + tabindex="0")。
+             * 这里只补 aria 契约;真正接进 DnD 上下文时把 sortable 的
+             * listeners 透传到这个按钮上即可,DOM 形态不需要再动。
+             */
+            role={sortable ? 'button' : undefined}
+            aria-roledescription={sortable ? 'sortable' : undefined}
+            aria-disabled={sortable ? 'false' : undefined}
+            tabIndex={sortable ? 0 : undefined}
             onClick={onToggle}
             className="group/section-toggle flex min-w-0 flex-1 items-center gap-1 rounded-md py-0.5 pe-1 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 cursor-default"
           >
@@ -135,7 +154,8 @@ export function SidebarSection({
     >
       <div className="flex flex-col">
         {header}
-        {!collapsed && <div className="overflow-hidden">{children}</div>}
+        {/* D8:折叠是**带动画**的(高度 + 透明度),稳态内联样式与 Codex 一致 */}
+        <SidebarCollapseRegion open={!collapsed}>{children}</SidebarCollapseRegion>
       </div>
     </section>
   )

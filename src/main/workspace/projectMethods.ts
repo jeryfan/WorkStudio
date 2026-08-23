@@ -53,6 +53,26 @@ export function registerProjectMethods(router: RpcRouter, registry: ProjectRegis
     return registry.snapshot()
   })
 
+  router.registerLocal(LOCAL.projectSetPinned, (params) => {
+    const { projectId, pinned } = params as { projectId: string; pinned: boolean }
+    if (typeof projectId !== 'string') throw new Error('projectId is required')
+    registry.setProjectPinned(projectId, pinned === true)
+    return registry.snapshot()
+  })
+
+  router.registerLocal(LOCAL.pinnedReorder, (params) => {
+    const { itemKeys } = params as { itemKeys: string[] }
+    registry.reorderPinnedItems(itemKeys ?? [])
+    return registry.snapshot()
+  })
+
+  router.registerLocal(LOCAL.projectThreadsReorder, (params) => {
+    const { projectId, chatIds } = params as { projectId: string; chatIds: string[] }
+    if (typeof projectId !== 'string') throw new Error('projectId is required')
+    registry.reorderProjectThreads(projectId, chatIds ?? [])
+    return registry.snapshot()
+  })
+
   router.registerLocal(LOCAL.projectPickDirectory, async () => {
     // 挂到当前窗口上，macOS 才会以 sheet 形式呈现而不是独立窗口
     const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

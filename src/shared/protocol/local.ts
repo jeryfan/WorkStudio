@@ -17,6 +17,12 @@ export const LOCAL = {
   projectRename: 'app/project/rename',
   projectReorder: 'app/project/reorder',
   projectSelect: 'app/project/select',
+  /** 项目置顶。与会话置顶各自独立，都落到 Pinned 分节 */
+  projectSetPinned: 'app/project/setPinned',
+  /** Pinned 分节的混合排序（项目与会话同级），入参是完整的 itemKey 顺序 */
+  pinnedReorder: 'app/pinned/reorder',
+  /** 项目内会话的手工顺序 */
+  projectThreadsReorder: 'app/project/threads/reorder',
   /** 打开系统目录选择框，返回选中的绝对路径 */
   projectPickDirectory: 'app/project/pickDirectory',
 

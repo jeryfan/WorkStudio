@@ -466,14 +466,278 @@ toggle 折叠 → 展开恢复到折叠前那一档。控制台无 error/warning
 > ref 存 cleanup,连续拖拽时旧监听摘不掉、多个 move 处理器各持 `startSize` 互相覆写,
 > 宽度卡住不动。改成**一次拖拽 = 一个 AbortController**,不跨拖拽存任何状态。
 
+### 已完成:A5 首页流式布局 + A4 Composer
+
+**验收:首页 60 个节点、Composer 98 个节点,标签/缩进/类名集合逐一全等(diff 0 处)。**
+(比对脚本 `/tmp/cmp/cmpnode.py`:归一化 CSS Module 哈希 `_Name_xxxxx_NN` → `codex-Name`
+后逐节点比标签、缩进深度、类名集合。)
+
+**A5 首页** —— 从像素绝对定位改成 Codex 的流式骨架:
+
+```
+div.@container/left-panel.relative.flex.h-full.min-h-0.flex-col
+└ div.[container-type:size].[container-name:home-main-content]…overflow-y-auto
+  ├ div.mx-auto…px-toolbar > div.home-banners…empty:hidden.pt-2        ← 横幅槽(常空)
+  └ div.min-h-0.w-full.flex-1.pt-6.flex.flex-col
+    ├ div.flex.grow.basis-0.items-end.justify-center.pb-24.min-h-fit   ← 上半区
+    │ └ div.relative.mx-auto…px-panel
+    │   ├ div.flex.min-h-28.w-full.items-end.justify-center → HomeHero
+    │   └ div.absolute.inset-x-[…].top-full.mt-8 → HomeSuggestions     ← hero 的 absolute 兄弟
+    └ div.flex…shrink-0.grow.basis-0.flex-col.min-h-fit.justify-end    ← 下半区
+      ├ div.mx-auto…gap-2.-mt-16 > [data-home-ambient-suggestions]
+      └ div.relative.z-20.pt-1.5.pb-4 > div.mx-auto…gap-2 > Composer
+```
+
+机制上的三点(绝对定位做不到):
+1. **两个 `grow basis-0` 半区**对半分可用高度,上半 `items-end` / 下半 `justify-end`,
+   窗口变高时 hero 与 composer 一起往中间靠。
+2. 建议卡是 hero 的 `absolute` 兄弟(`top-full mt-8`),位置永远跟着 hero,不需要知道 hero 多高。
+3. 宽度全走 token(`--thread-content-max-width` + `px-toolbar` / `px-panel`),
+   删掉了 `top-[289px]` / `top-[433px]` / `w-[714px]` / `bottom-[15px]` 这些原型稿遗留。
+
+顺带修掉的:
+- **两层路由容器**(`div.relative.min-h-0.flex-1 > div.h-full.min-h-0`)原先整个缺失,
+  导致首页与 Codex 整体错位 2 层。它们归 `MainContentLayout`(视图切换时不重建,
+  滚动位置与动画上下文才保得住),按 `routeLayout` 选 home/thread 两档类名。
+- `HomeLogoIcon` 用错了图标 —— 换成 Codex 运行时的真实 svg(`viewBox="149 149 418 418"`,
+  `<mask>` + 巨型 path 描边 + 两条 `stroke-width="24"` 的 `>_` 提示符)。
+- 建议卡数据是空数组 → 补上 Codex 的 4 条固定文案与 `token-charts-*` 配色。
+- 卡片网格从 `grid-cols-4` + `w-[714px]` 换成
+  `grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]` + 三条 `@container` 断点;
+  Electron 下无 border,靠 `ring-[0.5px]`。
+- `Hero`/`SuggestionCards` → `HomeHero`/`HomeSuggestions`(与 Codex 的 `Home*` 前缀一致)。
+
+**A4 Composer** —— 重写为 Codex 的 `ComposerLayout*` 结构:
+
+- `ComposerLayoutFooter` 是 **grid**,三槽用 `col-start`/`row-start` 显式定位:
+  输入区第 1 行 `col-span-full`,控件第 2 行左右分列。原先 flex + `ml-auto` 的换行行为不同。
+- 抽出 `ComposerDropdownLabel` 承载 6 处复用,含两个关键 data 属性:
+  `data-composer-dropdown-foreground`(primary/tertiary/warning,前景色不靠 text-* 类)
+  与 `data-composer-footer-collapse`(none/xs/sm,窄工具条的折叠优先级)。
+- chevron 三种形态实测各不相同,**不能统一**:项目选择器无 chevron、
+  运行位置是**裸 svg**`.codex-ComposerDropdownLabelChevron`、分支才包
+  `span.codex-ComposerDropdownLabelSecondaryChevron`。
+- 6 个按钮的尺寸类逐个对齐实测值(`h-token-button-composer-sm` + `px-1.5 text-sm`
+  + `in-data-[composer-placement=home]:px-2` 等),删掉硬编码的
+  `bg-[rgba(28,28,30,0.5)]` / `text-[#8b8b90]` / `border-black/5` / `backdrop-blur-[16px]`。
+- 表面色/圆角/模糊改由 `codex-ComposerLayoutRoot` 的模块 CSS + 4 个 `data-composer-*` 属性给。
+- `inline` 布尔 prop 删除,改成 Codex 的 `data-composer-placement`('home' | 'thread')。
+
+**输入区换成 ProseMirror**(`RichTextInput.tsx`,新增 6 个 prosemirror-* 依赖):
+DOM 契约与 Codex 完全一致 —— `div.ProseMirror[contenteditable][aria-multiline][dir="auto"]
+[role="textbox"][translate="no"][data-virtualkeyboard][data-codex-composer]`
++ 内联 `style="font-size: var(--codex-chat-font-size); height: auto; resize: none;
+min-height: 2.75rem;"`,空文档时 `p.placeholder[data-placeholder]`。
+
+两个踩过的坑:
+1. **占位符必须走 decoration**,不能在事务后 `classList.add`。ProseMirror 每次重绘
+   都按 state 重建 DOM,手动加的类会被下一次重绘抹掉 —— 实测表现是 `<p>` 上 class 恒为空。
+2. Codex 的占位符 CSS 是 **`.ProseMirror .placeholder:after`**(不是 `:before`,
+   也不是 input 的 placeholder 属性)。提取器原先漏了**裸 `.ProseMirror`** 选择器那一层
+   (它不带模块哈希),导致 `white-space: break-spaces` 缺失、ProseMirror 在控制台告警,
+   且占位符完全不显示。已把 `ProseMirror` 加进提取器的 NAMED 列表(90 条规则)。
+   同时补了 `shadow-md-strong` 等 3 个 shadow 标度(Tailwind 生成但不在 @theme 里)。
+
+交互验证(CDP 真实键盘事件):输入 → 占位符消失、发送键启用;退格清空 → 占位符恢复。
+控制台无 error/warning/异常。
+
+### 已完成:A3 会话视图骨架 + A7 portal 层
+
+**A7 验收:`<body>` 两个 portal 层 + `#root` 三子元素(两个 a11y announcer 夹住应用)
+与 Codex 逐字一致。**
+
+portal 必须是 `<body>` 的子元素而非 `#root` 内:应用根那层有
+`zoom: var(--codex-window-zoom)`,而 `zoom` 会给后代建立新的包含块 ——
+放在里面的 `fixed` 会相对那一层定位而不是视口,窗口缩放时浮层跟着漂。
+z 轴次序:z-[60](拖拽克隆体)> z-[55](toast)> z-40(thread 浮动面板)>
+z-30(header)> z-20(侧栏 footer / resize 手柄)。
+
+**A3 骨架验收:thread 11 层骨架 + 滚动容器类名集合与 Codex 完全一致。**
+
+新增三个组件:
+- `ThreadScrollContainer` —— `thread-scroll-container` 那一层及其外壳
+- `ThreadTurn` / `ThreadUserMessage` / `ThreadAssistantMessage` / `ThreadItems` / `ThreadItem`
+- `AppPortals` + 两个 announcer
+
+**最重要的发现:Codex 的贴底跟随靠 `flex flex-col-reverse`,不是 JS。**
+滚动容器本身是反向 flex,滚动原点在底部(实测 `scrollTop: 0` 即在底部),
+内容长高时浏览器自动保持贴底,不需要任何 scrollTop 计算,也不会和流式输出打架;
+用户往上翻时正常离开底部,是布局的自然行为而非特例逻辑。
+配合 `[overflow-anchor:none]` 关掉浏览器自己的锚定(会和反向 flex 冲突)。
+我最初写了 ResizeObserver + scrollTop 手动跟随,行为接近但不等价(流式时会抖),
+发现这个类之后整段删掉了。
+
+滚动容器另外三个容易漏的类:
+- `[container-type:inline-size]` + `[container-name:thread-content]` ——
+  内容块的容器查询靠它(宽块、表格按容器宽度切档),少了那些 `@container` 规则全失效
+- `[&:has([data-thread-scroll-footer='true']:focus-within)]:[scroll-padding-bottom:0px]` ——
+  输入框聚焦时取消滚动内边距,否则光标被自己的 padding 顶出视口
+
+其他结构性改动:
+- **不再是"请求行 + 回复行"扁平列表**。Codex 以 turn 为单位:一个 `data-turn-key`
+  里依次是用户消息 → 中间条目 → 最终回复,段间用空的 `div.w-full` 分隔。
+  之前跟 VS Code Chat 拆两行是为了虚拟滚动按行测高,Codex 不做窗口化,该约束不存在。
+- **react-virtuoso 已彻底移除**(package.json + 源码零引用),`ChatList.tsx` 删除。
+- 输入区移到 sticky 底槽 `[data-thread-scroll-footer]`,是消息流的兄弟。
+- `MainContentLayout` 的两层路由容器补上 thread 档类名。⚠️ 我一开始把
+  `data-vscode-context` 写在最外层,顺序反了 —— 实测 thread 态高度链断掉、
+  滚动容器量到 0 高。正确顺序是**路由容器在外,data-vscode-context 在最里**。
+- markdown 块类名换到 Codex 模块类:`codex-Paragraph` / `codex-Heading` /
+  `codex-List{,codex-Ordered/UnorderedList}` / `codex-ListItem` / `codex-Blockquote` /
+  `codex-HorizontalRule`,表格拆成
+  `codex-TableContainer > codex-TableScroller > codex-TableWrapper` + `codex-TableActions`,
+  加粗用 `font-semibold`(不是默认 bold)。`.rendered-markdown` 已归零。
+- `MarkdownPart` 加 `withRoot` —— 助手回复由 `ChatView` 套 `codex-MarkdownRoot`
+  (它要挂标注属性),避免嵌两层让 `[&>*:last-child]:mb-0` 打在错误的层上。
+
+**顺手修掉一个我自己引入的命名错误**:上一轮全局重命名把 `chat/model/rows.ts` 里的
+`ChatRow`(会话流行类型)误伤成了 `SidebarThreadRow` —— 那是侧栏的名字,语义完全不同。
+已改为 `ThreadRow`。
+
+### 已完成:D-c 悬浮面板 + D-d 拖拽 + D8〜D15
+
+**最重要的发现:悬浮卡片和普通 tooltip 是同一个组件。** Codex 没有独立的
+HoverCard —— 侧栏那张卡片是 `Lh`(tooltip)的 `variant="rich"` + `interactive`。
+之前 WS 自己写的 `useHoverCard` + 固定定位卡片,DOM 契约完全不同。已重写为
+`components/tooltip/Tooltip.tsx`(TooltipProvider + Tooltip + 内容层 portal),
+定位用 floating-ui(新增 `@floating-ui/react-dom`,Codex 也是它 —— 卡片的
+`max-width` 内联值直接引用 `--radix-tooltip-content-available-width`,
+那三个变量由 `size` 中间件的 apply 写入)。
+
+时序常量全部来自 bundle,别凭手感改:
+
+| 常量 | 值 | 出处 |
+|---|---|---|
+| 默认开启延迟 | **700ms** | `Ett` |
+| 免延迟窗口 | 300ms | `Dtt` |
+| `delayOpen` 短延迟 | 250ms | `utt` 里 `t && (n = 250)` |
+| interactive 交接定时器 | 100ms | `ktt` |
+
+外加一条**空间**规则:指针进入 `[data-hover-card-open-immediately]` 子树时延迟归 0
+(`bjc`)。侧栏把它挂在会话行的操作区与状态槽上。
+关闭不是"延时",是**安全三角**交接(`ntt`/`rtt`/`itt`,padding 8px):以指针为顶点、
+浮层靠触发器那条边为底边构成三角形,走出三角形立刻关 —— 方向维度的宽容,
+所以横扫一列行时上一张卡片不会挂着。
+
+**悬浮卡片只对「归属某个项目」的会话出现。** 这是从源码推出来的,不是产品取舍:
+`SRc` 里 `disableHoverCard: c || (E == null && !Ee)`,`E = hoverCardProjectLabel`;
+而侧栏会话列表(`DRc` 调用点)**根本不传这个 prop**,于是
+`W = s ?? H?.label ?? null` 退化成 `H?.label`,`H = Po(w8o, threadKey)` 就是
+该会话的项目组 —— 没项目就没 label,卡片关闭。实测两侧复核:
+hover Recents/Pinned 里的会话,body 下不出现 `[role=tooltip]`;
+展开项目后 hover 它下面的会话,卡片出现(Codex 224×86 / WS 224×62,
+差的 24px 是 WS 这条会话没有 git 分支行)。
+
+**层级是两级,靠一个空槽拉开缩进。** 项目下的会话嵌在项目组内,无项目的会话
+与**项目行**同级(不是与项目下的会话同级)。缩进不是靠 padding 而是
+`reserveLeadingSlot`(= `isGrouped`):分组行前面渲染一个**空的**
+`div.flex.w-4.shrink-0…`,16px + 内容行 `gap-2` 的 8px = 24px。实测标题左缘:
+
+| | Codex | WS 改前 | WS 改后 |
+|---|---|---|---|
+| 项目名 x | 40 | 40 | 40 |
+| 项目下会话标题 x | **40** | 16 ✗ | **40** ✓ |
+| 无项目会话标题 x | 16 | 16 | 16 |
+
+卡片计算样式两侧逐项相同:圆角 15px、`backdrop-filter: blur(8px)`、
+底色 `oklab(… / 0.9)`、box-shadow 六段全等、`max-width: 320px`、z-index 50、
+portal 到 `document.body`。
+
+**D-d 四类拖拽** —— 一个 DndContext 管全部(实测 Codex 侧栏所有可拖项的
+`aria-describedby` 都指向 `DndDescribedBy-0`)。id 命名从 aria-live 播报逆出来:
+
+| | id 形态 | 注册方式 |
+|---|---|---|
+| 项目组 | `codex:project:<uuid>` | useSortable |
+| 会话(可排序) | `codex:thread:local:<uuid>` | useSortable |
+| 会话(仅可拖) | `local:<uuid>` | useDraggable |
+| 容器落点 | `sidebar-thread-container:<containerId>` | useDroppable |
+
+containerId 命名空间(来自 `Agc`):`pinned` / `chats` / `project:<id>` /
+`custom:<id>` / `cloud`。`R8(id)` = `pinned` 或 `custom:*`,即**分节级**容器,
+**不含**项目容器 —— 我一开始理解反了。落点规则照抄 `Agc`。
+
+三种包装形态是实测的差别,不能统一:
+
+```
+Pinned/Projects 的项(项目与会话共用):
+  div[role=listitem][aria-roledescription=sortable].after:h-px.touch-none
+  └ div.overflow-hidden[style=…] └ 行/项目组
+项目内的会话:
+  div[role=listitem].after:h-px            ← 无 touch-none
+  └ div.cursor-grab.active:cursor-grabbing[aria-roledescription=sortable][role=button]
+    └ div.overflow-hidden[style=…] └ 行
+Recents 的会话:同上,但 aria-roledescription=**draggable**(Recents 不支持重排)
+```
+
+**拖拽副本不是行的克隆**,是一张专门的预览卡(实测):
+`div.pointer-events-none[style="position:fixed;…z-index:2147483647"]`
+→ `div[aria-hidden][inert].[--height-token-row:30px][style="height:calc(100%);width:calc(100%);transform:scale(1);transform-origin:left top"]`
+→ `div.relative.flex.w-fit.max-w-80.flex-col.gap-1`
+→ `div.sidebar-item.overflow-hidden.border.border-token-border.bg-token-bg-primary.opacity-70.shadow-lg`
+→ `div.flex.h-[var(--height-token-row)].max-w-80.items-center.gap-2.px-2` + 图标 + `span.min-w-0.truncate`。
+必须 **portal 到 body**:DndContext 在 aside 内,而 aside 的包装层有
+`overflow-hidden` + `[contain:layout_paint]`,不 portal 拖出侧栏就消失
+(实测第一版 body 下找不到任何 z-index 2147483647 的节点)。
+
+**跨项目移动的确认框**(`KIc`)只在**目标项目缺源目录**时弹。判定是"覆盖"
+而非"集合相等"(`LIc`):源目录等于目标某个目录、或在它之下,就算已覆盖。
+文案逐字:标题 `Add folders to {projectName}?`、正文
+`All chats in {projectName} will gain access to these folders:`、按钮 Cancel / Continue。
+
+> **教训:落点判定不能用裸 `closestCenter`。** Codex 有一整套 kind-aware 的
+> 碰撞检测(`oMc` + `Ngc` + `kgc`),我一开始图省事用了 dnd-kit 默认的
+> closestCenter,**四类拖拽里三类静默失效**:拖项目时 over 落到别的项目
+> **下面的会话**上,拖会话回 Recents 时落到某条会话上被当成跨项目移动、
+> 弹出确认框。三级优先已照 Codex 补上:
+> ① 按类型/`Agc` 先筛掉不合法落点 → ② pointerWithin 命中具体行(= 插到这一行)
+> → ③ 命中容器(= 移进这个列表),其中「落在项目会话列表里」优先解释成
+> **在列表内排序**(`isActiveInReorderBoundary`),只有 `project-icon` 落区
+> 是保证的容器落点。
+>
+> **另一个只有实际操作才会暴露的 bug**:`SidebarSortableItem` 里我把
+> `role="listitem"` 写在 `{...attributes}` **前面**,被 dnd-kit 的
+> `attributes.role = 'button'` 覆盖了 —— Codex 那层是 `role="listitem"` +
+> `aria-roledescription="sortable"` 并存。除了无障碍语义错,
+> `[role=list] > [role=listitem]` 这类选择器会全部落空。
+
+**Pinned 的混合顺序**(用户反馈的"项目与非项目会话应该平级"):Codex 侧栏状态
+里存的是**一个混合的 itemKey 数组**(schema 实测:`codex:project:<uuid>` /
+`codex:thread:local:<uuid>` / `codex:thread:remote:<id>` / `chatgpt:*`),
+所以 Pinned 里项目行与会话行是同一个可排序列表的兄弟,可以互相穿插。
+WS 原先拆成 `pinnedProjectIds` + `pinnedChatIds` 两个数组分别渲染,DOM 上永远是
+"项目全在前、会话全在后"。已在 `ProjectRegistry` 加 `pinnedItemKeys`(混合顺序)
+与 `projectThreadOrder`(项目内手工顺序),两个旧数组保留 —— 它们回答"是否置顶",
+新数组只回答"排第几";缺失时由两者派生,旧状态文件可直接用。
+
+**D8**:折叠是带动画的。三处(分节内容区、项目会话列表、每一行外壳)都是
+`div.overflow-hidden` + 稳态内联 `height: auto; opacity: 1; overflow: visible;`
+—— framer-motion 动画结束后的痕迹。折叠时**整块不渲染**,不是 height:0 常驻。
+
+**D9〜D12 / D14 / D15** 一并补齐:`group/cwd`、左侧 32px 落区遮罩起点改成
+`top-[var(--height-token-row)]`、项目图标 button → **span**(同时是
+`project-icon` 落区)、项目名 `truncate` → `text-fade-truncate`、
+`role="list"` + `aria-label="Scheduled tasks in X"`、
+`[data-app-action-sidebar-project-list-id]` + `-show-all` 包装、
+操作区 `grid-cols-1 min-w-6 shrink me-0.5`(min-w-6 **无条件**)、
+`⋯` 外层菜单触发器包装、行上去掉 `w-full`、删掉 Codex 没有的 transition。
+
 ### 未完成(按原修复顺序)
-6. **A5 + A4** 首页流式布局 + Composer 重写(需引入 ProseMirror)。
-7. **A3 + A7** 会话视图重写(去 VS Code chat 类与 react-virtuoso)+ 补 portal 层。
-8. **D 剩余项**:D8(折叠动画)、D9〜D12(项目/会话行 sortable 包装、`group/cwd`、
-   hover-card 触发、`role="list"`、Show-more 包装)、D14〜D16。
+8. **D 剩余项**:D16;分节标题的 sortable 只补了 aria 契约,还没接进 DnD 上下文
+   (Codex 的 Projects / Recents 分节可互相重排,Pinned 固定在最上)。
+9. **顶部区域点击** —— 用户反馈"侧边栏顶部 logo 无法点击",尚未定位。
+   怀疑是 header 的 `-webkit-app-region: drag` 盖住了下层,或 `no-drag` 缺失,
+   需要按 hit-test 实测(`document.elementFromPoint`)确认。
 
 ### 既有 lint 债(非本次改动引入)
 
 `ProjectRow.tsx` / `SortableProjects.tsx` 共 9 个 error:dnd-kit 的 `setNodeRef`
 触发 `react-hooks/refs`,以及 `react-refresh/only-export-components`。本次改动的文件
 全部 lint 干净。
+
+9. **A3 余项:parts 内部类名**。23 个 `chat/parts/` 组件内部仍用
+   `interactive-*` / `chat-*` / `codicon`(工具调用、思考块、代码块、审批控件、
+   TodoList 等),thread 态实测残留 `interactive-` 4 个 / `chat-` 6 个 / `.codicon` 4 个。
+   这是一整个子系统(含 Monaco 代码块、diff 视图),单列一轮。
+   10 个 VS Code chat CSS 已从被删的 `ChatList` 迁到 `main.tsx` 暂管;
+   parts 换完后连同 `@vscode/codicons` 依赖一起移除。

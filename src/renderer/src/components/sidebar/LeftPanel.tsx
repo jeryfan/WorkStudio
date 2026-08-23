@@ -17,10 +17,20 @@ import { usePanelResize } from '../../utils/usePanelResize'
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/PanelContext'
 import { IconButtonSm, SectionHeader, SidebarSection } from './SectionHeader'
 import { SidebarProjectRow } from './SidebarProjectRow'
-import { SortableProjects } from './SortableProjects'
+import { SidebarRowList, SidebarSortableItem, SidebarThreadDragItem } from './SidebarSortableRow'
 import { SidebarThreadRow } from './SidebarThreadRow'
 import { SidebarFooter } from './SidebarFooter'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
+import { SidebarDndProvider, SidebarSortableScope, SidebarThreadContainer } from './SidebarDnd'
+import {
+  threadDragId,
+  useSidebarDraggable,
+  useSidebarSortable,
+  type PendingThreadMove,
+  type SidebarContainerId
+} from './sidebarDndModel'
+import { ThreadProjectMoveConfirmation } from '../dialog/ThreadProjectMoveConfirmation'
+import { projectItemKey } from '@shared/workspace/types'
 
 type SectionId = 'pinned' | 'projects' | 'recents'
 
@@ -29,14 +39,144 @@ type SectionId = 'pinned' | 'projects' | 'recents'
  * top actions / Pinned / Projects（嵌套会话）/ Recents / footer。
  *
  * 三个分区是互斥划分，同一个会话只出现在其中一处：
- * - Pinned：置顶会话，不再进入其他分区
+ * - Pinned：置顶项目 + 置顶会话，两者都从原分区移走（置顶是移动，不是复制）
  * - Projects：按项目分组，展开后是该项目下的会话
  * - Recents：无项目归属的会话（以及所属项目未作为分区显示的会话）
  *
- * Pinned 无内容时整个分区隐藏；另两个分区始终显示，空时给空态文案。
+ * Pinned 两者都空时整个分区隐藏（实测：取消最后一个置顶后 section 消失）；
+ * 另两个分区始终显示，空时给空态文案。
  * 宽度由 PanelContext 的 sidebarWidth 经 props 传入,写在 aside 的内联 style 上(Codex 同做法)。
  */
-export function LeftPanel({
+/**
+ * 侧栏对外的入口 —— 只做一件事:把整个侧栏包进**一个** DnD 上下文,
+ * 并托管跨项目移动的确认框。
+ *
+ * 为什么在这里而不是在各个列表里起 context:实测 Codex 侧栏所有可拖项的
+ * `aria-describedby` 都指向同一个 `DndDescribedBy-0`。分成多个 context 时
+ * 「把 Recents 的会话拖进项目」这种跨列表操作收不到 over 事件。
+ */
+export function LeftPanel(props: {
+  width: number
+  onResize(desired: number): void
+}): React.JSX.Element {
+  const [pendingMove, setPendingMove] = useState<{
+    pending: PendingThreadMove
+    apply(): void
+  } | null>(null)
+  return (
+    <SidebarDndProvider onConfirmMove={(pending, apply) => setPendingMove({ pending, apply })}>
+      <LeftPanelBody {...props} />
+      {pendingMove && (
+        <ThreadProjectMoveConfirmation
+          missingSources={pendingMove.pending.missingSources}
+          projectName={pendingMove.pending.targetProject.name}
+          onClose={() => setPendingMove(null)}
+          onContinue={pendingMove.apply}
+        />
+      )}
+    </SidebarDndProvider>
+  )
+}
+
+/** Pinned 的一项 —— 项目与会话共用同一个可排序包装,只是内容不同 */
+function PinnedItemRow({
+  item,
+  isLast
+}: {
+  item: ReturnType<typeof useWorkspace>['pinnedItems'][number]
+  isLast: boolean
+}): React.JSX.Element {
+  const sortable = useSidebarSortable(
+    item.key,
+    item.kind === 'project'
+      ? { kind: 'sidebar-group', containerId: 'pinned', projectId: item.project.id }
+      : {
+          kind: 'sidebar-item',
+          containerId: 'pinned',
+          chatId: item.chat.id,
+          // 置顶把会话从原分区移走了,归属仍看它有没有项目 —— `Agc` 判断
+          // 「能不能拖回 Recents」时要的是归属,不是当前所在分区
+          homeContainerId: item.chat.projectId != null ? `project:${item.chat.projectId}` : 'chats'
+        }
+  )
+  return (
+    <SidebarSortableItem
+      isLast={isLast}
+      dragging={sortable.isDragging}
+      attributes={sortable.attributes}
+      listeners={sortable.listeners}
+      setNodeRef={sortable.setNodeRef}
+      style={sortable.style}
+    >
+      {item.kind === 'project' ? (
+        <SidebarProjectRow project={item.project} />
+      ) : (
+        <SidebarThreadRow chat={item.chat} />
+      )}
+    </SidebarSortableItem>
+  )
+}
+
+/** Projects 分节的项目组 —— 与 Pinned 的项目项同一个包装形态 */
+function ProjectGroupItem({
+  project,
+  containerId,
+  isLast
+}: {
+  project: Parameters<typeof SidebarProjectRow>[0]['project']
+  containerId: SidebarContainerId
+  isLast: boolean
+}): React.JSX.Element {
+  const sortable = useSidebarSortable(projectItemKey(project.id), {
+    kind: 'sidebar-group',
+    containerId,
+    projectId: project.id
+  })
+  return (
+    <SidebarSortableItem
+      isLast={isLast}
+      dragging={sortable.isDragging}
+      attributes={sortable.attributes}
+      listeners={sortable.listeners}
+      setNodeRef={sortable.setNodeRef}
+      style={sortable.style}
+    >
+      <SidebarProjectRow project={project} />
+    </SidebarSortableItem>
+  )
+}
+
+/** Recents 的会话 —— 只可拖不可落 */
+function RecentThreadItem({
+  chatId,
+  children,
+  isLast
+}: {
+  chatId: string
+  children: React.ReactNode
+  isLast: boolean
+}): React.JSX.Element {
+  const draggable = useSidebarDraggable(threadDragId(chatId), {
+    kind: 'sidebar-item',
+    containerId: 'chats',
+    chatId,
+    homeContainerId: 'chats'
+  })
+  return (
+    <SidebarThreadDragItem
+      isLast={isLast}
+      dragging={draggable.isDragging}
+      attributes={draggable.attributes}
+      listeners={draggable.listeners}
+      setNodeRef={draggable.setNodeRef}
+      style={draggable.style}
+    >
+      {children}
+    </SidebarThreadDragItem>
+  )
+}
+
+function LeftPanelBody({
   width,
   onResize
 }: {
@@ -47,7 +187,7 @@ export function LeftPanel({
   const resize = usePanelResize({ edge: 'right', size: width, onResize })
   // collapseAllProjects 保留在 WorkspaceContext 里 —— Codex 是从
   // Project sidebar options → Organize sidebar 子菜单触发,不是独立按钮。
-  const { pinnedChats, recentChats, chatsLoading, projects, selectProject } = useWorkspace()
+  const { pinnedItems, unpinnedProjects, recentChats, chatsLoading, selectProject } = useWorkspace()
   const { openMenu, setCommandOpen, setCreateProjectOpen } = useOverlay()
   const { closeChat } = useChatRuntime()
 
@@ -231,8 +371,12 @@ export function LeftPanel({
                   </div>
                 </div>
 
-                {/* Pinned：无置顶项时整个分区隐藏 */}
-                {pinnedChats.length > 0 && (
+                {/*
+                 * Pinned —— 同时装**置顶项目**(排前,连同其会话)和**置顶会话**(排后),
+                 * 两者都从原分区移走;都为空时整节不渲染;
+                 * 标题行**没有控制按钮**(实测只有 1 个子元素)。
+                 */}
+                {pinnedItems.length > 0 && (
                   <SidebarSection
                     heading="Pinned"
                     collapsed={collapsed.pinned}
@@ -244,10 +388,27 @@ export function LeftPanel({
                       />
                     }
                   >
-                    <div className="flex flex-col gap-px">
-                      {pinnedChats.map((c) => (
-                        <SidebarThreadRow key={c.id} chat={c} />
-                      ))}
+                    {/*
+                     * 项目行与会话行是 [role="list"] 下的**严格兄弟**,包同一个
+                     * SidebarSortableItem,且在**同一个** SortableContext 里 ——
+                     * 这是它们能互相穿插排序的前提(Codex 实测:Pinned 里项目与会话
+                     * 的可排序包装逐字相同,顺序存在一个混合的 itemKey 数组里)。
+                     * 顺序完全由 pinnedItems 决定,不再是"项目全在前、会话全在后"。
+                     */}
+                    <div className="flex flex-col gap-px pt-1">
+                      <SidebarThreadContainer containerId="pinned">
+                        <SidebarRowList>
+                          <SidebarSortableScope items={pinnedItems.map((i) => i.key)}>
+                            {pinnedItems.map((item, i) => (
+                              <PinnedItemRow
+                                key={item.key}
+                                item={item}
+                                isLast={i === pinnedItems.length - 1}
+                              />
+                            ))}
+                          </SidebarSortableScope>
+                        </SidebarRowList>
+                      </SidebarThreadContainer>
                     </div>
                   </SidebarSection>
                 )}
@@ -261,6 +422,7 @@ export function LeftPanel({
                       title="Projects"
                       collapsed={collapsed.projects}
                       onToggle={() => toggleSection('projects')}
+                      sortable
                       menuId="project-options"
                       controls={
                         <>
@@ -296,13 +458,25 @@ export function LeftPanel({
                     />
                   }
                 >
-                  <div className="flex flex-col gap-px">
-                    {projects.length === 0 ? (
+                  <div className="flex flex-col gap-px pt-1">
+                    {/* 置顶项目已移到 Pinned,这里只渲染未置顶的(两节互斥) */}
+                    {unpinnedProjects.length === 0 ? (
                       <div className="p-2 text-sm text-token-text-tertiary">No projects</div>
                     ) : (
-                      <SortableProjects projects={projects}>
-                        {(p) => <SidebarProjectRow key={p.id} project={p} />}
-                      </SortableProjects>
+                      <SidebarRowList>
+                        <SidebarSortableScope
+                          items={unpinnedProjects.map((p) => projectItemKey(p.id))}
+                        >
+                          {unpinnedProjects.map((p, i) => (
+                            <ProjectGroupItem
+                              key={p.id}
+                              project={p}
+                              containerId="chats"
+                              isLast={i === unpinnedProjects.length - 1}
+                            />
+                          ))}
+                        </SidebarSortableScope>
+                      </SidebarRowList>
                     )}
                   </div>
                 </SidebarSection>
@@ -316,6 +490,7 @@ export function LeftPanel({
                       title="Recents"
                       collapsed={collapsed.recents}
                       onToggle={() => toggleSection('recents')}
+                      sortable
                       controls={
                         <>
                           <IconButtonSm aria-label="Chat sidebar options" aria-haspopup="menu">
@@ -329,14 +504,31 @@ export function LeftPanel({
                     />
                   }
                 >
-                  <div className="flex flex-col gap-px">
-                    {recentChats.length === 0 ? (
-                      <div className="p-2 text-sm text-token-text-tertiary">
-                        {chatsLoading ? 'Loading…' : 'No chats'}
-                      </div>
-                    ) : (
-                      recentChats.map((c) => <SidebarThreadRow key={c.id} chat={c} />)
-                    )}
+                  <div className="flex flex-col gap-px pt-1">
+                    {/*
+                     * Recents 的会话是 **draggable 而不是 sortable**(实测
+                     * aria-roledescription="draggable"):能拖去项目 / Pinned,
+                     * 但 Recents 自己不支持重排 —— 它按时间排序,手工顺序没有意义。
+                     */}
+                    <SidebarThreadContainer containerId="chats">
+                      {recentChats.length === 0 ? (
+                        <div className="p-2 text-sm text-token-text-tertiary">
+                          {chatsLoading ? 'Loading…' : 'No chats'}
+                        </div>
+                      ) : (
+                        <SidebarRowList>
+                          {recentChats.map((c, i) => (
+                            <RecentThreadItem
+                              key={c.id}
+                              chatId={c.id}
+                              isLast={i === recentChats.length - 1}
+                            >
+                              <SidebarThreadRow chat={c} />
+                            </RecentThreadItem>
+                          ))}
+                        </SidebarRowList>
+                      )}
+                    </SidebarThreadContainer>
                   </div>
                 </SidebarSection>
               </div>

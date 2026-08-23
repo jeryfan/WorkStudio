@@ -14,11 +14,25 @@ import { rpc } from '../rpc/client'
 import type { ChatStatus } from '@shared/protocol/entities'
 import type { Project, Suggestion } from '../services/workspace/types'
 import type { ChatSummary } from '../services/chat/types'
-import type {
-  CreateProjectInput,
-  ProjectSelection,
-  WorkspaceSnapshot
+import {
+  parseItemKey,
+  projectItemKey,
+  threadItemKey,
+  type CreateProjectInput,
+  type ProjectSelection,
+  type WorkspaceSnapshot
 } from '@shared/workspace/types'
+
+/**
+ * Pinned 分节的一项 —— 项目和会话在这里是**同一种东西**的两个形态。
+ *
+ * Codex 的侧栏状态里 Pinned 存的是一个混合的 itemKey 数组,渲染时按顺序
+ * 逐项判断是项目还是会话;WS 之前把两者拆成 pinnedProjects / pinnedChats
+ * 两个列表分别渲染,DOM 上就永远是「项目全在前、会话全在后」,拖不到一起。
+ */
+export type PinnedItem =
+  | { key: string; kind: 'project'; project: Project }
+  | { key: string; kind: 'thread'; chat: ChatSummary }
 
 interface WorkspaceContextValue {
   projects: Project[]
@@ -28,8 +42,22 @@ interface WorkspaceContextValue {
   chatsLoading: boolean
   /** Recents 分区：无项目归属，或所属项目未作为分区显示 */
   recentChats: ChatSummary[]
-  /** 置顶会话。落入 Pinned 分区，且不在其他分区重复出现 */
+  /** 置顶会话。落入 Pinned 分区，并从原分区移走（置顶是移动，不是复制） */
   pinnedChats: ChatSummary[]
+  /** 置顶项目，按置顶顺序。落入 Pinned 分区，并从 Projects **移走** */
+  pinnedProjects: Project[]
+  /** 未置顶项目 —— Projects 分区渲染这个，不是 projects 全量 */
+  unpinnedProjects: Project[]
+  /** Pinned 分区按混合顺序展开的项(项目与会话同级) */
+  pinnedItems: PinnedItem[]
+  /** Pinned 分区拖拽排序后持久化混合顺序 */
+  reorderPinnedItems(itemKeys: string[]): Promise<void>
+  /** 项目内会话拖拽排序后持久化顺序 */
+  reorderProjectThreads(projectId: string, chatIds: string[]): Promise<void>
+  /** 会话改项目归属(拖进项目 / 拖回 Recents),projectId 传 null = 无归属 */
+  assignChatToProject(chatId: string, projectId: string | null): Promise<void>
+  /** 项目置顶开关 */
+  setProjectPinned(projectId: string, pinned: boolean): Promise<void>
   /** 全部会话，供命令面板等跨分区消费 */
   chats: ChatSummary[]
   /** 按项目 id 取该项目下的会话 */
@@ -55,6 +83,17 @@ interface WorkspaceContextValue {
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
+
+/**
+ * 首页建议卡 —— 文案/顺序/配色取自 Codex 实测(4 张,固定不随项目变)。
+ * 颜色映射到 --color-token-charts-{blue,purple,green,orange}。
+ */
+const HOME_SUGGESTIONS: Suggestion[] = [
+  { id: 'explore', label: 'Explore and understand code', color: 'blue' },
+  { id: 'build', label: 'Build a new feature, app, or tool', color: 'purple' },
+  { id: 'review', label: 'Review code and suggest changes', color: 'green' },
+  { id: 'fix', label: 'Fix issues and failures', color: 'orange' }
+]
 
 export function WorkspaceProvider({ children }: { children: ReactNode }): React.JSX.Element {
   // preload 已同步取好首屏快照，首帧即有真实项目列表，不出现空列表闪烁
@@ -88,6 +127,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
 
   // 通知回调里要用最新的快照重拉列表，但订阅本身不该随快照重建
   const loadChatsRef = useRef<(() => Promise<void>) | null>(null)
+  // 拖拽落点回调里要按 id 反查会话的 cwd，但回调不该随会话列表重建
+  const chatsRef = useRef<ChatSummary[]>(chats)
+  useEffect(() => {
+    chatsRef.current = chats
+  }, [chats])
 
   // 快照取自 preload 阶段，到组件挂载之间主进程状态可能已变（例如从其他窗口
   // 改了项目）。挂载后拉一次权威状态做校正——首帧仍用快照，不会闪。
@@ -154,6 +198,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
     setSnapshot(await chatService.setPinned(chatId, pinned))
   }, [])
 
+  const setProjectPinned = useCallback(
+    async (projectId: string, pinned: boolean): Promise<void> => {
+      setSnapshot(await workspaceService.setProjectPinned(projectId, pinned))
+    },
+    []
+  )
+
   const renameChat = useCallback(
     async (chatId: string, name: string): Promise<void> => {
       await chatService.rename(chatId, name)
@@ -199,20 +250,69 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
     setSnapshot(await workspaceService.selectProject(selection))
   }, [])
 
+  const reorderPinnedItems = useCallback(async (itemKeys: string[]): Promise<void> => {
+    setSnapshot(await workspaceService.reorderPinnedItems(itemKeys))
+  }, [])
+
+  const reorderProjectThreads = useCallback(
+    async (projectId: string, chatIds: string[]): Promise<void> => {
+      setSnapshot(await workspaceService.reorderProjectThreads(projectId, chatIds))
+    },
+    []
+  )
+
+  /**
+   * 会话改项目归属。
+   *
+   * cwd 是归属推导的事实来源,所以指派要把会话当前的 cwd 一起带上 ——
+   * 少了它主进程无法在「取消显式指派」后回落到按 cwd 推导。
+   */
+  const assignChatToProject = useCallback(
+    async (chatId: string, projectId: string | null): Promise<void> => {
+      const chat = chatsRef.current.find((c) => c.id === chatId)
+      if (chat == null) return
+      setSnapshot(await chatService.assignToProject(chatId, projectId, chat.cwd))
+    },
+    []
+  )
+
   const value = useMemo<WorkspaceContextValue>(() => {
     const { projects, selection } = snapshot
+    /*
+     * 兜底 ?? [] 不是防御性编程,是**必需**的:preload 阶段的快照可能来自
+     * 尚未重启的主进程(vite 只热更渲染层,主进程要手动重启),那份数据没有
+     * pinnedProjectIds。少了兜底首帧直接崩在 .map 上,整个 WorkspaceProvider 挂掉。
+     */
+    const pinnedProjectIds = snapshot.pinnedProjectIds ?? []
 
-    // 侧栏三分区是一次划分而不是三个视图：置顶优先，其次按项目，剩下的落
-    // Recents。判定顺序决定了同一会话不会在两个分区里重复出现。
+    /*
+     * 侧栏分区 —— Pinned 同时装**置顶项目**和**置顶会话**（项目排前、会话排后），
+     * **两者都从原分区移走**（置顶是"移动"而非"复制"），Pinned 为空时整节不渲染。
+     *
+     * ⚠️ 判定必须用 **id**。我一度以为置顶会话会在 Recents 保留一份，
+     * 那是误判：当时看的 Codex 侧栏里有多条**同名**会话（好几个"跟进监控"），
+     * 我只比对了标题列表就下了结论。同名不同 id，一条移走、另一条还在，
+     * 看起来就像"没移走"。
+     */
+    const pinnedProjectIdSet = new Set(pinnedProjectIds)
+    const pinnedProjects = pinnedProjectIds
+      .map((id) => projects.find((p) => p.id === id))
+      .filter((p): p is Project => p != null)
+    const unpinnedProjects = projects.filter((p) => !pinnedProjectIdSet.has(p.id))
+
     const shownProjectIds = new Set(projects.map((p) => p.id))
     const pinnedChats: ChatSummary[] = []
     const byProject = new Map<string, ChatSummary[]>()
     const recentChats: ChatSummary[] = []
 
     for (const chat of chats) {
+      // 置顶即移走：进了 Pinned 就不再参与项目/Recents 的归类
       if (chat.pinned) {
         pinnedChats.push(chat)
-      } else if (chat.projectId && shownProjectIds.has(chat.projectId)) {
+        continue
+      }
+
+      if (chat.projectId && shownProjectIds.has(chat.projectId)) {
         const list = byProject.get(chat.projectId)
         if (list) list.push(chat)
         else byProject.set(chat.projectId, [chat])
@@ -220,6 +320,48 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
         // 无归属，或所属项目未作为分区显示——后者不能让会话凭空消失
         recentChats.push(chat)
       }
+    }
+
+    /*
+     * Pinned 的混合顺序。
+     *
+     * 主进程给的是一个 itemKey 数组;这里只做「解析 + 查实体」,不做排序 ——
+     * 顺序的权威在主进程(拖拽后立刻持久化)。快照缺这个字段时(主进程还没重启)
+     * 退化成「项目在前、会话在后」,与旧行为一致。
+     */
+    const pinnedItemKeys =
+      snapshot.pinnedItemKeys ??
+      ([
+        ...pinnedProjectIds.map(projectItemKey),
+        ...pinnedChats.map((c) => threadItemKey(c.id))
+      ] as string[])
+    const pinnedItems: PinnedItem[] = []
+    for (const key of pinnedItemKeys) {
+      const parsed = parseItemKey(key)
+      if (parsed?.kind === 'project') {
+        const project = projects.find((p) => p.id === parsed.projectId)
+        if (project) pinnedItems.push({ key, kind: 'project', project })
+      } else if (parsed?.kind === 'thread') {
+        const chat = pinnedChats.find((c) => c.id === parsed.chatId)
+        if (chat) pinnedItems.push({ key, kind: 'thread', chat })
+      }
+    }
+
+    /*
+     * 项目内会话顺序:手工拖过的排前(按手工顺序),其余保持原顺序(按 updatedAt)。
+     * 全量记录手工顺序的话新会话会莫名跑到末尾 —— 只记被拖过的那些。
+     */
+    const projectThreadOrder = snapshot.projectThreadOrder ?? {}
+    const orderedChatsOfProject = (projectId: string): ChatSummary[] => {
+      const list = byProject.get(projectId) ?? []
+      const manual = projectThreadOrder[projectId]
+      if (manual == null || manual.length === 0) return list
+      const rank = new Map(manual.map((id, i) => [id, i]))
+      const known = list
+        .filter((c) => rank.has(c.id))
+        .sort((a, b) => rank.get(a.id)! - rank.get(b.id)!)
+      const rest = list.filter((c) => !rank.has(c.id))
+      return [...known, ...rest]
     }
 
     return {
@@ -232,9 +374,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
       chatsLoading,
       chats,
       pinnedChats,
+      pinnedProjects,
+      unpinnedProjects,
+      setProjectPinned,
       recentChats,
-      chatsOfProject: (projectId) => byProject.get(projectId) ?? [],
-      suggestions: [],
+      pinnedItems,
+      reorderPinnedItems,
+      reorderProjectThreads,
+      assignChatToProject,
+      chatsOfProject: orderedChatsOfProject,
+      suggestions: HOME_SUGGESTIONS,
       projectExpanded,
       toggleProject: (id) => setProjectExpanded((prev) => ({ ...prev, [id]: !(prev[id] ?? true) })),
       collapseAllProjects: () =>
@@ -262,7 +411,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
     renameProject,
     removeProject,
     selectProject,
+    reorderProjects,
+    reorderPinnedItems,
+    reorderProjectThreads,
+    assignChatToProject,
     setChatPinned,
+    setProjectPinned,
     renameChat,
     archiveChat,
     removeChat

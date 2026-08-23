@@ -56,6 +56,108 @@
     font-weight:var(--font-weight-medium);
     line-height:1.2
   }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror {
+    resize:none
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror:focus-visible {
+    outline:none
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror p {
+    margin:0
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror ul,._RichTextInput_xuwpz_2 .ProseMirror ol {
+    padding-inline-start:calc(var(--spacing) * 6)
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror ul {
+    list-style-type:disc
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror ul ul {
+    list-style-type:circle
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror ul ul ul {
+    list-style-type:square
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror ol {
+    list-style-type:decimal
+  }
+
+  ._RichTextInput_xuwpz_2[data-rich-text-layout=multiline] .ProseMirror {
+    height:auto;
+    min-height:calc(var(--spacing) * 8)
+  }
+
+  ._RichTextInput_xuwpz_2[data-rich-text-layout=single-line] .ProseMirror {
+    min-width:0;
+    line-height:calc(var(--spacing) * 5);
+    white-space:nowrap;
+    flex:1;
+    overflow:hidden;
+    height:calc(var(--spacing) * 5)!important;
+    min-height:calc(var(--spacing) * 5)!important
+  }
+
+  ._RichTextInput_xuwpz_2[data-rich-text-layout=single-line] .ProseMirror p {
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    overflow:hidden
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [data-composer-code-block] {
+    contain:inline-size;
+    margin:var(--spacing) 0;
+    border-radius:var(--radius-lg);
+    background:var(--color-token-text-code-block-background);
+    width:100%;
+    min-width:0;
+    overflow:clip
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [data-composer-code-block]>pre {
+    padding:calc(var(--spacing) * 2);
+    font-family:var(--font-mono);
+    font-size:var(--codex-chat-code-font-size);
+    line-height:calc(var(--spacing) * 5);
+    tab-size:4;
+    white-space:pre;
+    margin:0;
+    overflow-x:auto
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [data-composer-code-block]>pre>code {
+    min-width:max-content;
+    display:block
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [data-composer-code-block-toolbar] {
+    background-color:var(--color-token-main-surface-primary);
+    background-image:linear-gradient(var(--color-token-text-code-block-background), var(--color-token-text-code-block-background)), linear-gradient(color-mix(in oklab, var(--color-token-input-background) 90%, transparent), color-mix(in oklab, var(--color-token-input-background) 90%, transparent))
+  }
+
+  .electron-dark ._RichTextInput_xuwpz_2 .ProseMirror [data-composer-code-block-toolbar] {
+    background-color:var(--color-token-dropdown-background);
+    background-image:linear-gradient(var(--color-token-text-code-block-background), var(--color-token-text-code-block-background))
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [text-link-href]::selection {
+    color:highlighttext
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror [rich-link-display-text][rich-link-href]::selection {
+    color:highlighttext
+  }
+
+  ._RichTextInput_xuwpz_2 .ProseMirror.ProseMirror-focused [data-rich-link-selected] {
+    --inline-mention-color:HighlightText;
+    background-color:highlight
+  }
 }
 
 @layer utilities {
@@ -115,6 +217,16 @@
     color:var(--color-token-foreground)
   }
 
+  .shadow-md-strong {
+    --tw-shadow:0px 2px 4px -1px var(--tw-shadow-color,#0000001a);
+    box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)
+  }
+
+  .shadow-xl-spread {
+    --tw-shadow:0px 0px 0px .5px var(--tw-shadow-color,var(--color-token-border)), var(--shadow-xl);
+    box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)
+  }
+
   .draggable {
     -webkit-app-region:drag;
     -webkit-user-select:none;
@@ -127,6 +239,91 @@
 
   .no-drag {
     -webkit-app-region:no-drag
+  }
+
+  .\[\&_\.ProseMirror\]\:h-6 .ProseMirror {
+    height:calc(var(--spacing) * 6)
+  }
+
+  .\[\&_\.ProseMirror\]\:min-h-6 .ProseMirror {
+    min-height:calc(var(--spacing) * 6)
+  }
+
+  .\[\&_\.ProseMirror\]\:w-full .ProseMirror {
+    width:100%
+  }
+
+  .\[\&_\.ProseMirror\]\:\!overflow-hidden .ProseMirror {
+    overflow:hidden!important
+  }
+
+  .\[\&_\.ProseMirror\]\:p-4 .ProseMirror {
+    padding:calc(var(--spacing) * 4)
+  }
+
+  .\[\&_\.ProseMirror\]\:px-0 .ProseMirror {
+    padding-inline:0
+  }
+
+  .\[\&_\.ProseMirror\]\:py-0 .ProseMirror {
+    padding-block:0
+  }
+
+  .\[\&_\.ProseMirror\]\:text-center .ProseMirror {
+    text-align:center
+  }
+
+  .\[\&_\.ProseMirror\]\:\!font-sans .ProseMirror {
+    font-family:var(--font-sans)!important
+  }
+
+  .\[\&_\.ProseMirror\]\:font-sans .ProseMirror {
+    font-family:var(--font-sans)
+  }
+
+  .\[\&_\.ProseMirror\]\:\!leading-6 .ProseMirror {
+    --tw-leading:calc(var(--spacing) * 6)!important;
+    line-height:calc(var(--spacing) * 6)!important
+  }
+
+  .\[\&_\.ProseMirror\]\:leading-5 .ProseMirror {
+    --tw-leading:calc(var(--spacing) * 5);
+    line-height:calc(var(--spacing) * 5)
+  }
+
+  .\[\&_\.ProseMirror\]\:leading-relaxed .ProseMirror {
+    --tw-leading:var(--leading-relaxed);
+    line-height:var(--leading-relaxed)
+  }
+
+  .\[\&_\.ProseMirror\]\:whitespace-nowrap .ProseMirror {
+    white-space:nowrap
+  }
+
+  .\[\&_\.ProseMirror\]\:\!text-token-foreground .ProseMirror {
+    color:var(--color-token-foreground)!important
+  }
+
+  .\[\&_\.ProseMirror\]\:caret-current .ProseMirror {
+    caret-color:currentColor
+  }
+
+  .extension\:\[\&_\.ProseMirror\]\:leading-normal:where([data-codex-window-type=extension] .extension\:\[\&_\.ProseMirror\]\:leading-normal) .ProseMirror {
+    --tw-leading:var(--leading-normal);
+    line-height:var(--leading-normal)
+  }
+
+  .\[\&_\.ProseMirror_p\]\:\!font-sans .ProseMirror p {
+    font-family:var(--font-sans)!important
+  }
+
+  .\[\&_\.ProseMirror_p\]\:\!leading-6 .ProseMirror p {
+    --tw-leading:calc(var(--spacing) * 6)!important;
+    line-height:calc(var(--spacing) * 6)!important
+  }
+
+  .\[\&_\.ProseMirror_p_\*\]\:\!font-sans .ProseMirror p *,.\[\&_\.ProseMirror_span\]\:\!font-sans .ProseMirror span {
+    font-family:var(--font-sans)!important
   }
 }
 
@@ -159,9 +356,316 @@
   position:absolute
 }
 
+._editor_11vxc_8 .ProseMirror li p,._editor_11vxc_8 .ProseMirror td p,._editor_11vxc_8 .ProseMirror th p {
+  margin:0
+}
+
+._editor_11vxc_8 .ProseMirror.ProseMirror-focused table.writing-block-table-structure-mode {
+  caret-color:#0000
+}
+
+._editor_11vxc_8 .ProseMirror.ProseMirror-focused td.writing-block-table-structure-selected-cell,._editor_11vxc_8 .ProseMirror.ProseMirror-focused th.writing-block-table-structure-selected-cell {
+  box-shadow:0 0 0 1px color-mix(in oklab, var(--oai-wb-accent) 70%, transparent)
+}
+
+._editor_11vxc_8 .ProseMirror.ProseMirror-focused td.writing-block-table-structure-active-cell,._editor_11vxc_8 .ProseMirror.ProseMirror-focused th.writing-block-table-structure-active-cell {
+  box-shadow:0 0 0 2px var(--oai-wb-accent)
+}
+
+._editor_11vxc_8 .ProseMirror.ProseMirror-focused td.writing-block-table-structure-edit-active-cell,._editor_11vxc_8 .ProseMirror.ProseMirror-focused th.writing-block-table-structure-edit-active-cell {
+  box-shadow:0 0 0 2px var(--oai-wb-accent), 0 0 0 4px var(--oai-wb-entity-accent);
+  caret-color:auto!important
+}
+
+._editor_11vxc_8 .ProseMirror.ProseMirror-focused td.writing-block-table-structure-edit-active-cell *,._editor_11vxc_8 .ProseMirror.ProseMirror-focused th.writing-block-table-structure-edit-active-cell * {
+  caret-color:auto!important
+}
+
+._editor_11vxc_8 .ProseMirror p .selection-highlight {
+  padding-top:.28em;
+  padding-bottom:.28em
+}
+
+._editor_11vxc_8 .ProseMirror {
+  --magic-edit-selection-padding-y:.21em
+}
+
+._editor_11vxc_8 .ProseMirror.writing-block-ios-webview {
+  --magic-edit-selection-padding-y:.03em
+}
+
+._editor_11vxc_8 .ProseMirror p .magic-edit-selection {
+  padding-bottom:var(--magic-edit-selection-padding-y);
+  padding-top:var(--magic-edit-selection-padding-y)
+}
+
+._editor_11vxc_8 .ProseMirror .magic-edit-selection {
+  background-color:var(--oai-wb-selection)
+}
+
+._editor_11vxc_8 .ProseMirror a,._editor_11vxc_8 .ProseMirror a:hover,._editor_11vxc_8 .ProseMirror a:active {
+  color:inherit;
+  cursor:text;
+  text-decoration-line:underline;
+  text-decoration-style:dotted;
+  text-decoration-thickness:1px;
+  -webkit-text-decoration-color:var(--oai-wb-text-tertiary);
+  text-decoration-color:var(--oai-wb-text-tertiary);
+  text-underline-offset:2px;
+  -webkit-text-decoration-skip-ink:auto;
+  text-decoration-skip-ink:auto;
+  text-underline-position:from-font;
+  transition:color .2s ease-in-out
+}
+
+._editor_11vxc_8.magic-edit-submitting .ProseMirror {
+  --shimmer-contrast:var(--oai-wb-text-tertiary);
+  --shimmer-text-secondary:var(--oai-wb-text-secondary);
+  background:var(--shimmer-text-secondary) linear-gradient(to var(--end), var(--shimmer-text-secondary) 0%, var(--shimmer-contrast) 40%, var(--shimmer-contrast) 60%, var(--shimmer-text-secondary) 100%);
+  background:var(--shimmer-text-secondary) -webkit-gradient(linear, 100% 0, 0 0, from(var(--shimmer-text-secondary)), color-stop(.4, var(--shimmer-contrast)), color-stop(.6, var(--shimmer-contrast)), to(var(--shimmer-text-secondary)));
+  background-position:-100% 0;
+  background-position:var(--is-ltr,-100%) var(--is-rtl,200%) top;
+  text-fill-color:transparent;
+  -webkit-text-fill-color:transparent;
+  animation-duration:var(--cot-shimmer-duration,2s);
+  background-repeat:no-repeat;
+  background-size:50% 200%;
+  -webkit-background-clip:text;
+  background-clip:text;
+  animation-name:_writingBlockLoadingShimmer_11vxc_1;
+  animation-iteration-count:infinite;
+  animation-delay:0s
+}
+
+.dark ._editor_11vxc_8.magic-edit-submitting .ProseMirror {
+  --shimmer-contrast:var(--oai-wb-shimmer-dark-contrast);
+  --shimmer-text-secondary:var(--oai-wb-shimmer-dark-secondary)
+}
+
+._editor_11vxc_8 .ProseMirror.writing-block-open-link-mode a {
+  cursor:pointer
+}
+
+._editor_11vxc_8 .ProseMirror.writing-block-open-link-mode a:hover,._editor_11vxc_8 .ProseMirror.writing-block-open-link-mode a:active {
+  color:var(--oai-wb-entity-accent);
+  text-decoration-line:underline;
+  text-decoration-color:currentColor
+}
+
+._editor_11vxc_8 .ProseMirror>:where(:not(.ProseMirror-trailingBreak)):not(:first-child) {
+  margin-block-start:1rem
+}
+
+._editor_11vxc_8 .ProseMirror>:where(:not(.ProseMirror-trailingBreak)),._editor_11vxc_8 .ProseMirror>p:last-child {
+  margin-block-end:0
+}
+
+._editor_11vxc_8 .ProseMirror ul li[data-task-list-item=true] {
+  align-items:flex-start;
+  gap:.375rem;
+  list-style:none;
+  display:flex
+}
+
+._editor_11vxc_8 .ProseMirror ol li[data-task-list-item=true] {
+  align-items:flex-start
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox {
+  margin-top:.4rem;
+  color:var(--oai-wb-accent);
+  margin-inline-start:-1.4375rem;
+  display:inline-flex
+}
+
+._editor_11vxc_8 .ProseMirror ol li[data-task-list-item=true] .task-list-item-checkbox {
+  margin-inline-start:0
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input {
+  appearance:none;
+  width:1rem;
+  height:1rem;
+  color:inherit;
+  border:.9px solid var(--oai-wb-control-border);
+  cursor:pointer;
+  pointer-events:auto;
+  background:0 0;
+  border-radius:.125rem;
+  place-content:center;
+  display:inline-grid
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:before {
+  content:"";
+  border-right:2px solid var(--oai-wb-on-accent);
+  border-bottom:2px solid var(--oai-wb-on-accent);
+  transform-origin:50%;
+  width:.25rem;
+  height:.5rem;
+  transform:rotate(45deg)scale(0)
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:checked {
+  background:currentColor;
+  border-color:currentColor
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:checked:before {
+  transform:rotate(45deg)scale(1)
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:indeterminate {
+  background:currentColor;
+  border-color:currentColor
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:indeterminate:before {
+  background:var(--oai-wb-on-accent);
+  border-bottom:none;
+  border-right:none;
+  width:.5rem;
+  height:.125rem;
+  transform:none
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:focus,._editor_11vxc_8 .ProseMirror .task-list-item-checkbox input:focus-visible {
+  box-shadow:none;
+  outline:none
+}
+
+._editor_11vxc_8 .ProseMirror .task-list-item-content {
+  flex:1;
+  min-width:0
+}
+
+._editor_11vxc_8 .ProseMirror li[data-task-list-item=true][data-checked=true]>.task-list-item-checkbox:has(input:checked:not(:indeterminate))+.task-list-item-content>p:first-child {
+  color:var(--oai-wb-text-tertiary);
+  text-decoration-line:line-through;
+  text-decoration-color:currentColor
+}
+
+._editor_11vxc_8 .ProseMirror ol li[data-task-list-item=true] .task-list-item-content {
+  min-width:0;
+  display:inline-block
+}
+
+._editor_11vxc_8 .ProseMirror [data-writing-block-empty-placeholder] {
+  position:relative
+}
+
+._editor_11vxc_8 .ProseMirror [data-writing-block-empty-placeholder]:before {
+  color:var(--oai-wb-text-tertiary);
+  content:attr(data-writing-block-empty-placeholder);
+  pointer-events:none;
+  -webkit-user-select:none;
+  user-select:none;
+  white-space:pre-wrap;
+  position:absolute;
+  inset-block-start:0;
+  inset-inline-start:0
+}
+
+._editor_11vxc_8 .ProseMirror p.isSelectedEnd .ProseMirror-trailingBreak {
+  display:none
+}
+
+._editor_11vxc_8 .ProseMirror.writing-block-editor-disabled {
+  -webkit-user-select:none;
+  user-select:none
+}
+
+._editor_11vxc_8 .ProseMirror.writing-block-editor-selectable {
+  -webkit-user-select:text;
+  user-select:text
+}
+
+._editor_11vxc_8 .ProseMirror p.isSelectedEnd:after {
+  content:"​";
+  pointer-events:none;
+  background-color:var(--oai-wb-selection);
+  margin-inline-end:-6px;
+  padding-inline-end:6px;
+  display:inline-block
+}
+
+.firefox._editor_11vxc_8 .ProseMirror p.isSelectedEnd:after {
+  display:inline
+}
+
+._editor_11vxc_8.header-magic-edit-composer-open .ProseMirror p.isSelectedEnd:after {
+  display:none
+}
+
+.ProseMirror .placeholder {
+  pointer-events:none;
+  -webkit-user-select:none;
+  user-select:none;
+  position:relative
+}
+
+.ProseMirror .placeholder:after {
+  color:var(--color-token-input-placeholder-foreground);
+  content:attr(data-placeholder);
+  opacity:.5;
+  pointer-events:none;
+  -webkit-user-select:none;
+  user-select:none;
+  inset:0 auto auto 0;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  max-width:100%;
+  position:absolute;
+  right:0;
+  overflow:hidden
+}
+
+.ProseMirror .placeholder::selection {
+  color:inherit;
+  background:0 0
+}
+
+.ProseMirror .placeholder ::selection {
+  color:inherit;
+  background:0 0
+}
+
+.ProseMirror .ProseMirror-selectednode:has([skill-mention-name]) {
+  outline:none
+}
+
+.ProseMirror {
+  word-wrap:break-word;
+  white-space:pre-wrap;
+  white-space:break-spaces;
+  -webkit-font-variant-ligatures:none;
+  font-variant-ligatures:none;
+  font-feature-settings:"liga" 0;
+  position:relative
+}
+
+.ProseMirror pre {
+  white-space:pre-wrap
+}
+
+.ProseMirror li {
+  position:relative
+}
+
+.ProseMirror [draggable][contenteditable=false] {
+  -webkit-user-select:text;
+  user-select:text
+}
+
 @supports (color:color-mix(in lab, red, red)) {
   [data-codex-window-type=electron]:not([data-codex-window-chrome=application-menu]) .app-shell-left-panel {
     background:color-mix(in srgb, var(--color-token-editor-background) 70%, transparent)
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  ._editor_11vxc_8.magic-edit-submitting .ProseMirror {
+    animation:none
   }
 }
 
@@ -219,6 +723,12 @@
     content:"";
     pointer-events:none;
     position:absolute
+  }
+}
+
+@layer components {
+  ._RichTextInput_xuwpz_2 .ProseMirror:focus-visible {
+    outline:none
   }
 }
 
