@@ -987,3 +987,303 @@ sweep `absolute` + 渐变 mask、两条动画都绑上 `1s steps(48) x1`;控制�
    这是一整个子系统(含 Monaco 代码块、diff 视图),单列一轮。
    10 个 VS Code chat CSS 已从被删的 `ChatList` 迁到 `main.tsx` 暂管;
    parts 换完后连同 `@vscode/codicons` 依赖一起移除。
+
+---
+
+## 取证方法的一次跃迁:webview-dump 里有**全部 4714 个 lazy chunk**
+
+前面几轮一直在两个受限的来源之间挣扎:`app-initial-Biw83Aiz.js`(参数名未压缩,
+但只有首屏那部分)与运行中 Codex 的 DOM(受限于"本机 14 条会话里没有工具调用")。
+上一轮记的"从 CSS dump 的文件名入手"是这个困境的产物。
+
+**其实 `reverse/webview-dump/assets/` 里躺着整个 webview 的 4714 个文件**,
+按功能切分、文件名就是模块名。这一轮直接读到了:
+
+| 文件 | 内容 |
+|---|---|
+| `tool-activity-disclosure-CkDQzSI4.js` | **整套活动行原语**(表头/箭头/行壳/展开体/disclosure) |
+| `local-conversation-turn-DF8fx5gl.js` | turn 的三段式 + 「Worked for」折叠头 + 折叠摘要三档文案 |
+| `subagent-activity-chip-group-DtZM0hSI.js` | 30479 行的会话渲染主体:32 种条目的扁平 switch、推理块、patch 行、计划 pill、图标映射 |
+| `split-items-into-render-groups-CBZe4KAV.js` | **过程 / 最终回复的真实分段算法** |
+| `reasoning-item-heading-pM5srCoy.js` | 推理正文的小标题剥离/提取 |
+| `worktree-init-tool-activities-DMSULnlr.js` | shell 块(`default` / `embedded` 两档)+ ANSI 转换器 |
+| `highlight-code-bx-gqOKs.js` | 代码高亮:**highlight.js**,注册 40 个语言 |
+| `book-open-kevPl-ms.js` 等 | 单个图标一个 chunk |
+
+**方法**:`grep -l '<某个特征类名或文案>' reverse/webview-dump/assets/*.js`
+定位到 chunk,`npx prettier --parser babel` 展开,然后顺着 `import { x as y }`
+的别名表往上追(`/tmp/cmp/resolve.py`)。这比按 CSS 文件名猜、比在 DOM 里
+碰运气都可靠得多 —— **而且不需要会话里真出现那个构件**。
+
+> sourcemap 走不通:8214 对 `*.js.map` 返回 index.html(200 但是 13570 字节的
+> SPA 兜底),webview-dump 里也没有 `.map`。别再试。
+
+### 还原出来的活动行原语(已 1:1 落地到 `chat/parts/activity/`)
+
+| WS | Codex 源码 | 要点 |
+|---|---|---|
+| `ConversationItem` | `aZc`(app-initial) | `padding="offset"` → `min-w-0 text-size-chat relative overflow-visible py-0`;`default` 只有 `py-0` |
+| `ActivityRow` | `j` | `ConversationItem` + `div.flex.min-w-0.flex-col` 装 [header, body] |
+| `ActivityBody` | `G` | `default` = `gap-2 pt-2 pb-1`;`grouped` = `gap-[var(--conversation-grouped-item-gap,4px)] pt-1`;`indent` = `ps-6` |
+| `ActivityHeaderContent` | `y` | `inline-flex min-w-0 gap-1.5` + `items-center`/`items-start` |
+| `ActivityChevron` | `C` | **平时 `opacity-0`**,hover / focus-visible / 展开才显;展开加 `rotate-90` |
+| `ActivityHeader` | `D` | 有 disclosure → `<button>`,没有 → `<div>`,类名基座相同,只多 `cursor-interaction` |
+| `ActivityHeaderRow` | `F` | 见下 |
+| `ToolActivityDisclosure` | `Y` | 见下 |
+| `ScrollFadeStack` | `OT` | 见下 |
+| `DiffCounts` | `CZ`(app-initial) | 见下 |
+| `useElementHeight` | `B` | 回调 ref,挂上先用 `scrollHeight` 写一次;RO 读 `borderBoxSize[0].blockSize` |
+| `DISCLOSURE_TRANSITION` | `Qj`(app-initial) | `{duration: 0.3, ease: [0.19, 1, 0.22, 1]}` |
+
+#### ① 可展开的活动行**不是**把整行包进 `<button>`
+
+```
+div.group/activity-header.relative.inline-flex.max-w-full.min-w-0.items-center.gap-1.self-start
+├ button.absolute.inset-0.cursor-interaction              ← 铺满整行的透明按钮
+│   [aria-label|aria-labelledby][aria-expanded]
+│   .focus-visible:ring-1.focus-visible:ring-token-focus-border.focus-visible:ring-inset
+├ span.pointer-events-none.relative.shrink.truncate.text-size-chat
+│   .[&_a]:pointer-events-auto.[&_button]:pointer-events-auto   ← 摘要
+├ accessory                                               ← 增删行数等
+└ span.pointer-events-none.relative.flex > chevron
+```
+
+这样摘要里的文件链接仍可点,行内空白处点哪都能展开。用 `<button>` 包整行做不到
+—— 嵌套 interactive 元素非法,而且点链接会顺带展开。
+**上一轮我从 DOM 快照倒推的那版少了 accessory 与 chevron,还把调用方传进来的
+几层 span 当成了组件自身的结构** —— 这就是只有 DOM、没有源码时的典型误差。
+
+#### ② `ToolActivityDisclosure` 有**两个**展开状态位
+
+```js
+const [runningExpanded, setRunningExpanded] = useState(false)
+const [idleExpanded,    setIdleExpanded]    = useState(defaultExpanded)
+const expanded = hasBody && (running ? !runningExpanded : idleExpanded)
+//                                     ^^^ 取非
+```
+
+running 档取的是**非**:初值 false → **运行中默认展开**,点一下置 true 才收起
+(这个 state 的语义是"用户主动收起过")。跑完切到 `idleExpanded`(默认 false)
+→ 自动收起。换的是**读哪个 state**,不是去写另一个,所以不需要任何 effect 同步
+—— 我第一版想成"一个 expanded + useEffect 在 status 变化时重置",那会在 status
+抖动时把用户的展开操作抹掉。
+
+#### ③ 贴底与淡出**全部由 CSS 承担**,一行 JS 都没有
+
+`ScrollFadeStack`(`OT`)只有两层 div:
+
+- **贴底跟随 = `flex flex-col-reverse`**(与 `ThreadScrollContainer` 同一手法)
+- **上下淡出 = `vertical-scroll-fade-mask`**,靠 `animation-timeline: scroll(self y)`
+  插值 `--top-fade` / `--bottom-fade`,遮罩自己跟着滚动位置变
+
+所以 `ThinkingPart` 里整套 `ResizeObserver + scrollTop + onScroll 算淡出类` 全删了
+—— 不是简化,是那两件事在 Codex 里根本不由 JS 做。
+
+终端输出块还多一条:容器是 column-reverse 之后滚动进度方向翻转,遮罩动画必须配
+**`[animation-direction:reverse]`**,否则上下两条淡出带会装反(贴底时淡下边)。
+
+#### ④ 展开动画是**测出来的像素高度**,不是 `max-height` 也不是 grid `fr`
+
+```jsx
+<motion.div initial={false}
+  animate={{height: expanded ? elementHeightPx : 0, opacity: expanded ? 1 : 0}}
+  aria-hidden={!expanded} inert={!expanded}
+  className={expanded ? 'overflow-visible' : 'overflow-hidden'}
+  style={{pointerEvents: expanded ? 'auto' : 'none'}}
+  transition={{duration: .3, ease: [.19, 1, .22, 1]}}>
+  <ActivityBody ref={elementRef} …>{children}</ActivityBody>
+</motion.div>
+```
+
+Codex 里这段在推理块 / patch 行 / 多 agent 动作 / 计划 / disclosure 至少五处
+**逐字重复**(React Compiler 内联的结果),WS 抽成了 `DisclosureBody`,产出的 DOM 一样。
+四个不能省的细节:`initial={false}`(否则重开历史会话时所有活动行一起做收起动画)、
+`inert`+`aria-hidden`(光靠 `height:0` 里面的按钮还能被 Tab 聚焦)、
+`overflow-visible` 只在展开态、`pointerEvents` 走 style(动画中间态不该能点)。
+
+### 分段:`splitItemsIntoRenderGroups` 的真实规则
+
+上一版我写的是"**尾部连续的** markdown 全算最终输出"。Codex 是:
+
+```js
+let z = R.length - 1
+while (R[z]?.type === 'mcp-server-elicitation') --z
+if (!isAssistantMessage(R[z])) {
+  let e = z
+  for (;;) {                                    // 只跳这三类
+    const t = R[e]
+    if (t?.type !== 'mcp-server-elicitation' &&
+        t?.type !== 'subagent-activity' &&
+        (t?.type !== 'reasoning' || !t.completed)) break
+    --e
+  }
+  if (isAssistantMessage(R[e]) && R[e].phase === 'final_answer') z = e
+}
+const V = isAssistantMessage(R[z]) ? R[z] : null
+if (V) R.splice(z, 1)                            // ← 只摘走**一条**
+```
+
+两处关键差别:
+
+1. **只有一条 assistant message 进最终段**。模型分两段输出正文(中间没有工具调用)时,
+   我那版会把第一段也搬进最终输出。
+2. **可以跳过尾部的"已完成推理"去找它** —— 回复之后又来一段推理时,最终输出仍是那条回复。
+
+WS 的 `ChatContent` 没有 `phase` 字段(协议不给),`phase === 'final_answer'` 落不了地,
+退化成"取最后一条 markdown"。Codex 在这种情况下走的也是 `isAssistantMessage(R[z])`
+那条直接分支,所以不是判断错误,是数据缺失。
+
+### 折叠头文案是**三档**,不是一档
+
+`CollapsedTurnSummary`(`ca`):
+
+| 条件 | 文案 id | 文案 |
+|---|---|---|
+| 运行中(`workedForItem`) | —— | 每秒 tick 的实时计时器 |
+| 有 `workedDurationMs` | `localConversation.workedFor` | `Worked for {time}` |
+| 都没有 | `localConversation.previousMessagesSummary` | `{count, plural, one {# previous message} other {# previous messages}}` |
+
+上一版我在没有时长时编了一句 `Worked for a moment` —— Codex 换成**数条数**。
+没跑过工具的轮次谈"工作了多久"本身没意义,而"N 条之前的消息"描述的是被折叠起来的
+**内容量**,那才是折叠头该给的信息。
+
+folding header 的 chevron 折叠态写的是显式 `rotate-0`(不是"不加类"),已照抄。
+展开的内容是**第三个兄弟**且带入场动画:`opacity 0→1` + `translateY(-8px)→0`,
+220ms / `cubic-bezier(.33,1,.68,1)`(reduced-motion 120ms 且不位移)。
+
+### 推理块(`reasoning`,源码 `LT`)—— 上一版几乎全错
+
+| 上一版(照 VS Code 抄) | Codex 实测 |
+|---|---|
+| 每段推理一个 `.chat-thinking-item` + `codicon-circle-filled` 圆点,连成思维链 | **一整块 markdown**,没有分段、没有圆点 |
+| 表头显示推理正文里的小标题 | `Thinking` / `Thought for {elapsed}` / `Thought` 三档,**从不显示小标题** |
+| 固定高度 200px(VS Code `THINKING_SCROLL_MAX_HEIGHT`) | **8.75rem = 140px** |
+| ResizeObserver + scrollTop 手写贴底 | `flex flex-col-reverse` |
+| onScroll 里算上下渐隐、切四个类 | `vertical-scroll-fade-mask` + 滚动驱动动画 |
+
+小标题的去处:`stripHeading` 把它从正文里**剥掉丢开**,另一条 `extractLastHeading`
+把它喂给**轮次级的活动摘要**(另一个表面,WS 还没有)。所以它不是"该显示在这里
+但漏了",是属于别的地方 —— 显示在表头会和正文第一行重复一遍。
+
+> 这条是**截图逮到的**:改完先看 DOM 全对,截图里那行写着「核对求值规则」而不是
+> 「Thought」才露馅。四样验证里"截图"不是走过场。
+
+### 图标映射(`Fg(item)`)
+
+全部 `aria-hidden` + 共享常量 `Lg = 'icon-xs shrink-0 text-token-conversation-body'`:
+
+| 条目 | 图标 |
+|---|---|
+| `exec` + `parsedCmd.type === 'read'` | 翻开的书(`book-open` chunk) |
+| `exec` + `'search'` | 放大镜(与 WS 已有的 `SearchIcon` **path 逐字相同**) |
+| `exec` + `'list_files'` | 文件夹 |
+| `exec` + `executionStatus === 'interrupted'` | 圆角实心方块(停止) |
+| `exec` + 网络命令 | 地球(与 WS `BrowserGlobeIcon` 逐字相同) |
+| `exec` 兜底 | 终端 |
+| `patch` | 笔(**与 composer 的 EditIcon 不是同一个**:那个 21 宽,这个 20 宽) |
+| `web-search` | 地球 |
+| `context-compaction` | 两条横线向中间收 |
+| `stream-error` | **wifi 弧线**(不是错误图标 —— 用"连接"表达断流) |
+| `system-error` | 圆圈感叹号 |
+| `reasoning` / `todo-list` / `assistant-message` / `user-message` / `worked-for` | **无图标** |
+
+11 个由 `scripts/extract-activity-icons.mjs` 从产物生成(21 条 path 全部逐字比对通过),
+不手抄:这些 path 有的两千多字符,抄错一位不报错,只是形状微妙地歪掉。
+
+### 计划(`todo-list`,源码 `FE` → `IE`,tooltip 内容 `BE`)
+
+| 上一版 | Codex |
+|---|---|
+| 常驻展开的卡片:`checklist 图标 + Plan · 2/5` + 一整个 `<ul>` | **一颗 pill**:12px 圆环 + `Step 2 / 5`,清单收在 rich tooltip 里 |
+| 每项一个 codicon(`pass`/`record`/`circle-outline`)+ 三种语义色 | 空心圆 / 圆圈勾**两个**图标,完成项 `text-token-text-tertiary` |
+
+圆环:`pathLength={100} strokeDasharray={100} strokeDashoffset={100 - percent}`
+—— 用 `pathLength` 把周长归一化成 100,dashoffset 直接就是百分比,不用算 `2πr`;
+`transform="rotate(-90 6 6)"` 把起点从三点钟转到十二点钟;底圈同一个圆 `opacity: 0.16`。
+
+### 顺手抓到的两个**既有 bug**(不是本轮引入的)
+
+1. **`text-size-chat` 从来没被提取过。** `.text-size-chat{font-size:var(--codex-chat-font-size)}`
+   是 Codex 自己写的规则,不是 Tailwind 生成的,提取器的 NAMED 里没有它。
+   后果:整个会话流的文字都停在 16px 根字号,Codex 是 14px —— 而每个 className
+   都写着 `text-size-chat`,肉眼根本看不出"这条类没生效"。
+   实测:WS 16px/16px vs Codex 14px/13px。已把 `text-size-chat{,-sm}` /
+   `text-size-code{,-sm}` / `icon-xxs` / `disambiguated-digits` / `font-vscode-editor`
+   加进 NAMED 重跑,现在两侧 14px/13px 全等。
+2. **turn 的段间隔实际是 0。** Codex 的 gap 组件(`XC`)是
+   `<div aria-hidden className="w-full" style={{height: 'var(--conversation-item-gap, 16px)'}}/>`
+   —— **高度是内联给的**。我上一轮只写了 `<div className="w-full"/>`,而容器是
+   `flex flex-col gap-0`,于是三段全贴在一起。DOM 结构对了、节点也确实存在,
+   **结构 diff 看不出来** —— 这也解释了 Codex 为什么把 `gap-0` 显式写在容器上:
+   间距只能由这些槽提供,容器不许有自己的 gap。
+
+### 本轮验证记录(四样都做了)
+
+- **结构**:15 个活动行(`BUTTON` + `DIV` 两种形态都在)、10 个 `icon-xs` 图标、
+  8 个 chevron、4 条折叠头 + 4 条发丝线、17 个分隔槽(高度 **16px**)、8 个 markdown 根、
+  4 个 `data-local-conversation-final-assistant`
+- **几何**:活动摘要 14px;收起态 `height 0 / overflow hidden / pointer-events none /
+  opacity 0 / aria-hidden / inert`;展开态 `130.56px / overflow visible / auto`;
+  展开体内边距 `8px 0 4px 24px`(= `gap-2 pt-2 pb-1` + `ps-6`);
+  推理滚动窗 `max-height 140px` + `animation-timeline: scroll(self y)`;
+  终端 `whitespace: pre` / 13px;`DiffCounts` 的 `font-feature-settings: "cv01","cv02"`
+- **交互**(真鼠标事件,不是 dispatchEvent):
+  - 点折叠头:`0px → 114px`,`aria-expanded false→true`,chevron `opacity 0→1`、`rotate 90deg`,
+    再点回 `0px`
+  - hover 活动行:`chevronOpacity 0→1`,摘要色变 `token-foreground`
+  - 点文件链接:`rowExpanded` 保持 `false` —— `stopPropagation` 生效,没有顺带展开
+- **截图**:浅色 + 深色各一张,`/tmp/cmp/round11-activity.png` / `round11-dark3.png`
+- **控制台**:干净(顺手修掉了预览页的 `duplicate key: t1` —— 那是 fixture 里
+  request/response 同 id 却各渲染一个 turn 造成的)
+
+一个**排除掉的疑点**:活动行的 `cursor` 实测是 `default` 而不是 `pointer`。
+两侧都查了:`--cursor-interaction` 在 `<body>` 上被 `[data-codex-window-type=electron] body`
+设成 `default`,**Codex 也一样** —— Electron 里整个应用不用手型光标。不是 bug。
+
+### 预览页(`preview.tsx`)这一轮也改了 —— 它上一轮漏测了骨架
+
+之前 preview 只渲染 `ThreadUserMessage` / `ThreadAssistantMessage`,**不走过程段**,
+所以「Worked for」折叠头、段间隔、活动行一个都测不到 —— 骨架改了它却测不出来。
+现在它与 ChatView 走同一条路(合并 request/response 成 turn + 三段式)。
+另外它的 light/dark 开关原先只切 `<html>` 的类,**Monaco 不跟着换主题**
+(它订阅的是 `themeStore`),深色页面上代码块留一块白底;已补 `publishTheme(v)`。
+
+> 预览页仍有一处已知限制:`data-theme`(给 `.hljs-*` 选档)由 `useTheme()` 的
+> context 决定,而 context 只跟系统外观走,所以预览页切深色时代码块的 `data-theme`
+> 仍是 light。真应用里 ThemeProvider 两件事一起做,不存在这个问题。
+
+## 剩余差距(明确没做,不是漏了)
+
+1. **代码块与 diff 的渲染引擎仍是 Monaco。** Codex 用 **highlight.js**
+   (`highlight-code-bx-gqOKs.js` 注册 40 个语言,产出 `.hljs-*` —— 那批 CSS
+   已经在 `assets/codex/highlight.css` 里,目前是死代码);diff 是自研的
+   turn-diff 行(`h-9 border-b border-token-border bg-token-dropdown-background`)。
+   **外壳已经换成 Codex 的 `CodeSnippet` 了**(`data-markdown-copy` /
+   `contain-inline-size` / 标题栏 / `bg-token-text-code-block-background`),
+   换引擎只需要替换 `<code>` 里的内容 —— 但要加依赖、对 40 个语言、还牵连 DiffView,
+   单列一轮。`theme/themes.ts` 里那条 `TODO(Phase 3)` 说的就是这件事。
+2. **终端输出的 ANSI 颜色。** Codex 把输出交给 ANSI→HTML 转换器,产出 `.ansi-red-fg`
+   这类 span(类在 `worktree-init-tool-activities-CxuoHau6.css`,颜色取
+   `--color-token-terminal-ansi-*` —— **这些 token WS 已经有了**,缺的是类规则
+   与解析器)。现在仍是纯文本,含转义序列的输出会显示成可见乱码。这是既有行为
+   (之前的 `<pre class="chat-terminal-output">` 也一样),本轮没有改善。
+3. **审批控件的 Codex 版没找到。** bundle 里有
+   `localConversation.automaticApprovalReview.*`(7 title + 5 actionSummary)与
+   `approvalRequest.inProgress`,但那些是**对自动审批结果的回顾**,不是给用户点的
+   allow/deny;`permission-request` 分支渲染的 `TO` 在 dump 里是空壳。翻遍 4714 个
+   chunk 没找到命令审批的按钮文案。所以 `ToolConfirmation` 只对齐了能对齐的部分:
+   外壳用活动行,按钮类名逐字取自 Codex `Button` 的两张表(`primary` / `secondary` /
+   `ghost` + `size="compact"`),语义(Allow / Allow for this session / Skip)仍是 WS 协议的。
+4. **`useElementHeight` 每个元素单开一个 ResizeObserver。** Codex 全应用共用一个
+   (`useResizeObserver` + `ResizeObserverProvider`)。可观察行为相同,差在 observer 实例数。
+5. **推理耗时**(`Thought for {elapsed}`)与**折叠头的实时计时器**:协议不给推理耗时,
+   turn 模型也没有"过程段仍在进行"这个状态位,两者都退到 Codex 自己的兜底分支。
+6. **模式菜单的键盘导航**(上一轮就挂着):Codex 是 Radix menu(↑↓ / Home/End / typeahead),
+   目前只有 Escape 与点击外部关闭。
+
+## 既有 lint / tsc 债(非本轮引入,已核对)
+
+- `tsc`:7 个 error,全在 `components/panel/`(改动前后都是 7)
+- `eslint`:1 个 error 在 `state/AppShellContext.tsx:367`(effect 里同步 setState)
+  + `ProjectRow.tsx` / `SortableProjects.tsx` 的 dnd-kit `react-hooks/refs` 警告
+- 本轮改动的文件全部 lint 干净
