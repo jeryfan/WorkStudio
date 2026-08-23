@@ -10,3 +10,7 @@ resources/agent/
 
 # 浏览器自动化（对话区视觉核对）留下的截图与日志
 .playwright-mcp/
+
+# tsc --incremental 的缓存。tsconfig.web.tsbuildinfo 之前被误提交过,
+# 每次 typecheck 都会让工作区变脏(而且它会让 git stash 在 pop 时冲突)。
+*.tsbuildinfo
