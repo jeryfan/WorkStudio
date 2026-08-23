@@ -220,9 +220,25 @@ const NAMED = [
   'horizontal-scroll-fade-mask',
   'vertical-scroll-fade-mask',
   'heading-xl',
+  // 会话区的字号标度 —— **不是** Tailwind 生成的,Codex 自己写的四条规则
+  // (`font-size:var(--codex-chat-font-size)` / `calc(… - 1px)`)。
+  // 漏掉这四个的后果实测过:整个会话流的文字都退到 16px 根字号,
+  // Codex 是 14px —— 而且因为每个 className 都写着 `text-size-chat`,
+  // 肉眼看不出"这条类根本没生效"。
+  'text-size-chat',
+  'text-size-chat-sm',
+  'text-size-code',
+  'text-size-code-sm',
   'icon-2xs',
   'icon-xs',
+  'icon-xxs',
   'icon-sm',
+  // 增删行数那种「+12 -3」要用 cv01/cv02 字形:默认字形里 1 和 l、0 和 O
+  // 在小字号下分不开(Codex 给它单起了一个类名,含义就是"消歧数字")。
+  'disambiguated-digits',
+  // 终端输出用的等宽字族(`var(--vscode-editor-font-family, var(--font-mono-default))`)。
+  // Tailwind 不会生成它 —— `font-vscode-editor` 不是 `--font-*` 命名空间里的键。
+  'font-vscode-editor',
   'home-banners',
   'cursor-interaction',
   'no-drag',

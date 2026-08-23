@@ -36,6 +36,11 @@
 }
 
 @layer components {
+  .icon-xxs {
+    width:12px;
+    height:12px
+  }
+
   .icon-2xs {
     width:14px;
     height:14px
@@ -277,6 +282,30 @@
   .sidebar-item {
     border-radius:var(--radius-lg);
     corner-shape:var(--codex-corner-shape)
+  }
+
+  .font-vscode-editor {
+    font-family:var(--vscode-editor-font-family,var(--font-mono-default))
+  }
+
+  .disambiguated-digits {
+    font-feature-settings:"cv01" on, "cv02" on
+  }
+
+  .text-size-chat {
+    font-size:var(--codex-chat-font-size)
+  }
+
+  .text-size-chat-sm {
+    font-size:calc(var(--codex-chat-font-size) - 1px)
+  }
+
+  .text-size-code {
+    font-size:var(--codex-chat-code-font-size)
+  }
+
+  .text-size-code-sm {
+    font-size:calc(var(--codex-chat-code-font-size) - 1px)
   }
 
   .sidebar-hover-icon-button-tint {
