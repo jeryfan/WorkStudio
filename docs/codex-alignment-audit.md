@@ -1394,3 +1394,142 @@ Codex 的 `csc` 外层只负责定位,渐变在内层,而且:
   铺满整行会把左右两侧的背景也压出一道色差
 - 渐变是 `from-X via-X` 而**没有 `to-`**(Tailwind 默认 `to-transparent`),
   下半截实心、上半截淡出;只写 `from-X` 的话中点就开始透明,遮不住紧贴输入区那几行
+
+---
+
+## 实测比对:「调研下工控猫」这条会话(用户报的四处不一致)
+
+同一条会话(两侧 `data-turn-key` 完全相同:`01a00942-25bb-7d10-b43f-f8`),
+在 Codex 与 WS 各 dump 一次 DOM 树逐项比。**四处不一致全部复现,根因如下。**
+
+### ① 「Worked for」不该总是出现 —— 它是**协议条目**,不是算出来的
+
+WS 现在的做法是"只要有 `startedAtMs`/`completedAtMs` 就显示 `Worked for {时长}`",
+所以这条会话的 turn 0 显示了「Worked for 5m 33s」+ 那条发丝线。
+**Codex 这个 turn 完全没有折叠头,过程条目直接摊开。**
+
+Codex 的真实来源(`local-conversation-turn` 源码 `_a`):
+
+```js
+for (const u of units) {
+  if (u.kind === 'standalone' && u.item.item.type === 'worked-for') {
+    workedForItem = u.item.item      // ← 从条目流里**摘出来**的
+    continue
+  }
+  ...
+}
+```
+
+`worked-for` 是**协议里的一种条目类型**。另有一个 `workedDurationMs` 是传进
+turn 组件的 prop。折叠头显不显示由
+
+```js
+jn = turnStatus == null && !showFullTranscript && !startAfterTurnIntro && mn && wn
+Ln = jn && collapsedMessageCount > 0 && !onlyContextCompaction
+```
+
+决定 —— `showToggle` 有五六个前置条件,**不是"有过程条目就显示"**。
+(`mn` 还没解出来,其余都对上了。)
+
+文案三档在上一轮已经改对(`Worked for {time}` / `{n} previous messages` / 实时计时器),
+**但触发条件整个错了**。
+
+### ② Codex 一条 reasoning 都不渲染,WS 渲染了 16 条
+
+Codex turn 0 的过程段(实测,按顺序):
+
+```
+活动行  Searched the web for 工控猫
+助手消息 «初步搜索显示"工控猫"主要是一个工控行业的垂直B2B电商平台…»
+助手消息 «直接抓取被 WAF 拦截了,我改用浏览器渲染和更多搜索来补齐信息。»
+助手消息 «已获取官网"关于我们"页面。现在我来补齐融资、股权关系及最新动态等信息。»
+活动行  Searched the web for 工控网(北京)电子商务股份有限公司
+助手消息 …(共 9 条)
+成组行  Used Playwright integration, searched the web   ← 可展开
+活动行  Searched the web for …
+成组行  Used Playwright integration
+```
+
+那些中间文字在 Codex 里是 **assistant-message**(`h4 «ChatGPT said:»` + MarkdownRoot,
+带 `data-response-annotation-target=item-N`),**不是** reasoning。
+`grep 'Thought\|Thinking' codex-turn0.txt` → **0**;WS 那份 → **16**。
+
+WS 的 adapter 分得是对的(`agentMessage`→markdown、`reasoning`→thinking),
+说明协议确实推了 reasoning,而 **Codex 选择不渲染它**。
+
+Codex 有一个设置 `conversationDetailMode`,默认 `STEPS_COMMANDS`,
+枚举 `['STEPS_PROSE','STEPS_COMMANDS','STEPS_EXECUTION']`,描述是
+"How much turn detail Codex shows"。reasoning 的过滤**不在渲染层**
+(`case 'reasoning'` 无条件渲染 `LT`),所以要么在建 units 的上游、要么在数据层。
+**这一条还没定位到,是下一步要查的。**
+
+### ③ 连续的 MCP 工具调用会**成组**成一行 —— WS 没有这个形态
+
+数量差:同一 turn,Codex **6 个**活动行,WS **29 个**。
+
+Codex 的组(实测结构):
+
+```
+div.flex.min-w-0.flex-col
+├ button.group/activity-header [aria-expanded]                      ← 组表头
+│ ├ svg.rounded-2xs.icon-xs.bg-token-main-surface-primary.object-contain   ← **MCP 服务器 logo**
+│ └ «Used Playwright integration, searched the web»
+└ div
+  └ div.vertical-scroll-fade-mask.flex.max-h-56.flex-col.overflow-y-auto   ← 组体:224px 滚动窗
+    ├ div > div.w-full + ConversationItem > ActivityRow  «Searched the web for …»
+    ├ div > div.w-full + ConversationItem > ActivityRow  «Browser navigate»(可展开)
+    └ …
+```
+
+三个要点:
+- 组表头的图标是**服务器 logo**(圆角 + 底色 + `object-contain`),不是线稿图标
+- 组体是 `max-h-56` 的**滚动窗** + `vertical-scroll-fade-mask`
+- 组内每个子项前面有一个 `div.w-full` gap(不是 flex gap)
+- 子项摘要是 **`Browser navigate`** —— MCP 工具名 `browser_navigate` 经
+  `pf(name, {style:'sentence'})` 转成句首大写的人话
+
+`_a()` 里 `u.kind === 'group'` 与 `Ao()` 的 `t.kind === 'group' ? t.items.length : 1`
+都印证了"组"是一等公民。**WS 的模型里没有 group 这一层。**
+
+### ④ MCP 工具的结果块是**散文**排版,不是代码块
+
+Codex 展开一个 `Browser navigate` 之后:
+
+```
+div.overflow-visible                                     ← DisclosureBody
+└ div.flex.flex-col.gap-[var(--conversation-grouped-item-gap,4px)].pt-1
+  ├ div.[&_*]:text-token-non-assistant-body-descendant.flex.flex-col.gap-0.5
+  │ └ div.relative.overflow-clip.rounded-lg.border.border-token-border-heavy
+  │      .bg-token-text-code-block-background
+  │   ├ div.sticky.top-0.z-10.flex.items-center.justify-between    ← 标题栏**是 sticky 的**
+  │   │ ├ div.min-w-0.truncate  «plaintext»
+  │   │ └ div.flex.items-center                                     ← 复制按钮
+  │   └ div.max-h-48.overflow-y-auto.p-2
+  │     └ pre.text-token-description-foreground/80.m-0
+  │           .whitespace-pre-wrap.break-words.font-sans            ← **font-sans + 可换行**
+  └ div.inline-flex.w-fit [data-state=closed][aria-expanded=false]  ← "看更多"按钮
+```
+
+与 WS 现在的差别:
+
+| | WS | Codex |
+|---|---|---|
+| 结构 | 两个完整代码块(Tool / Result) | **一个** `pre` 块 |
+| 字体 | 等宽 + hljs 高亮 | **`font-sans`**,统一 `text-token-description-foreground/80` |
+| 换行 | `whitespace-pre!`(不换行) | **`whitespace-pre-wrap break-words`** |
+| 边框 | 无 | `border border-token-border-heavy` |
+| 标题栏 | 普通 | **`sticky top-0 z-10`**(滚动时钉住) |
+| 底部 | 无 | 一个"看更多"的展开按钮 |
+
+也就是说 **MCP 的返回值 Codex 当自然语言/markdown 排版**(它经常就是散文),
+而不是当代码。WS 现在一律塞进代码块,又是等宽又是不换行,长 URL 会横向溢出。
+
+### 下一步的顺序(从确定性高到低)
+
+1. **④ 结果块换成散文排版** —— 结构与类名已经全拿到,改动集中在 InputOutputToolPart
+2. **① `Worked for` 的触发条件** —— 至少先把"没有时长就不显示折叠头"做对;
+   `worked-for` 条目类型要看 WS 的协议有没有对应物
+3. **② reasoning 为什么不显示** —— 还需要定位;在没定位之前**不要**盲目隐藏,
+   否则可能把 WS 协议里真正有用的推理内容也砍掉
+4. **③ MCP 成组** —— 最大的一块:模型层要加 `group` 单元、需要服务器 logo 通道
+   (WS 目前没有)、工具名要做 sentence-case 转换
