@@ -419,57 +419,76 @@ function Preview(): React.JSX.Element {
        * 外层用与 MainContentLayout / ChatView 一致的壳层类名 —— 宽度由
        * --thread-content-max-width + px-toolbar 决定,用普通 div 撑高就测不出
        * 应用里真实的布局。
+       *
+       * **`main` 上面这两层不能省。** AppShell 的注释里写着那条高度传递链:
+       *
+       *   应用根有确定高度(100vh) → 主行 flex-1 + min-h-0
+       *   → aside/main 靠 align-items:stretch 自动等高
+       *   —— 任何一环写成块级,后面全得手写高度
+       *
+       * 之前这里把 `main` 直接挂在 React 根那个**块级** div 下面:`main` 从模块
+       * CSS 拿到 `flex:1`,但父级不是 flex 容器,这条声明就是死的 → 它的高度由
+       * 内容决定(实测 1445px)→ 溢出 800px 的视口、被 `body{overflow:hidden}` 裁掉,
+       * 而 `.thread-scroll-container` 自己和内容一样高,`scrollHeight ≈ clientHeight`
+       * → **整页滚不动**。
+       *
+       * 之前没暴露出来只是因为 fixture 内容比视口短;这一轮补上过程段之后内容
+       * 长过一屏,立刻就撞上了。
        */}
-      <main className="codex-MainContentSurface">
-        <div className="relative flex h-full flex-col min-h-0">
-          <ThreadScrollContainer
-            footer={
-              <>
-                {/* 计划挂在输入区上方，不进回复流 —— 与上游一致 */}
-                <TodoListPart
-                  todos={[
-                    { title: '读上游的色彩注册表', status: 'completed' },
-                    { title: '生成四套主题的 token', status: 'completed' },
-                    { title: '把审批缝到工具调用上', status: 'in-progress' },
-                    { title: '删掉旧的 session 视图', status: 'not-started' }
-                  ]}
-                />
-                <div className="rounded-lg border border-dashed border-token-border p-3 text-size-chat text-token-description-foreground">
-                  输入区占位（应用里是 Composer）
-                </div>
-              </>
-            }
-          >
-            {empty ? (
-              <div className="text-sm text-token-description-foreground">Loading…</div>
-            ) : (
-              /*
-               * 把 request / response 两行合成一个 turn —— 与 ChatView 一致。
-               * 之前是各渲染一个 `<ThreadTurn key={row.id}>`,而 fixture 里
-               * 同一轮的两行 **id 相同**,于是控制台一直在报
-               * "Encountered two children with the same key: t1"。
-               * 更要紧的是结构也不对:Codex 的一个 turn 里必须同时有用户消息
-               * 与回复,分成两个 turn 就测不到段间隔与三段式。
-               */
-              TURN_GROUPS.map((g) => (
-                <ThreadTurn key={g.key} turnKey={g.key}>
-                  {g.request && (
-                    <>
-                      <ThreadUserMessage unitKey={g.key}>
-                        <MarkdownPart
-                          content={{ kind: 'markdownContent', content: g.request.text }}
-                        />
-                      </ThreadUserMessage>
-                      <ThreadTurnGap />
-                    </>
-                  )}
-                  {g.response && <PreviewTurnBody row={g.response} />}
-                </ThreadTurn>
-              ))
-            )}
-          </ThreadScrollContainer>
+      <div className="relative flex flex-col" style={{ height: '100vh' }}>
+        <div className="relative isolate flex max-h-full min-h-0 w-full flex-1">
+          <main className="codex-MainContentSurface">
+            <div className="relative flex h-full flex-col min-h-0">
+              <ThreadScrollContainer
+                footer={
+                  <>
+                    {/* 计划挂在输入区上方，不进回复流 —— 与上游一致 */}
+                    <TodoListPart
+                      todos={[
+                        { title: '读上游的色彩注册表', status: 'completed' },
+                        { title: '生成四套主题的 token', status: 'completed' },
+                        { title: '把审批缝到工具调用上', status: 'in-progress' },
+                        { title: '删掉旧的 session 视图', status: 'not-started' }
+                      ]}
+                    />
+                    <div className="rounded-lg border border-dashed border-token-border p-3 text-size-chat text-token-description-foreground">
+                      输入区占位（应用里是 Composer）
+                    </div>
+                  </>
+                }
+              >
+                {empty ? (
+                  <div className="text-sm text-token-description-foreground">Loading…</div>
+                ) : (
+                  /*
+                   * 把 request / response 两行合成一个 turn —— 与 ChatView 一致。
+                   * 之前是各渲染一个 `<ThreadTurn key={row.id}>`,而 fixture 里
+                   * 同一轮的两行 **id 相同**,于是控制台一直在报
+                   * "Encountered two children with the same key: t1"。
+                   * 更要紧的是结构也不对:Codex 的一个 turn 里必须同时有用户消息
+                   * 与回复,分成两个 turn 就测不到段间隔与三段式。
+                   */
+                  TURN_GROUPS.map((g) => (
+                    <ThreadTurn key={g.key} turnKey={g.key}>
+                      {g.request && (
+                        <>
+                          <ThreadUserMessage unitKey={g.key}>
+                            <MarkdownPart
+                              content={{ kind: 'markdownContent', content: g.request.text }}
+                            />
+                          </ThreadUserMessage>
+                          <ThreadTurnGap />
+                        </>
+                      )}
+                      {g.response && <PreviewTurnBody row={g.response} />}
+                    </ThreadTurn>
+                  ))
+                )}
+              </ThreadScrollContainer>
+            </div>
+          </main>
         </div>
-      </main>
+      </div>
     </>
   )
 }
