@@ -87,3 +87,6 @@ export { BrowserReloadIcon } from './BrowserReloadIcon'
 export { OpenExternalIcon } from './OpenExternalIcon'
 export { AnnotateIcon } from './AnnotateIcon'
 export { BreadcrumbChevronIcon } from './BreadcrumbChevronIcon'
+
+/* —— 会话活动行图标(scripts/extract-activity-icons.mjs 从 Codex 产物生成) —— */
+export * from './activity'

@@ -1,6 +1,6 @@
 import type { IconProps } from './types'
 
-export function SearchIcon({ className }: IconProps): React.JSX.Element {
+export function SearchIcon({ className, 'aria-hidden': ariaHidden }: IconProps): React.JSX.Element {
   return (
     <svg
       width="16"
@@ -9,6 +9,7 @@ export function SearchIcon({ className }: IconProps): React.JSX.Element {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden={ariaHidden}
     >
       <path
         fillRule="evenodd"

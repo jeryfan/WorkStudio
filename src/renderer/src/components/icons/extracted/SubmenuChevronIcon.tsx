@@ -1,9 +1,13 @@
 import type { IconProps } from '../types'
 
-export function SubmenuChevronIcon({ className }: IconProps): React.JSX.Element {
+export function SubmenuChevronIcon({
+  className,
+  'aria-hidden': ariaHidden
+}: IconProps): React.JSX.Element {
   return (
     <svg
       className={className}
+      aria-hidden={ariaHidden}
       width="20"
       height="20"
       viewBox="0 0 20 20"
