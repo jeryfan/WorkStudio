@@ -761,6 +761,49 @@ aria-haspopup / aria-expanded",一直是个死按钮。顺带纠正一点:
 9. **模式菜单的键盘导航**:Codex 是 Radix menu(↑↓ 选择、Home/End、typeahead),
    目前只实现了 Escape 与点击外部关闭。
 
+10. **#15 parts 类名迁移** —— 已测绘,**卡在取证上**,没有动手改。
+
+    现状(只统计 tsx,不含那 10 个 CSS):`interactive-*` / `chat-*` /
+    `rendered-markdown` / `codicon` 分布在 **20 个组件**里,高频的是
+    `interactive-item-container`(23)、`chat-thinking-box`(22)、
+    `chat-used-context-label`(14)、`interactive-request`(13)、
+    `chat-font-size-body-s`(13)。
+
+    **卡点:本机运行的 Codex 里拿不到这些构件的 DOM。** 打开内容最长的那条会话
+    (470 个节点)后,`.thread-scroll-container` 里出现的模块类只有 markdown 一族
+    —— `_Paragraph_` / `_Heading_` / `_List(Item)_` / `_Blockquote_` /
+    `_HorizontalRule_` / `_Table*_` / `_InlineMarkdown(Isolate)_` /
+    `_MarkdownRoot_` / `_Mention_` / `_Icon(Container)_`,**这些已经迁过了**。
+    工具调用、思考块、代码块、diff、TodoList、审批控件一个都没有,
+    所以它们的 Codex 类名/层级此刻无法实测。照猜写等于自己编类名,不做。
+
+    **已知可用的对位模块类**(在生成的 components.css 里已存在,可直接消费):
+    `codex-CodeBlock` / `codex-CodeBlockPlaceholder`(代码块)、
+    `codex-TaskList` / `codex-TaskListItem`(TodoList)、
+    `codex-activityPill*` / `codex-ActivityText` / `codex-ActivityStackViewport`
+    (工作中/活动条)、`codex-thinkingShimmer`(思考文字流光)、
+    `codex-throbber` / `codex-throbberArc`(加载转圈,`stroke-dasharray` 以
+    **度**为单位,由 `--browser-tab-throbber-sweep` 驱动)、
+    `codex-timeline*`(时间线)、`codex-MermaidBlock` / `codex-MarkdownTablePreview`。
+
+    **图标那一半也一样卡。** `Codicon.tsx` 产出的是 VS Code **字体**类名
+    (`.codicon.codicon-x`),要移除 `@vscode/codicons` 就得把 18 个名字全换成 SVG:
+    `check copy chevron-down chevron-right circle-filled file checklist loading
+    edit terminal error warning info pass record circle-outline plug book`。
+    其中能直接对上 WS 已有(从 Codex 提取的)图标的只有一小半
+    (check→CheckIcon、copy→CopyIcon、chevron-*→ChevronIcon、file→DocumentsIcon、
+    terminal→TerminalIcon、edit→EditIcon、info→InfoIcon);
+    `pass / record / circle-outline / plug / book / checklist / error / warning /
+    circle-filled` 在 Codex 侧没有取到对应物,混着编会污染"图标全部来自 Codex"这条底线。
+
+    顺带查明一件事(改的时候能省一步):`ChatProgressMessagePart` 的 `loading`
+    转圈**从来不可见** —— 上游 CSS 写着
+    `.shimmer-progress > .codicon { display: none }`,shimmer 态图标被隐藏,
+    只有静止态的 `check` 会显示。所以那一处不需要找转圈图标,直接条件渲染即可。
+
+    **下一轮的正确起手式**:先在 Codex 里造出这些构件(发一条会触发工具调用/
+    思考/代码块/TodoList 的消息),再逐个抓 DOM;拿不到实测之前不要动 parts。
+
 ### 既有 lint 债(非本次改动引入)
 
 `ProjectRow.tsx` / `SortableProjects.tsx` 共 9 个 error:dnd-kit 的 `setNodeRef`
