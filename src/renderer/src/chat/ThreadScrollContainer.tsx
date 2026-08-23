@@ -84,11 +84,28 @@ export function ThreadScrollContainer({
                     data-thread-scroll-footer="true"
                     className="sticky bottom-0 z-10 mt-auto w-full pb-4"
                   >
-                    {/* 底部渐隐 —— 让最后一条消息滑到输入区下方时淡出,不是硬切 */}
+                    {/*
+                     * 底部渐隐 —— 让最后一条消息滑到输入区下方时淡出,不是硬切。
+                     *
+                     * **外面这层只是定位壳,渐变在里面那层。** 之前只写了外壳、
+                     * 里面是空的,于是它什么都不遮 —— 正文直接从输入区下面透出来
+                     * (真应用里第一次看到长会话就撞上了:推理文字压在 composer 上)。
+                     *
+                     * 内层的宽度约束与消息流、输入区**共用同一串**
+                     * (`mx-auto w-full max-w-(--thread-content-max-width) px-toolbar`,
+                     * Codex 把它抽成了常量 `N3`)—— 渐变只能盖住内容列的宽度,
+                     * 铺满整行会把左右两侧的背景也压出一道色差。
+                     *
+                     * 渐变写的是 `from-X via-X` 而**没有 `to-`**:Tailwind 默认
+                     * `to-transparent`,所以下半截是实心表面色、上半截淡出。
+                     * 只写 `from-X` 的话中点就开始透明,遮不住紧贴输入区那几行。
+                     */}
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-x-0 bottom-0 z-0 flex h-full w-full justify-center pt-4"
-                    />
+                    >
+                      <div className="mx-auto w-full max-w-(--thread-content-max-width) px-toolbar z-0 h-full bg-gradient-to-t from-token-main-surface-primary via-token-main-surface-primary" />
+                    </div>
                     <div
                       data-pip-obstacle="thread-footer"
                       className="relative z-10 flex flex-col mx-auto w-full max-w-(--thread-content-max-width) px-toolbar"
