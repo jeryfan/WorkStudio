@@ -1,5 +1,6 @@
 import type { ChatReconnectContent } from '../model/content'
 import { Collapsible } from './Collapsible'
+import { CadencedShimmer } from './CadencedShimmer'
 
 /**
  * 流断开重连。
@@ -30,7 +31,9 @@ export function ChatReconnectPart({
   const title = (
     <span className="progress-container shimmer-progress">
       <span className="rendered-markdown progress-step">
-        <p className="chat-shimmer-text">{text}</p>
+        <p>
+          <CadencedShimmer>{text}</CadencedShimmer>
+        </p>
       </span>
     </span>
   )

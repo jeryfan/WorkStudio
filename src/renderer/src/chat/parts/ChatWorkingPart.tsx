@@ -1,4 +1,5 @@
 import type { ChatWorkingContent } from '../model/content'
+import { CadencedShimmer } from './CadencedShimmer'
 
 /**
  * "工作中" —— 移植自上游的 ChatWorkingProgressContentPart。
@@ -16,7 +17,9 @@ export function ChatWorkingPart({ content }: { content: ChatWorkingContent }): R
   return (
     <div className="progress-container shimmer-progress chat-working-part">
       <div className="rendered-markdown progress-step">
-        <p className="chat-shimmer-text">{content.label}</p>
+        <p>
+          <CadencedShimmer>{content.label}</CadencedShimmer>
+        </p>
       </div>
     </div>
   )

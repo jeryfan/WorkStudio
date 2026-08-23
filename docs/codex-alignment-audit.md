@@ -804,6 +804,63 @@ aria-haspopup / aria-expanded",一直是个死按钮。顺带纠正一点:
     **下一轮的正确起手式**:先在 Codex 里造出这些构件(发一条会触发工具调用/
     思考/代码块/TodoList 的消息),再逐个抓 DOM;拿不到实测之前不要动 parts。
 
+    ### 更新:换了取证路径 —— 从 CSS dump 的**文件名**入手
+
+    又扫了一遍 Codex 的 14 条会话,**没有一条**含工具调用/思考/代码块;
+    所以走不通"打开会话抓 DOM"。改从 `reverse/webview-dump/assets/` 的
+    **文件名**入手有效 —— 那些名字直接对应构件,而且每个文件里就那么几个类。
+
+    **三个已排除的错误对位**(照猜会全错,记下来省下一轮的时间):
+
+    | 我以为 | 实际是 | 怎么看出来的 |
+    |---|---|---|
+    | `codex-TaskList` = 计划/TodoList 组件 | markdown 的 GFM 复选框列表 | 模块 hash 是 `y8xrz`,与 `_Paragraph_y8xrz_82` / `_Table_y8xrz_39` 同一个 |
+    | `codex-activityPill*` / `codex-ActivityText` / `codex-ActivityStackViewport` = 会话的"工作中"指示 | **桌宠/头像浮层** | 规则里全是 `data-avatar-overlay-stack-*`;CSS 文件名也是 `avatar-overlay-*` |
+    | `codex-CodeBlock` = 工具输出的代码块 | markdown 的围栏代码块(这个能用) | 同样是 `y8xrz` hash |
+
+    **两个可用的真实对位**:
+    - `subagent-activity-chip-group-*.css` → `_chip_jj3nd_1`(= `codex-chip`),
+      subagent 活动 chip,是"工具活动行"最接近的东西
+    - `thinking-shimmer-*.css` → `_cadencedShimmer{,Active,Highlight,Sweep}_1q6es_*`
+      (= `codex-cadencedShimmer*`),**会话里"正在做事"的文字流光** ✅ 已落地
+
+### 已完成:文字流光迁到 Codex 的 cadencedShimmer
+
+`chat-shimmer-text` 在 tsx 里**已归零**(6 处全换),新增
+`chat/parts/CadencedShimmer.tsx`。
+
+它不是"给文字加渐变背景"—— 文字渲染**两遍**:底层一份 +
+`codex-cadencedShimmerSweep`(absolute 铺满 + 渐变 mask 开一条亮带)里再放一份
+`codex-cadencedShimmerHighlight`。两层动画位移**方向相反**
+(sweep `-50%→125%`,highlight `50%→-125%`),相消之后高亮副本在视觉上原地不动、
+只有那条亮带扫过它 —— 单层 `background-clip:text` 做不出这个效果。
+时序是 `steps(48,end)` 的 **1s 单次**(不是 infinite):是一次次"打拍子",
+不是连续流动。
+
+**载体类挑错过一次,值得记**:这一族只消费
+`--shimmer-text-secondary` / `--shimmer-contrast`,自己不定义,必须同时挂载体。
+
+| 载体 | contrast | 用途 |
+|---|---|---|
+| `loading-shimmer-pure-text` / `loading-shimmer` | `#ffffffbf`(白 75%) | 列表/侧栏 loading 态 |
+| `codex-thinkingShimmer` | `color-mix(--color-token-foreground 50%, transparent)` | **会话内**的思考/工作文字 |
+
+第一版挂了 `loading-shimmer-pure-text`,实测高亮算出来 `rgba(255,255,255,0.75)`
+—— 浅色背景上**看不见**(那条规则是给深色表面写的,它的 `.dark` 变体反而给黑色,
+语义是反的,应该是从 ChatGPT web 带过来的)。换成 `codex-thinkingShimmer` 后
+两个值都由 `currentColor` / `--color-token-foreground` 推导,深浅色都成立。
+
+顺带补了提取器的一个漏:`loading-shimmer` / `loading-shimmer-pure-text`
+两个载体类原先没被收进来(侧栏 loading 态的 meta 文本也用它),已加进 NAMED 重跑。
+
+**一个已排除的疑点**:`--shimmer-text-secondary` 里的 `var(--text-secondary)`
+在 WS 解析为空,导致底层文字用满色而不是 50%。查了两侧 `html`/`body`,
+**Codex 也是空** —— `--text-*` 那一族只在 `.loading-shimmer*` 作用域内自己定义。
+所以这不是提取漏了,WS 复现的就是 Codex 的实际行为,不用管。
+
+实测(在 WS 里现场造节点验 CSS):tokens 都解析、底色与高亮色不同、
+sweep `absolute` + 渐变 mask、两条动画都绑上 `1s steps(48) x1`;控制台干净。
+
 ### 既有 lint 债(非本次改动引入)
 
 `ProjectRow.tsx` / `SortableProjects.tsx` 共 9 个 error:dnd-kit 的 `setNodeRef`

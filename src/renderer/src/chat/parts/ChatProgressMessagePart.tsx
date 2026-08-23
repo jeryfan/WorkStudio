@@ -1,5 +1,6 @@
 import type { ChatProgressMessageContent } from '../model/content'
 import { Codicon } from './Codicon'
+import { CadencedShimmer } from './CadencedShimmer'
 
 /**
  * 进度行 —— 对应上游的 chatProgressContentPart.ts。
@@ -20,7 +21,9 @@ export function ChatProgressMessagePart({
     <div className={`progress-container${content.shimmer ? ' shimmer-progress' : ''}`}>
       <Codicon name={content.shimmer ? 'loading' : 'check'} spin={content.shimmer} />
       <div className="rendered-markdown progress-step">
-        <p className={content.shimmer ? 'chat-shimmer-text' : undefined}>{content.content}</p>
+        <p>
+          {content.shimmer ? <CadencedShimmer>{content.content}</CadencedShimmer> : content.content}
+        </p>
       </div>
     </div>
   )

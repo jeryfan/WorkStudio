@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatThinkingContent } from '../model/content'
 import { Collapsible } from './Collapsible'
 import { Codicon } from './Codicon'
+import { CadencedShimmer } from './CadencedShimmer'
 import { MarkdownPart } from './MarkdownPart'
 
 /**
@@ -83,8 +84,8 @@ export function ThinkingPart({ content }: { content: ChatThinkingContent }): Rea
       expanded={expanded}
       onToggle={() => setUserExpanded((v) => !v)}
       title={
-        <span className={content.isActive ? 'chat-thinking-title-shimmer chat-shimmer-text' : ''}>
-          {title}
+        <span className={content.isActive ? 'chat-thinking-title-shimmer' : ''}>
+          {content.isActive ? <CadencedShimmer>{title}</CadencedShimmer> : title}
         </span>
       }
       bodyRef={body}
@@ -116,7 +117,9 @@ export function ThinkingPart({ content }: { content: ChatThinkingContent }): Rea
             <span className="chat-thinking-icon">
               <Codicon name="circle-filled" />
             </span>
-            <span className="chat-thinking-spinner-label chat-shimmer-text">Thinking</span>
+            <span className="chat-thinking-spinner-label">
+              <CadencedShimmer>Thinking</CadencedShimmer>
+            </span>
           </div>
         )}
       </div>

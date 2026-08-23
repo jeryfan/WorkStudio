@@ -235,6 +235,12 @@ const NAMED = [
   'shadow-hairline',
   // 悬浮卡片(Tooltip variant="rich")的阴影:0.5px 描边 + --shadow-xl 两层叠加
   'shadow-xl-spread',
+  // 流光文字的**变量载体** —— `--shimmer-text-secondary` / `--shimmer-contrast`
+  // 只定义在这两个类上(含 `.dark` 变体)。`codex-cadencedShimmer*` 那一族只消费
+  // 不定义,少了载体两层文字会同色,流光完全看不见。侧栏 loading 态的
+  // meta 文本也用它(`loading-shimmer-pure-text min-w-[72px]`)。
+  'loading-shimmer',
+  'loading-shimmer-pure-text',
   // ProseMirror 基础层 —— Codex 里是**裸 .ProseMirror** 选择器(不带模块哈希),
   // 提供 white-space:break-spaces / word-wrap / font-variant-ligatures,
   // 以及占位符 `.ProseMirror .placeholder:after { content: attr(data-placeholder) }`。

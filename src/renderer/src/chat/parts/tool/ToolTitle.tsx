@@ -1,6 +1,7 @@
 import type { ToolInvocation } from '../../model/toolInvocation'
 import { toolFailed } from '../../model/toolDisplay'
 import { Codicon } from '../Codicon'
+import { CadencedShimmer } from '../CadencedShimmer'
 
 /**
  * 工具调用的标题行。
@@ -59,7 +60,9 @@ export function ToolTitle({
           }
         />
       )}
-      <span className={`chat-tool-label${running ? ' chat-shimmer-text' : ''}`}>{text}</span>
+      <span className="chat-tool-label">
+        {running ? <CadencedShimmer>{text}</CadencedShimmer> : text}
+      </span>
       {suffix && <span className="chat-tool-suffix">{suffix}</span>}
     </span>
   )

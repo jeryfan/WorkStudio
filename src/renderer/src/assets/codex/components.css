@@ -5649,6 +5649,10 @@
   0%{--left-fade:0;--right-fade:var(--edge-fade-distance,1rem)}.1%,99.9%{--left-fade:var(--edge-fade-distance,1rem);--right-fade:var(--edge-fade-distance,1rem)}to{--left-fade:var(--edge-fade-distance,1rem);--right-fade:0}
 }
 
+@keyframes loading-shimmer {
+  0%{background-position:-100% 0}to{background-position:250% 0}
+}
+
 @keyframes _loadingResultsShimmer_1fros_1 {
   0%{transform:translate(-100%)}to{transform:translate(100%)}
 }
