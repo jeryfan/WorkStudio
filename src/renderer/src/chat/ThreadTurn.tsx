@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 
 /**
@@ -197,4 +198,75 @@ export function ThreadItem({
     )
   }
   return <div>{children}</div>
+}
+
+/**
+ * 过程段 —— turn 的**中间那一段**,折叠头写着「Worked for 1m 28s」。
+ *
+ * 实测(Codex,展开/折叠各抓一次):
+ *
+ * ```
+ * div.flex.flex-col                                          ← 本组件的根
+ * ├ div.text-size-chat.text-token-text-secondary
+ * │ └ button[type=button][aria-expanded]
+ * │     .inline-flex.items-center.gap-1.rounded-md.border.border-transparent.text-size-chat
+ * │     .focus-visible:ring-2.focus-visible:ring-token-focus-border.focus-visible:outline-none
+ * │   └ span > span.text-token-conversation-body  «Worked for 1m 28s»
+ * ├ div.pt-1.text-size-chat.text-token-text-secondary
+ * │ └ div.w-full.border-t.border-token-border                ← 折叠态**只剩这条发丝线**
+ * └ [仅展开时存在的第三个兄弟] div
+ *   ├ div.w-full[aria-hidden="true"]
+ *   └ div.flex.flex-col.gap-[var(--conversation-item-gap,16px)]  ← 过程条目列表
+ * ```
+ *
+ * 几个实测要点:
+ * - **那条 `border-t` 折叠时也在**,不是展开才有的分隔线 —— 它是折叠头下面
+ *   固定的一条发丝线,展开的内容追加在它**之后**。
+ * - 展开的内容是**第三个兄弟**,不是塞进第二个 div 里;它自己又先放一个
+ *   `div.w-full[aria-hidden]` 空隔离元素,再接条目列表。
+ * - 条目间距走 `--conversation-item-gap`(16px),不写死。
+ * - 折叠头没有 chevron 元素?截图里有 `⌄`。这里按截图补一个 —— 但 DOM 里
+ *   `button > span > span` 之外没抓到额外节点,所以 chevron 应该是那个外层
+ *   `span` 的伪元素或 svg 兄弟;**没抓到就不编**,先只做文字 + aria-expanded,
+ *   等下一轮把 button 的完整 innerHTML 抓下来再补。
+ *
+ * 默认折叠:实测重新打开已完成会话时 `aria-expanded="false"`。
+ * 运行中是否默认展开还没实测,所以把初始值交给调用方(`defaultExpanded`)。
+ */
+export function ThreadProcessSection({
+  children,
+  durationLabel,
+  defaultExpanded = false
+}: {
+  children: ReactNode
+  /** 折叠头文案,例如 `Worked for 1m 28s` */
+  durationLabel: string
+  defaultExpanded?: boolean
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  return (
+    <div className="flex flex-col">
+      <div className="text-size-chat text-token-text-secondary">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
+        >
+          <span>
+            <span className="text-token-conversation-body">{durationLabel}</span>
+          </span>
+        </button>
+      </div>
+      <div className="pt-1 text-size-chat text-token-text-secondary">
+        <div className="w-full border-t border-token-border" />
+      </div>
+      {expanded && (
+        <div>
+          <div className="w-full" aria-hidden="true" />
+          <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
+        </div>
+      )}
+    </div>
+  )
 }

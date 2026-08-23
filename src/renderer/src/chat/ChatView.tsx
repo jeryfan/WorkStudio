@@ -4,7 +4,17 @@ import { Composer } from '../components/composer/Composer'
 import { latestTodos, turnsToRows } from './adapter/entryToContent'
 import { ChatActionsProvider } from './ChatActionsContext'
 import { ThreadScrollContainer } from './ThreadScrollContainer'
-import { ThreadAssistantMessage, ThreadTurn, ThreadTurnGap, ThreadUserMessage } from './ThreadTurn'
+import {
+  ThreadAssistantMessage,
+  ThreadItem,
+  ThreadItems,
+  ThreadProcessSection,
+  ThreadTurn,
+  ThreadTurnGap,
+  ThreadUserMessage
+} from './ThreadTurn'
+import { formatDuration } from '../utils/time'
+import type { ChatContent } from './model/content'
 import { ChatContentPart } from './parts/ChatContentPart'
 import { MarkdownPart } from './parts/MarkdownPart'
 import { ChatResponseFooter } from './parts/ChatResponseFooter'
@@ -96,6 +106,10 @@ export function ChatView(): React.JSX.Element {
           const req = group.request?.kind === 'request' ? group.request : undefined
           const res = group.response?.kind === 'response' ? group.response : undefined
           const text = res ? responsePlainText(res) : ''
+          // 尾部连续的 markdown = 最终输出;它之前的一切都是过程
+          const split = splitTurnContent(res?.content ?? [])
+          const process = split.process
+          const final = split.final
           return (
             <ThreadTurn key={group.key} turnKey={group.key}>
               {req && (
@@ -107,6 +121,35 @@ export function ChatView(): React.JSX.Element {
                 </ThreadUserMessage>
               )}
               {req && res && <ThreadTurnGap />}
+              {/*
+               * 过程段 —— Codex 的 turn 是**三段式**:用户消息 / 过程(可折叠) /
+               * 最终回复,三者是兄弟,段间夹 `div.w-full[aria-hidden]`。
+               * 之前 WS 把思考、工具调用和最终 markdown 全塞在同一个
+               * ThreadAssistantMessage 里,所以既没有「Worked for」折叠头,
+               * 过程也没法收起来。
+               *
+               * 怎么分:最终输出是**尾部连续的 markdown**,它前面的一切
+               * (思考、工具调用、进度、hook…)都算过程。实测依据是中间推理文字
+               * 与最终回复用的是同一套结构,区别只在最终那段的父级带
+               * `data-local-conversation-final-assistant` —— 所以按"位置"分而不是
+               * 按"类型"分,才和 Codex 一致。
+               */}
+              {res && process.length > 0 && (
+                <>
+                  <ThreadProcessSection
+                    durationLabel={workedForLabel(res.startedAtMs, res.completedAtMs)}
+                  >
+                    <ThreadItems>
+                      {process.map((content, index) => (
+                        <ThreadItem key={contentKey(content, index)}>
+                          <ChatContentPart content={content} />
+                        </ThreadItem>
+                      ))}
+                    </ThreadItems>
+                  </ThreadProcessSection>
+                  <ThreadTurnGap />
+                </>
+              )}
               {res && (
                 <ThreadAssistantMessage
                   unitKey={group.key}
@@ -126,7 +169,7 @@ export function ChatView(): React.JSX.Element {
                     data-markdown-text-style="assistant-message"
                     className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
                   >
-                    {res.content.map((content, index) => (
+                    {final.map((content, index) => (
                       <ChatContentPart key={contentKey(content, index)} content={content} />
                     ))}
                   </div>
@@ -139,4 +182,36 @@ export function ChatView(): React.JSX.Element {
       </ThreadScrollContainer>
     </ChatActionsProvider>
   )
+}
+
+/**
+ * 把一轮回复拆成「过程」与「最终输出」。
+ *
+ * 判据是**位置**而不是类型:从尾部往前收连续的 markdown 当最终输出,
+ * 其余归过程。这是实测得出的 —— Codex 里中间推理文字和最终回复用的是
+ * 完全同一套结构(`div.group.flex.min-w-0.flex-col[data-response-annotation-*]`
+ * + `h4.sr-only «ChatGPT said:»` + `codex-MarkdownRoot`),唯一区别是最终那段的
+ * 父级带 `data-local-conversation-final-assistant="true"`。既然类型分不出来,
+ * 就只能按位置分。
+ *
+ * 全是 markdown(没有任何工具调用/思考)时过程为空,于是不渲染折叠头 ——
+ * 与 Codex 一致(纯问答的 turn 没有「Worked for」那一行)。
+ */
+function splitTurnContent(content: ChatContent[]): {
+  process: ChatContent[]
+  final: ChatContent[]
+} {
+  let cut = content.length
+  while (cut > 0 && content[cut - 1].kind === 'markdownContent') cut -= 1
+  // 整轮都是 markdown:全部当最终输出,过程为空
+  if (cut === 0) return { process: [], final: content }
+  return { process: content.slice(0, cut), final: content.slice(cut) }
+}
+
+/** 折叠头文案 —— Codex 实测 `Worked for 1m 28s`;时长未知时退化成 `Worked for a moment` */
+function workedForLabel(startedAtMs?: number | null, completedAtMs?: number | null): string {
+  if (startedAtMs == null || completedAtMs == null || completedAtMs <= startedAtMs) {
+    return 'Worked for a moment'
+  }
+  return `Worked for ${formatDuration(completedAtMs - startedAtMs)}`
 }
