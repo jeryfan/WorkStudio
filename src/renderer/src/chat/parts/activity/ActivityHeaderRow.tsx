@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react'
 import { cx } from '../../../utils/cx'
+import { preserveViewportPosition, windowZoom } from '../../preserveViewportPosition'
 import { ActivityChevron, ActivityHeader, ActivityHeaderContent } from './ActivityHeader'
 import { ActivityRow } from './ActivityRow'
 
@@ -85,7 +86,11 @@ export function ActivityHeaderRow({
           aria-labelledby={disclosure.accessibleLabel == null ? summaryId : undefined}
           aria-expanded={disclosure.expanded}
           className="absolute inset-0 cursor-interaction focus-visible:ring-1 focus-visible:ring-token-focus-border focus-visible:outline-none focus-visible:ring-inset"
-          onClick={disclosure.onToggle}
+          onClick={(e) => {
+            // 见 preserveViewportPosition:反向 flex 容器里,展开会把这一行自己顶走
+            preserveViewportPosition(e.currentTarget, windowZoom())
+            disclosure.onToggle()
+          }}
         />
         <ActivityHeaderContent className="pointer-events-none relative shrink truncate text-size-chat [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
           {content}

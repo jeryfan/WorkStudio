@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { SubmenuChevronIcon } from '../../../components/icons'
 import { cx } from '../../../utils/cx'
+import { preserveViewportPosition, windowZoom } from '../../preserveViewportPosition'
 
 /**
  * 活动行表头的三个原语 —— 逐字对应 Codex 的
@@ -126,7 +127,11 @@ export function ActivityHeader({
       data-testid={testId}
       dir={dir}
       aria-expanded={disclosure.expanded}
-      onClick={disclosure.onToggle}
+      onClick={(e) => {
+        // 见 preserveViewportPosition:反向 flex 容器里,展开会把这一行自己顶走
+        preserveViewportPosition(e.currentTarget, windowZoom())
+        disclosure.onToggle()
+      }}
     >
       {content}
     </button>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { TIMELINE_SCROLL_ATTR } from './preserveViewportPosition'
 
 /**
  * 会话滚动容器 —— 复刻 Codex 的 `thread-scroll-container` 那一层及其外壳。
@@ -67,7 +68,16 @@ export function ThreadScrollContainer({
         <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col">
           <div className="min-h-0 flex-1">
             <div className="relative h-full flex-1 [content-visibility:auto]">
-              <div className="thread-scroll-container relative h-full overflow-x-hidden overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--thread-scroll-padding-bottom,0px)] electron:[scrollbar-gutter:stable_both-edges] pt-(--thread-content-top-inset) [container-name:thread-content] [container-type:inline-size] focus:outline-none [&:has([data-thread-scroll-footer='true']:focus-within)]:[scroll-padding-bottom:0px] flex flex-col-reverse">
+              <div
+                /*
+                 * Codex 实测在这一层挂着 `data-app-action-timeline-scroll`
+                 * (它的 `sm.timelineScroll` 选择器就是这个属性)。滚动位置补偿
+                 * (preserveViewportPosition)靠 `closest()` 找它,少了这个属性
+                 * 补偿会静默失效 —— 函数直接 return,不报错。
+                 */
+                {...{ [TIMELINE_SCROLL_ATTR]: 'true' }}
+                className="thread-scroll-container relative h-full overflow-x-hidden overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--thread-scroll-padding-bottom,0px)] electron:[scrollbar-gutter:stable_both-edges] pt-(--thread-content-top-inset) [container-name:thread-content] [container-type:inline-size] focus:outline-none [&:has([data-thread-scroll-footer='true']:focus-within)]:[scroll-padding-bottom:0px] flex flex-col-reverse"
+              >
                 <div className="flex min-h-full shrink-0 flex-col justify-start">
                   <div
                     data-mcp-app-portal-target="true"

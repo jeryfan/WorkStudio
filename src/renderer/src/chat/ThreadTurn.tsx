@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { SubmenuChevronIcon } from '../components/icons'
 import { cx } from '../utils/cx'
+import { preserveViewportPosition, windowZoom } from './preserveViewportPosition'
 
 /**
  * 一个会话轮次 —— Codex 的 `data-turn-key` 结构。
@@ -287,7 +288,20 @@ export function ThreadProcessSection({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
+          onClick={(e) => {
+            /*
+             * **先记基准,再改 state。** 滚动容器是反向 flex(贴底跟随),
+             * 于是内容长高时 P 之前的部分整体上移 —— 折叠头就在自己展开内容的
+             * 前面,点一下它自己就往上跳(实测 51px / 74px)。
+             *
+             * Codex 在**同一个位置**做同一件事:`Ge(e.currentTarget, u)`
+             * (local-conversation-turn 源码,`u` 是窗口 zoom),
+             * 详见 preserveViewportPosition 的注释。
+             * 基准必须在这个同步回调里取 —— 等到 effect 里布局已经变了。
+             */
+            preserveViewportPosition(e.currentTarget, windowZoom())
+            setExpanded((v) => !v)
+          }}
           className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
         >
           <span>
