@@ -39,6 +39,15 @@ export type ToolState =
  */
 export interface TerminalToolData {
   kind: 'terminal'
+  /**
+   * 命令被解析成了哪一类动作 —— 对应 Codex 的 `exec` 条目上的 `parsedCmd.type`。
+   *
+   * 光有展示文案不够:Codex **按这个字段选活动行图标**(`Fg()` 里 exec 分支先看
+   * `parsedCmd.type === 'read' | 'search' | 'list_files'`,才落到终端图标),
+   * 而文案是给人读的、图标是给人扫的,不能从文案里反推。
+   * 协议已经给了 `commandActions`,adapter 只是把它收敛成一个枚举。
+   */
+  commandKind: 'read' | 'listFiles' | 'search' | 'unknown'
   command: string
   /** 展示用命令；与 `command` 不同时说明经过了沙箱/包装改写 */
   commandForDisplay: string

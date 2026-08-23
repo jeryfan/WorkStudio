@@ -95,5 +95,13 @@ export function DiffView({
     }
   }, [original, modified, path])
 
-  return <div ref={host} className="chat-diff-editor" style={{ height }} />
+  /*
+   * Codex 的 diff **不是** Monaco:它自己渲染成一行行 `div`
+   * (`text-size-chat flex h-9 w-full cursor-interaction items-center gap-2
+   *   border-b border-token-border bg-token-dropdown-background
+   *   py-[var(--turn-diff-row-padding-y)]` 那一套 turn-diff 行)。
+   * 换掉 Monaco 与换代码块高亮引擎是同一件事(见 CodeBlockPart 顶部注释),
+   * 单列一轮。这里只把 VS Code 的类名去掉,容器交给外层的 ActivityBody。
+   */
+  return <div ref={host} className="min-w-0 overflow-hidden rounded-lg" style={{ height }} />
 }

@@ -1,17 +1,20 @@
 import type { SearchToolData, ToolInvocation } from '../../model/toolInvocation'
-import { Collapsible } from '../Collapsible'
-import { ToolTitle } from './ToolTitle'
-import { formatDuration } from '../../model/toolDisplay'
+import { toolStatus, toolSummary } from '../../model/toolDisplay'
+import { ToolActivityDisclosure } from '../activity'
+import { ToolActivityIcon } from './ToolActivityIcon'
 
 /**
- * 检索工具 —— 对应上游的 ChatResultListSubPart / ChatToolProgressSubPart。
+ * 网页检索的活动行。
  *
- * 上游在 `chatToolInvocationPart.ts` 里的分支是：**有结果就渲染成可折叠的
- * 结果列表，没有才退回一行进度**。之前这里只画了标题，等于把搜到的东西丢了，
- * 用户看到"Searched the web for X"却没有 X 的结果，会以为什么都没搜到。
+ * Codex 的 `web-search` 条目实测文案是
+ * `{status, select, completed {Searched the web} other {Searching the web}}`,
+ * 图标是地球(与 exec 里"跑了个网络命令"同一个图标)。有查询词时 adapter 会
+ * 拼成 "Searched the web for X" —— 与 Codex 的
+ * `agentActivity.searchingWebForQuery` 同构。
  *
- * 结果的字段是协议明确声明的不透明 JSON，抽取在 adapter 里尽力而为；这里只
- * 负责显示：有 url 的做成可点链接，没有的当纯文本。
+ * 没有结果时**不给展开体**:`ToolActivityDisclosure` 在 children 为空时不渲染
+ * chevron、表头退回不可点的 `div` —— 一个点开是空的箭头比没有箭头更烦人,
+ * 这条规则在 Codex 里是由"有没有 body"自动决定的,不需要调用方判断。
  */
 export function SearchToolPart({
   invocation,
@@ -20,35 +23,24 @@ export function SearchToolPart({
   invocation: ToolInvocation
   data: SearchToolData
 }): React.JSX.Element {
-  const duration =
-    invocation.state.type === 'completed' ? formatDuration(invocation.state.durationMs) : null
-
-  const title = (
-    <ToolTitle
-      invocation={invocation}
-      variant={data.results.length > 0 ? 'collapsible' : 'progress'}
-      suffix={
-        <>
-          {data.results.length > 0 && <span>{data.results.length} results</span>}
-          {duration && <span>{duration}</span>}
-        </>
-      }
-    />
-  )
-
-  // 没有结果时不套折叠壳：一个点开是空的箭头比没有箭头更烦人
-  if (data.results.length === 0) {
-    return <div className="chat-tool-invocation-part chat-tool-simple">{title}</div>
-  }
-
   return (
-    <div className="chat-tool-invocation-part">
-      <Collapsible title={title}>
-        <ul className="chat-search-results">
+    <ToolActivityDisclosure
+      icon={<ToolActivityIcon invocation={invocation} />}
+      status={toolStatus(invocation)}
+      summary={toolSummary(invocation)}
+    >
+      {data.results.length > 0 ? (
+        <ul className="flex min-w-0 flex-col gap-1 text-size-chat text-token-conversation-body">
           {data.results.map((result, i) => (
-            <li key={`${i}:${result.url ?? result.title}`}>
+            <li key={`${i}:${result.url ?? result.title}`} className="min-w-0 truncate">
               {result.url ? (
-                <a href={result.url} target="_blank" rel="noreferrer" title={result.url}>
+                <a
+                  href={result.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={result.url}
+                  className="text-token-link hover:underline"
+                >
                   {result.title}
                 </a>
               ) : (
@@ -57,7 +49,7 @@ export function SearchToolPart({
             </li>
           ))}
         </ul>
-      </Collapsible>
-    </div>
+      ) : undefined}
+    </ToolActivityDisclosure>
   )
 }

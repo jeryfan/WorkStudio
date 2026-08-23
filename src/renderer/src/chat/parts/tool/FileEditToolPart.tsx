@@ -1,18 +1,56 @@
+import { useState } from 'react'
 import type { FileEditToolData, ToolInvocation } from '../../model/toolInvocation'
 import { countDiffLines, parseDiff } from '../../model/diff'
-import { Collapsible } from '../Collapsible'
+import { toolStatus, toolSummary } from '../../model/toolDisplay'
+import {
+  ActivityBody,
+  ActivityHeaderRow,
+  DiffCounts,
+  DisclosureBody,
+  ToolActivityDisclosure
+} from '../activity'
 import { CodeBlockPart } from '../CodeBlockPart'
 import { InlineAnchor } from '../InlineAnchor'
-import { ToolTitle } from './ToolTitle'
 import { DiffView } from './DiffView'
+import { ToolActivityIcon } from './ToolActivityIcon'
 
 /**
- * 文件改动 —— 对应上游的 chatEditPillElement + chatChangesSummaryPart。
+ * 文件改动的活动行 —— 照 Codex 的 `patch` 条目。
  *
- * 每个文件一行：路径（可点开）+ 增删行数。展开后是 diff。
+ * Codex 的 patch 行长这样(`subagent-activity-chip-group` 里那个 `ym` 调用):
  *
- * 增删行数**总是**显示，即使补丁方言没认出来：数 `+` / `-` 开头的行比还原两侧
- * 宽容得多，标题上的 `+12 −3` 不该因为解析失败就消失。
+ * ```
+ * <ActivityHeaderRow
+ *   className="overflow-clip rounded-lg"
+ *   headerClassName="text-token-conversation-body"
+ *   icon={<PatchIcon/>}
+ *   summary={<FileLink/>}
+ *   accessory={
+ *     <div className="flex items-center gap-1.5">
+ *       <DiffCounts variant="agent-activity" className="text-size-chat-sm" …/>
+ *       {type === 'add'    && <span className="block size-1.5 rounded-full bg-token-charts-blue/70"/>}
+ *       {type === 'delete' && <span className="block size-1.5 rounded-full bg-token-charts-red/70"/>}
+ *     </div>
+ *   }
+ *   disclosure={{accessibleLabel: `Toggle diff for ${fileName}`, expanded, onToggle}}
+ *   body={<motion.div …>{diff}</motion.div>}
+ * />
+ * ```
+ *
+ * 三处从源码抄来的判断:
+ *
+ * 1. **增删行数走 `accessory` 槽,不是拼进摘要**。accessory 在 chevron 左边,
+ *    是给这种结构化附加信息用的;耗时那类才拼进句子(见 `toolSummary`)。
+ * 2. **`variant="agent-activity"`**:平时继承行的颜色,只在整行 hover 时才变成
+ *    git 增删色 —— 而且鼠标停在文件链接上不算(见 DiffCounts 里那条 `:not(:has(…))`)。
+ * 3. **新增文件补一个蓝点、删除补一个红点**(`size-1.5 rounded-full`,
+ *    `bg-token-charts-{blue,red}/70`)。修改文件没有点 —— 点只标"这文件是新的/没了"。
+ *
+ * **WS 与 Codex 的一处结构差异**:Codex 一个 `patch` 条目对应一个文件,多文件
+ * 走 `turn-diff` 聚合;WS 的协议是一条 `fileChange` 带 N 个 change。所以这里
+ * 单文件时直接是那一行,多文件时外面套一行汇总、里面用
+ * `ActivityBody variant="grouped"` 排开每个文件 —— 用的是 Codex 给多子条目
+ * 准备的那一档(`gap-[var(--conversation-grouped-item-gap,4px)] pt-1`)。
  */
 export function FileEditToolPart({
   invocation,
@@ -29,59 +67,114 @@ export function FileEditToolPart({
     { added: 0, removed: 0 }
   )
 
+  // 单文件:就是 Codex 的那一行,文件名当摘要
+  if (data.changes.length === 1) {
+    return (
+      <FileChangeRow change={data.changes[0]} icon={<ToolActivityIcon invocation={invocation} />} />
+    )
+  }
+
   return (
-    <div className="chat-tool-invocation-part chat-file-edit-part">
-      <Collapsible
-        title={<ToolTitle invocation={invocation} suffix={<DiffCounts {...totals} />} />}
-      >
-        <div className="chat-file-edit-list">
+    <ToolActivityDisclosure
+      icon={<ToolActivityIcon invocation={invocation} />}
+      status={toolStatus(invocation)}
+      summary={toolSummary(invocation)}
+      accessory={
+        totals.added > 0 || totals.removed > 0 ? (
+          <div className="flex items-center gap-1.5">
+            <DiffCounts
+              className="text-size-chat-sm"
+              linesAdded={totals.added}
+              linesRemoved={totals.removed}
+              variant="agent-activity"
+            />
+          </div>
+        ) : undefined
+      }
+    >
+      {data.changes.length > 0 ? (
+        <ActivityBody variant="grouped">
           {data.changes.map((change) => (
-            <FileDiff key={change.path} change={change} />
+            <FileChangeRow key={change.path} change={change} />
           ))}
-        </div>
-      </Collapsible>
-    </div>
+        </ActivityBody>
+      ) : undefined}
+    </ToolActivityDisclosure>
   )
 }
 
-function DiffCounts({ added, removed }: { added: number; removed: number }): React.JSX.Element {
-  return (
-    <span className="chat-thinking-title-diff">
-      {added > 0 && <span className="label-added">+{added}</span>}
-      {removed > 0 && <span className="label-removed">−{removed}</span>}
-    </span>
-  )
-}
-
-function FileDiff({ change }: { change: FileEditToolData['changes'][number] }): React.JSX.Element {
+/**
+ * 单个文件的活动行:文件链接 + 增删行数 + 状态点,展开是 diff。
+ *
+ * 不能用 `ToolActivityDisclosure` —— 那个把摘要包进 `CadencedShimmer`
+ * (文件名不需要流光),而且它的展开态跟 `status` 绑定(文件行没有 running 概念)。
+ * 所以直接用下一层的 `ActivityHeaderRow` + `DisclosureBody`,与 Codex 的
+ * patch 行同层同构。
+ */
+function FileChangeRow({
+  change,
+  icon
+}: {
+  change: FileEditToolData['changes'][number]
+  icon?: React.ReactNode
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
   const parsed = parseDiff(change.diff)
   const counts = countDiffLines(change.diff)
+  const fileName = change.path.split('/').pop() ?? change.path
 
   return (
-    <div className="chat-file-edit-item">
-      <div className="chat-file-edit-header">
-        <span className={`chat-file-edit-op chat-file-edit-op-${change.operation}`}>
-          {change.operation}
-        </span>
-        <InlineAnchor path={change.path} />
-        {change.movedTo && (
-          <>
-            <span className="chat-file-edit-arrow">→</span>
-            <InlineAnchor path={change.movedTo} />
-          </>
-        )}
-        <DiffCounts {...counts} />
-      </div>
-
-      {parsed ? (
-        <DiffView original={parsed.original} modified={parsed.modified} path={change.path} />
-      ) : (
-        /*
-         * 补丁方言不认识时的退路：按 diff 语法高亮原样显示。
-         * 永远是对的，只是少了左右对照与语言高亮。
-         */
-        <CodeBlockPart code={change.diff} lang="diff" />
-      )}
-    </div>
+    <ActivityHeaderRow
+      className="overflow-clip rounded-lg"
+      headerClassName="text-token-conversation-body"
+      icon={icon}
+      summary={
+        <>
+          <InlineAnchor path={change.path} />
+          {change.movedTo && (
+            <>
+              <span className="mx-1 text-token-text-tertiary">→</span>
+              <InlineAnchor path={change.movedTo} />
+            </>
+          )}
+        </>
+      }
+      accessory={
+        <div className="flex items-center gap-1.5">
+          {(counts.added > 0 || counts.removed > 0) && change.operation !== 'delete' && (
+            <DiffCounts
+              className="text-size-chat-sm"
+              linesAdded={counts.added}
+              linesRemoved={counts.removed}
+              variant="agent-activity"
+            />
+          )}
+          {change.operation === 'add' && (
+            <span className="block size-1.5 rounded-full bg-token-charts-blue/70" />
+          )}
+          {change.operation === 'delete' && (
+            <span className="block size-1.5 rounded-full bg-token-charts-red/70" />
+          )}
+        </div>
+      }
+      disclosure={{
+        expanded,
+        onToggle: () => setExpanded((v) => !v),
+        accessibleLabel: `Toggle diff for ${fileName}`
+      }}
+      body={
+        <DisclosureBody expanded={expanded}>
+          {parsed ? (
+            <DiffView original={parsed.original} modified={parsed.modified} path={change.path} />
+          ) : (
+            /*
+             * 补丁方言不认识时的退路:按 diff 语法高亮原样显示。
+             * 永远是对的,只是少了左右对照与语言高亮。
+             */
+            <CodeBlockPart code={change.diff} lang="diff" />
+          )}
+        </DisclosureBody>
+      }
+    />
   )
 }

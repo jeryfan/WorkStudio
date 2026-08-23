@@ -13,7 +13,12 @@
  */
 import type { Entry } from '@shared/protocol/entities'
 import type { PendingApproval } from '../model/approval'
-import type { ToolInvocation, ToolSpecificData, ToolState } from '../model/toolInvocation'
+import type {
+  TerminalToolData,
+  ToolInvocation,
+  ToolSpecificData,
+  ToolState
+} from '../model/toolInvocation'
 
 type Narrow<K extends Entry['type']> = Extract<Entry, { type: K }>
 
@@ -87,6 +92,28 @@ function commandLabels(entry: Narrow<'commandExecution'>): {
   return { invocation: `Running ${entry.command}`, pastTense: `Ran ${entry.command}` }
 }
 
+/**
+ * 命令归到哪一类 —— 给活动行选图标用(Codex 的 `parsedCmd.type`)。
+ *
+ * 与 `commandLabels` 同一个判据(只有单一动作才敢分类;管道串起来的复合命令
+ * 归 unknown),所以图标和文案永远一致 —— 不会出现"文案说 Searched、
+ * 图标画的是终端"这种错位。
+ */
+function commandKind(entry: Narrow<'commandExecution'>): TerminalToolData['commandKind'] {
+  const actions = entry.commandActions
+  if (actions.length !== 1) return 'unknown'
+  switch (actions[0].type) {
+    case 'read':
+      return 'read'
+    case 'listFiles':
+      return 'listFiles'
+    case 'search':
+      return 'search'
+    case 'unknown':
+      return 'unknown'
+  }
+}
+
 /** JSON 入参格式化。过长的单行 JSON 没法读，缩进后至少能扫 */
 function formatJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -151,6 +178,7 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
       const labels = commandLabels(entry)
       const data: ToolSpecificData = {
         kind: 'terminal',
+        commandKind: commandKind(entry),
         command: entry.command,
         commandForDisplay: entry.command,
         cwd: entry.cwd,
@@ -297,6 +325,8 @@ export function approvalToInvocation(approval: PendingApproval): ToolInvocation 
       state,
       data: {
         kind: 'terminal',
+        // 审批阶段拿不到 commandActions(那在条目里),所以只能归 unknown
+        commandKind: 'unknown',
         command,
         commandForDisplay: command,
         cwd: approval.fallback.cwd,
