@@ -60,6 +60,10 @@ export const M = {
   accountRateLimits: 'account/rateLimits/read',
   authStatus: 'getAuthStatus',
 
+  // MCP 服务器与连接器(app)
+  mcpServerStatusList: 'mcpServerStatus/list',
+  appList: 'app/list',
+
   // 配置
   configRead: 'config/read',
   configWrite: 'config/value/write',

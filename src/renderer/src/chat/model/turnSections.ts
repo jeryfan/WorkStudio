@@ -5,8 +5,9 @@
  * 它们是纯函数、预览页与 ChatView 都要用,而 react-refresh 要求组件文件
  * 只导出组件(混着导出会让整个模块在热更新时重建,丢掉所有展开状态)。
  */
-import { formatDuration } from '../../utils/time'
-import type { ChatContent } from './content'
+import { formatDuration } from '../../utils/time.ts'
+import type { ChatContent, ChatToolInvocationContent } from './content'
+import type { RenderUnit } from './renderUnits'
 
 /**
  * 把一轮回复拆成「过程」与「最终输出」—— 照 Codex 的
@@ -57,26 +58,15 @@ export function splitTurnContent(content: ChatContent[]): {
   process: ChatContent[]
   final: ChatContent[]
 } {
-  let z = content.length - 1
-  if (content[z]?.kind !== 'markdownContent') {
-    // 往前跳过"已完成的推理"(WS 没有 elicitation / subagent-activity 两类)
-    let e = z
-    while (e >= 0 && content[e].kind === 'thinking' && !isActiveThinking(content[e])) e -= 1
-    /*
-     * 只有**明确标了 `final_answer`** 的才值得往回跳。phase 未知(null)时不跳:
-     * 那等于凭"它是 markdown"就把推理之前的一段旁白提成最终回答,
-     * 而 Codex 在这一支上要求的正是显式的 final_answer。
-     */
-    const candidate = content[e]
-    if (candidate?.kind === 'markdownContent' && candidate.phase === 'final_answer') z = e
-  }
+  const z = content.length - 1
+  /*
+   * Codex 在「最末位不是助手文本」时会往回跳过尾部的「已完成推理 /
+   * 表单请求 / subagent 活动」去找一条 final_answer。WS 的推理与那两类
+   * 条目都不进内容流,没有可跳的 —— 最末位不是 markdown 就没有最终段。
+   */
   if (content[z]?.kind !== 'markdownContent') return { process: content, final: [] }
   // 只摘走这一条 —— 它前面的一切(含别的 markdown)都是过程
   return { process: [...content.slice(0, z), ...content.slice(z + 1)], final: [content[z]] }
-}
-
-function isActiveThinking(item: ChatContent): boolean {
-  return item.kind === 'thinking' && item.isActive
 }
 
 /**
@@ -124,13 +114,22 @@ function isActiveThinking(item: ChatContent): boolean {
  */
 export function shouldShowProcessToggle({
   final,
-  process,
-  cancelled
+  processCount,
+  units,
+  cancelled,
+  isTurnInProgress
 }: {
   final: ChatContent[]
-  process: ChatContent[]
+  /** 折叠计数 —— Codex `Pn = Ao(Tn)`:组按成员数展开计 */
+  processCount: number
+  /** 渲染单元 —— 只用末位的形态与「只有一条压缩」判定 */
+  units: RenderUnit[]
   cancelled: boolean
+  /** Codex `jn` 里的 `turnStatus == null`:轮次在跑时没有折叠头,过程全部摊开 */
+  isTurnInProgress: boolean
 }): boolean {
+  // 轮次在跑(turnStatus === 'active')→ `jn` 为假 → 没有折叠头
+  if (isTurnInProgress) return false
   const assistant = final[0]
   // Dat(B):phase 必须是显式的 final_answer,且这条真的有内容
   const hasFinalAssistantStarted =
@@ -140,12 +139,18 @@ export function shouldShowProcessToggle({
 
   if (!hasFinalAssistantStarted || cancelled) return false
   // Pn > 0:折叠起来至少得有一条东西
-  if (process.length === 0) return false
+  if (processCount === 0) return false
   /*
    * Fn —— 只有一条上下文压缩时不给折叠头。压缩条目本身就是一行"已压缩"的提示,
    * 把它收进"Worked for …"后面等于用一行字盖住另一行字。
    */
-  if (process.length === 1 && process[0].kind === 'contextCompaction') return false
+  if (
+    units.length === 1 &&
+    units[0].kind === 'standalone' &&
+    units[0].item.kind === 'contextCompaction'
+  ) {
+    return false
+  }
   return true
 }
 
@@ -176,4 +181,97 @@ export function turnSummaryLabel(
     return `Worked for ${formatDuration(completedAtMs - startedAtMs)}`
   }
   return processCount === 1 ? '1 previous message' : `${processCount} previous messages`
+}
+
+// ── 轮次状态行(Codex `ja` + `kn`/`An`/`W`)────────────────────────────
+
+export interface ThinkingRowState {
+  /** 底部状态行是否出现 */
+  visible: boolean
+  /**
+   * 轮次是否处于「探索中」(尾部连续 read/search/list 且有未完成) ——
+   * 组表头的 active 态标签要用它(Codex `Yr` 的 isExploring 入参)。
+   */
+  isExploring: boolean
+}
+
+/**
+ * 「思考中」状态行的显隐 —— Codex `local-conversation-turn` 的 `ja`/`W`/`kn`。
+ *
+ * 源码条件展开后是这样(逐条都有出处):
+ *
+ * ```
+ * W = P && !blocking && !exploring && !anyNonExploringRunning
+ *     && (!assistantStarted || !finalAnswerPhase)
+ * ```
+ *
+ * - `P`:轮次在跑。`assistantStarted`:最终回答已有内容(流式中也算)。
+ * - `blocking`:有待决审批(审批控件自己就是等待的表达)。
+ * - `exploring`:尾部是连续的探索命令且有在跑的 —— 状态由组表头的
+ *   active 态承担("Reading foo.ts"),底部不再重复。
+ * - `anyNonExploringRunning`:最末单元是非探索类工具且在跑 —— 那行自己
+ *   带流光。注意 Codex 看的是**最末一条**(`jr` 的 `on`),不是任意一条。
+ * - 回答流式期间也显示(Codex 的 `On` 分支),**除非**它已明确是
+ *   final_answer(那时回答本身就是收尾,没有"还在想"可言)。
+ *
+ * 最后:`kn` —— 最末单元是组时,状态行进组表头(thinking 态),
+ * 底部不重复出现。
+ */
+export function thinkingRowState({
+  isTurnInProgress,
+  assistantStarted,
+  hasFinalAnswerPhase,
+  hasBlockingRequest,
+  units
+}: {
+  isTurnInProgress: boolean
+  assistantStarted: boolean
+  hasFinalAnswerPhase: boolean
+  hasBlockingRequest: boolean
+  units: RenderUnit[]
+}): ThinkingRowState {
+  const lastUnit = units[units.length - 1]
+  const exploring = isTurnInProgress && lastUnit != null && isExplorationRun(lastUnit)
+  const lastNonExploringRunning =
+    lastUnit?.kind === 'standalone' &&
+    lastUnit.item.kind === 'toolInvocation' &&
+    !isExplorationInvocation(lastUnit.item) &&
+    isInvocationInProgress(lastUnit.item)
+
+  const wantsRow =
+    isTurnInProgress &&
+    !hasBlockingRequest &&
+    !exploring &&
+    !lastNonExploringRunning &&
+    (!assistantStarted || !hasFinalAnswerPhase)
+
+  // kn:最末单元是组 → 状态行收进组表头(thinking 态),底部不重复
+  const absorbedByGroup = wantsRow && !assistantStarted && lastUnit?.kind === 'group'
+  return { visible: wantsRow && !absorbedByGroup, isExploring: exploring }
+}
+
+/** 尾部单元是否「探索中」—— 组内全是探索命令且有在跑的(Codex `jr` 的 isExploring) */
+function isExplorationRun(unit: RenderUnit): boolean {
+  if (unit.kind !== 'group') return false
+  if (!unit.items.every(isExplorationInvocation)) return false
+  return unit.items.some(isInvocationInProgress)
+}
+
+function isExplorationInvocation(content: ChatToolInvocationContent): boolean {
+  const { data } = content.invocation
+  return (
+    data.kind === 'terminal' &&
+    (data.commandKind === 'read' ||
+      data.commandKind === 'search' ||
+      data.commandKind === 'listFiles')
+  )
+}
+
+function isInvocationInProgress(content: ChatToolInvocationContent): boolean {
+  const { state } = content.invocation
+  return (
+    state.type === 'executing' ||
+    state.type === 'streaming' ||
+    state.type === 'waitingForConfirmation'
+  )
 }

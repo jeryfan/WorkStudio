@@ -100,22 +100,42 @@ export function ThreadTurnGap({
  *       ├ h4.sr-only.select-none  «You said:»                  ← 屏幕阅读器锚点
  *       └ div.group.flex.w-full.flex-col.items-end.justify-end.gap-1
  *         ├ div.bg-token-foreground/5.max-w-[77%]…rounded-2xl.px-3.py-2   ← 气泡
- *         │   .[&_.contain-inline-size]:[contain:initial].text-start
- *         │   .focus-visible:ring-2.focus-visible:ring-token-focus-border
+ *         │ └ div.flex.flex-col.items-end.gap-1
+ *         │   └ div.relative.w-full.min-w-0.text-size-chat
+ *         │     └ div(裸)  ← Codex 在气泡与 markdown 之间还有这一层
+ *         │       └ div.text-size-chat.whitespace-pre-wrap
+ *         │         └ MarkdownRoot(带 8 条边距覆写,**没有** data-markdown-text-style)
  *         └ div.flex.flex-row-reverse.items-center.gap-1                  ← 悬浮操作条
+ *           └ div.me-1.ms-1…opacity-0.group-hover:opacity-100
+ *             ├ span.flex.opacity-0… > span.text-xs.text-token-text-tertiary  «Aug 16, 2:28 PM»
+ *             └ div.flex.items-center.gap-0.5 > [Copy message] + [Edit message]
  *
  * 气泡宽度是 **max-w-[77%]** 这个奇怪的数,不是 max-w-3/4 —— 照抄。
  * `[&_.contain-inline-size]:[contain:initial]` 是为了让气泡里的表格/代码块
  * 不被父级的 contain 裁掉。
+ *
+ * 编辑态(`editing`):气泡换成行内编辑表单(Codex 实测):
+ *
+ *   div.w-full.p-px
+ *   └ form.relative.flex.w-full.flex-col.rounded-3xl.bg-token-foreground/5
+ *     └ div.relative.z-10.flex.min-h-0.flex-1.flex-col
+ *       ├ div.mb-2.flex-grow.overflow-y-auto.px-3.pt-3 > RichTextInput
+ *       └ div.flex.justify-end.gap-1.5.px-3.pb-3 > [Cancel outline] + [Send primary]
  */
 export function ThreadUserMessage({
   unitKey,
   children,
-  actions
+  actions,
+  sentTime,
+  editing
 }: {
   unitKey: string
   children: ReactNode
   actions?: ReactNode
+  /** 悬浮行里的时间戳 —— Codex 形如 `Aug 16, 2:28 PM` */
+  sentTime?: string
+  /** 编辑态:气泡换成行内编辑表单 */
+  editing?: ReactNode
 }): React.JSX.Element {
   return (
     <div className="flex flex-col">
@@ -127,14 +147,27 @@ export function ThreadUserMessage({
         <div className="flex flex-col items-end gap-2">
           <h4 className="sr-only select-none">You said:</h4>
           <div className="group flex w-full flex-col items-end justify-end gap-1">
-            <div className="bg-token-foreground/5 max-w-[77%] min-w-0 overflow-hidden break-words rounded-2xl px-3 py-2 [&_.contain-inline-size]:[contain:initial] text-start focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none">
-              <div className="flex flex-col items-end gap-1">
-                <div className="relative w-full min-w-0 text-size-chat">{children}</div>
+            {editing != null ? (
+              editing
+            ) : (
+              <div className="bg-token-foreground/5 max-w-[77%] min-w-0 overflow-hidden break-words rounded-2xl px-3 py-2 [&_.contain-inline-size]:[contain:initial] text-start focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none">
+                <div className="flex flex-col items-end gap-1">
+                  <div className="relative w-full min-w-0 text-size-chat">
+                    <div>
+                      <div className="text-size-chat whitespace-pre-wrap">{children}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
             <div className="flex flex-row-reverse items-center gap-1">
               <div className="me-1 ms-1 flex items-center gap-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
-                {actions}
+                {sentTime && (
+                  <span className="flex opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+                    <span className="text-xs text-token-text-tertiary">{sentTime}</span>
+                  </span>
+                )}
+                {actions != null && <div className="flex items-center gap-0.5">{actions}</div>}
               </div>
             </div>
           </div>
@@ -203,19 +236,40 @@ export function ThreadAssistantMessage({
 }
 
 /**
- * 中间过程条目容器(工具调用、思考、推理等) —— Codex 用
- * `div.flex.flex-col.gap-[var(--conversation-item-gap,16px)]` 包住一串条目,
- * 每个条目外面再套一个裸 div。带工具调用 id 的条目会多挂
- * `[data-local-conversation-item-target-ids]` + `outline-none`。
+ * 中间助手消息(过程段里的 commentary) —— 与最终回复**同一套结构**
+ * (Codex 实测:两者都是 `div.group.flex.min-w-0.flex-col[data-response-annotation-*]`
+ * + `h4.sr-only «ChatGPT said:»` + `MarkdownRoot[data-markdown-text-style=assistant-message]`),
+ * 区别只有两条:父级不带 `data-local-conversation-final-assistant`,没有操作条。
  */
-export function ThreadItems({ children }: { children: ReactNode }): React.JSX.Element {
+export function ThreadAssistantCommentary({
+  conversationId,
+  targetId,
+  children
+}: {
+  conversationId?: string
+  targetId?: string
+  children: ReactNode
+}): React.JSX.Element {
   return (
-    <div className="flex flex-col">
-      <div>
-        <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
-      </div>
+    <div
+      className="group flex min-w-0 flex-col"
+      data-response-annotation-conversation={conversationId}
+      data-response-annotation-target={targetId}
+    >
+      <h4 className="sr-only select-none">ChatGPT said:</h4>
+      {children}
     </div>
   )
+}
+
+/**
+ * 过程条目的列表容器 —— 就是 Codex `VO` 的那一个
+ * `div.flex.flex-col.gap-[var(--conversation-item-gap,16px)]`。
+ * 不要再加外层:过程段的 motion.div 直接包它,单元壳(ThreadItem)
+ * 是 Codex `VO` 里每个单元的包装 div(outline-none + target-ids)。
+ */
+export function ThreadItems({ children }: { children: ReactNode }): React.JSX.Element {
+  return <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
 }
 
 /** 单个中间条目 —— targetIds 有值时挂 Codex 的定位属性 */
@@ -296,23 +350,34 @@ export function ThreadItem({
  *
  * 什么时候为假见 `ChatView` 的 `shouldShowProcessToggle` —— 一句话:
  * 最终回答那条的 `phase` 不是 `final_answer` 就没有折叠头。
+ *
+ * ## 运行中的形态(本轮从源码补齐)
+ *
+ * Codex 的折叠态是 `isCollapsed = Ln && Nn`:`Ln`(showToggle)要求
+ * `turnStatus == null` —— 轮次在跑时 turnStatus 是 'active',**所以运行中的
+ * 轮次没有折叠头、过程全部摊开**;跑完(turnStatus 归位)折叠头出现、
+ * 默认收起。WS 没有 turnStatus 概念,等价条件就是"轮次在跑":
+ * `running → 摊开;完成 → 折叠头 + 默认收起`。
  */
 export function ThreadProcessSection({
   children,
   summary,
-  showToggle = true,
-  defaultExpanded = false
+  showToggle = true
 }: {
   children: ReactNode
   /** 折叠头文案 —— `Worked for 1m 28s` 或 `3 previous messages`,见 turnSummaryLabel */
   summary: string
-  /** Codex 的 `showToggle`(`Ln`)。为假时没有按钮、没有发丝线,内容摊开 */
+  /**
+   * Codex 的 `showToggle`(`Ln`)。为假(轮次在跑 / 条件不满足)时没有按钮、
+   * 没有发丝线,内容摊开。
+   */
   showToggle?: boolean
-  defaultExpanded?: boolean
 }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  // Codex `wo`:isCollapsed = !forceExpanded && (persistedCollapsed ?? !preventAutoCollapse)
+  // —— 完成态默认收起,用户展开后保持(Codex 按轮次持久化,WS 按组件实例)
+  const [userExpanded, setUserExpanded] = useState(false)
   // Codex 的 `isCollapsed = Ln && Nn` —— 没有折叠头就谈不上折叠
-  const collapsed = showToggle && !expanded
+  const collapsed = showToggle && !userExpanded
   return (
     <div className="flex flex-col">
       {showToggle && (
@@ -320,7 +385,7 @@ export function ThreadProcessSection({
           <div className="text-size-chat text-token-text-secondary">
             <button
               type="button"
-              aria-expanded={expanded}
+              aria-expanded={userExpanded}
               onClick={(e) => {
                 /*
                  * **先记基准,再改 state。** 滚动容器是反向 flex(贴底跟随),
@@ -333,7 +398,7 @@ export function ThreadProcessSection({
                  * 基准必须在这个同步回调里取 —— 等到 effect 里布局已经变了。
                  */
                 preserveViewportPosition(e.currentTarget, windowZoom())
-                setExpanded((v) => !v)
+                setUserExpanded((v) => !v)
               }}
               className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
             >
@@ -344,7 +409,7 @@ export function ThreadProcessSection({
                 className={cx(
                   'icon-2xs text-token-conversation-summary-trailing transition-transform duration-basic',
                   // Codex 折叠时写的是显式的 `rotate-0`,不是"不加类" —— 照抄
-                  expanded ? 'rotate-90' : 'rotate-0'
+                  userExpanded ? 'rotate-90' : 'rotate-0'
                 )}
               />
             </button>
@@ -367,8 +432,9 @@ export function ThreadProcessSection({
             animate={{ opacity: 1, transform: 'translateY(0)' }}
             transition={{ duration: 0.22, ease: [0.33, 1, 0.68, 1] }}
           >
+            {/* Codex `Io`:motion.div 直接包 [间隔槽 + 单元容器],不再垫一层 */}
             {showToggle && <ThreadTurnGap />}
-            <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
+            {children}
           </motion.div>
         )}
       </AnimatePresence>

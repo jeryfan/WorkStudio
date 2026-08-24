@@ -2,20 +2,10 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './assets/main.css'
 import { ThreadScrollContainer } from './chat/ThreadScrollContainer'
-import {
-  ThreadAssistantMessage,
-  ThreadItem,
-  ThreadItems,
-  ThreadProcessSection,
-  ThreadTurn,
-  ThreadTurnGap,
-  ThreadUserMessage
-} from './chat/ThreadTurn'
-import { shouldShowProcessToggle } from './chat/model/turnSections'
-import { ChatContentPart } from './chat/parts/ChatContentPart'
+import { ThreadTurn, ThreadTurnGap, ThreadUserMessage } from './chat/ThreadTurn'
 import { MarkdownPart } from './chat/parts/MarkdownPart'
-import { contentKey } from './chat/model/contentKey'
 import { TodoListPart } from './chat/parts/TodoListPart'
+import { ThreadTurnBody } from './chat/ThreadTurnBody'
 import { ThemeProvider } from './chat/theme/ThemeProvider'
 import { useTheme } from './chat/theme/themeContext'
 import { THEME_VARIANTS, themeClassName } from './chat/theme/themes'
@@ -68,17 +58,6 @@ const rows: ThreadRow[] = [
     kind: 'response',
     id: 't1',
     content: [
-      {
-        kind: 'thinking',
-        id: 'th1',
-        title: '核对求值规则',
-        items: [
-          '**核对求值规则**\n\n颜色默认值里有 transparent()、darken()、oneOf() 这些变换，还会跨 id 引用。静态翻译这套规则容易出错。',
-          '**决定执行上游代码**\n\n用 esbuild 把注册表打包成 ESM 直接跑，求值逻辑就是 VSCode 本身那一份。',
-          '**处理无法导入的两个模块**\n\npeekView 在 browser 层，导入链会在模块初始化时真的构建 DOM。'
-        ],
-        isActive: false
-      },
       { kind: 'markdownContent', content: ANSWER, phase: 'final_answer' },
       {
         kind: 'toolInvocation',
@@ -155,11 +134,12 @@ const rows: ThreadRow[] = [
         invocation: {
           id: 'tool-mcp',
           toolId: 'github/create_issue',
-          invocationMessage: 'Running create_issue',
-          pastTenseMessage: 'Ran create_issue',
+          invocationMessage: 'Create issue',
+          pastTenseMessage: 'Create issue',
           state: { type: 'executing', progress: null },
           data: {
             kind: 'inputOutput',
+            source: { kind: 'mcp', server: 'github', connectorId: null, appName: null },
             blocks: [],
             structuredJson: null,
             error: null,
@@ -176,11 +156,12 @@ const rows: ThreadRow[] = [
         invocation: {
           id: 'tool-mcp-prose',
           toolId: 'playwright/browser_navigate',
-          invocationMessage: 'Running browser_navigate',
-          pastTenseMessage: 'Ran browser_navigate',
+          invocationMessage: 'Browser navigate',
+          pastTenseMessage: 'Browser navigate',
           state: { type: 'completed', success: true, durationMs: 1840 },
           data: {
             kind: 'inputOutput',
+            source: { kind: 'mcp', server: 'playwright', connectorId: null, appName: null },
             blocks: [
               {
                 type: 'text',
@@ -207,11 +188,12 @@ const rows: ThreadRow[] = [
         invocation: {
           id: 'tool-mcp-json',
           toolId: 'linear/list_issues',
-          invocationMessage: 'Running list_issues',
-          pastTenseMessage: 'Ran list_issues',
+          invocationMessage: 'List issues',
+          pastTenseMessage: 'List issues',
           state: { type: 'completed', success: true, durationMs: 420 },
           data: {
             kind: 'inputOutput',
+            source: { kind: 'mcp', server: 'linear', connectorId: null, appName: null },
             blocks: [],
             structuredJson:
               '{\n  "issues": [\n    { "id": "WS-12", "title": "对齐活动行" }\n  ]\n}',
@@ -225,11 +207,12 @@ const rows: ThreadRow[] = [
         invocation: {
           id: 'tool-mcp-error',
           toolId: 'fetch/fetch_url',
-          invocationMessage: 'Running fetch_url',
-          pastTenseMessage: 'Ran fetch_url',
+          invocationMessage: 'Fetch url',
+          pastTenseMessage: 'Fetch url',
           state: { type: 'completed', success: false, durationMs: 12000 },
           data: {
             kind: 'inputOutput',
+            source: { kind: 'mcp', server: 'fetch', connectorId: null, appName: null },
             blocks: [],
             structuredJson: null,
             error: 'HTTP 403 Forbidden — 目标站点的 WAF 拦截了直接抓取',
@@ -248,22 +231,13 @@ const rows: ThreadRow[] = [
           data: {
             kind: 'search',
             query: 'vscode agent window',
-            results: [
-              {
-                title: 'Agent Window - Visual Studio Code',
-                url: 'https://code.visualstudio.com/docs/copilot/agent-window'
-              },
-              {
-                title: 'microsoft/vscode: src/vs/sessions',
-                url: 'https://github.com/microsoft/vscode'
-              },
-              { title: '没有 url 的一条结果（协议里是不透明 JSON）', url: null }
-            ]
+            action: null
           }
         }
       },
       { kind: 'contextCompaction', id: 'k1' }
     ],
+    thinkingFallback: null,
     isComplete: true,
     isCanceled: false,
     startedAtMs: Date.now() - 60000,
@@ -281,18 +255,6 @@ const rows: ThreadRow[] = [
     id: 't2',
     content: [
       {
-        kind: 'thinking',
-        id: 'th2',
-        title: '正在核对覆盖率',
-        items: [
-          '**列出候选变量**\n\n先把对话 CSS 里出现的每一个 --vscode-* 变量抓出来，去重之后是 124 个。',
-          '**分类**\n\n其中 54 个能直接命中主题 JSON，约 30 个是尺寸/圆角/间距，剩下的要走注册表默认值。',
-          '**核对覆盖率**\n\n扫描上游 CSS 引用的每个变量，确认生成的 tokens.css 里都有对应的定义。',
-          '**处理漏网的两个**\n\npeekView 在 browser 层导入链会真的构建 DOM，debugTokenExpression 包在函数里不会自动注册，这两个只能钉住…'
-        ],
-        isActive: true
-      },
-      {
         kind: 'errorDetails',
         level: 'error',
         message: '上游对话 CSS 引用了 2 个无来源的变量',
@@ -305,6 +267,7 @@ const rows: ThreadRow[] = [
        */
       { kind: 'markdownContent', content: '两个变量已经钉在注册表里了。', phase: null }
     ],
+    thinkingFallback: null,
     isComplete: true,
     isCanceled: false,
     startedAtMs: Date.now() - 20000,
@@ -392,6 +355,7 @@ const rows: ThreadRow[] = [
         detail: 'HTTP 429 · retry-after 12s'
       }
     ],
+    thinkingFallback: null,
     isComplete: false,
     isCanceled: false,
     startedAtMs: Date.now() - 8000,
@@ -409,7 +373,8 @@ const rows: ThreadRow[] = [
   {
     kind: 'response',
     id: 't4',
-    content: [{ kind: 'working', label: 'Thinking' }],
+    content: [],
+    thinkingFallback: null,
     isComplete: false,
     isCanceled: false,
     startedAtMs: Date.now() - 1000,
@@ -562,7 +527,12 @@ function Preview(): React.JSX.Element {
                           <ThreadTurnGap />
                         </>
                       )}
-                      {g.response && <PreviewTurnBody row={g.response} />}
+                      {g.response && (
+                        <ThreadTurnBody
+                          row={g.response}
+                          isLastResponse={g.key === TURN_GROUPS[TURN_GROUPS.length - 1]?.key}
+                        />
+                      )}
                     </ThreadTurn>
                   ))
                 )}
@@ -597,61 +567,6 @@ const TURN_GROUPS: {
   }
   return groups
 })()
-
-/**
- * 一条回复的三段式 —— 与 ChatView 里的逻辑对齐(过程 / 最终输出)。
- *
- * 分段判据刻意简化成"最后一条 markdown 是最终输出":预览页的数据是写死的
- * fixture,不需要 ChatView 那套跳过尾部推理的逻辑;要测的是**结构**
- * (折叠头 + 发丝线 + 段间隔 + 活动行),不是分段算法。
- *
- * 但**折叠头的显隐走真函数**(`shouldShowProcessToggle`)—— 这一条不能简化,
- * 它正是本轮要验的东西:t1 的最终文本标了 `final_answer` → 有折叠头;
- * t2 的标了 `null` → 没有折叠头、条目摊开。
- */
-function PreviewTurnBody({
-  row
-}: {
-  row: Extract<ThreadRow, { kind: 'response' }>
-}): React.JSX.Element {
-  let cut = row.content.length - 1
-  while (cut >= 0 && row.content[cut].kind !== 'markdownContent') cut -= 1
-  const process = cut < 0 ? row.content : row.content.filter((_, i) => i !== cut)
-  const final = cut < 0 ? [] : [row.content[cut]]
-
-  return (
-    <>
-      {process.length > 0 && (
-        <>
-          <ThreadProcessSection
-            showToggle={shouldShowProcessToggle({ final, process, cancelled: row.isCanceled })}
-            summary={`Worked for 1m 28s`}
-          >
-            <ThreadItems>
-              {process.map((content, index) => (
-                <ThreadItem key={contentKey(content, index)}>
-                  <ChatContentPart content={content} />
-                </ThreadItem>
-              ))}
-            </ThreadItems>
-          </ThreadProcessSection>
-          <ThreadTurnGap />
-        </>
-      )}
-      <ThreadAssistantMessage unitKey={row.id} targetId={row.id}>
-        <div
-          data-markdown-text-style="assistant-message"
-          className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
-        >
-          {final.map((content, index) => (
-            <ChatContentPart key={contentKey(content, index)} content={content} />
-          ))}
-        </div>
-      </ThreadAssistantMessage>
-      <ThreadTurnGap />
-    </>
-  )
-}
 
 createRoot(document.getElementById('root')!).render(
   // InlineAnchor（文件改动里的路径胶囊）需要这两个 Provider 才能挂载

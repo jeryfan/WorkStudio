@@ -1,25 +1,14 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useChatRuntime } from '../state/ChatRuntimeContext'
 import { Composer } from '../components/composer/Composer'
 import { latestTodos, turnsToRows } from './adapter/entryToContent'
 import { ChatActionsProvider } from './ChatActionsContext'
 import { ThreadScrollContainer } from './ThreadScrollContainer'
-import {
-  ThreadAssistantMessage,
-  ThreadItem,
-  ThreadItems,
-  ThreadProcessSection,
-  ThreadTurn,
-  ThreadTurnGap,
-  ThreadUserMessage
-} from './ThreadTurn'
-import { shouldShowProcessToggle, splitTurnContent, turnSummaryLabel } from './model/turnSections'
-import { ChatContentPart } from './parts/ChatContentPart'
+import { ThreadTurn, ThreadTurnGap, ThreadUserMessage } from './ThreadTurn'
+import { ThreadTurnBody } from './ThreadTurnBody'
 import { MarkdownPart } from './parts/MarkdownPart'
-import { ChatResponseFooter } from './parts/ChatResponseFooter'
-import { contentKey } from './model/contentKey'
-import { responsePlainText } from './model/responseText'
 import { TodoListPart } from './parts/TodoListPart'
+import { UserMessageActions, UserMessageEditForm } from './parts/UserMessageActions'
 
 /**
  * 会话视图 —— 骨架逐层对齐 Codex(见 ThreadScrollContainer / ThreadTurn 里的层级注释)。
@@ -35,15 +24,31 @@ import { TodoListPart } from './parts/TodoListPart'
  * 3. **输入区在 sticky 底槽里**(`[data-thread-scroll-footer]`),是消息流的兄弟,
  *    不再作为列表的 footer 传进去。
  *
+ * 回复侧的渲染(过程段 / 状态行 / 最终回复)在 `ThreadTurnBody`,
+ * 预览页共用 —— 两侧的差异只能来自数据,不会来自结构。
+ *
  * adapter 仍然产出 request/response 两种行(那层是协议投影,与渲染无关),
  * 这里按 id 把相邻的 request+response 合成一个 turn。
  */
 export function ChatView(): React.JSX.Element {
-  const { turns, approvals, loading, readOnly, readOnlyReason, error, respondToApproval } =
-    useChatRuntime()
+  const {
+    turns,
+    approvals,
+    loading,
+    readOnly,
+    readOnlyReason,
+    error,
+    respondToApproval,
+    editUserMessage
+  } = useChatRuntime()
   const rows = useMemo(() => turnsToRows(turns, approvals), [turns, approvals])
   // 当前计划挂在输入框上方,不进回复流 —— 与上游一致,理由见 TodoListPart
   const todos = useMemo(() => latestTodos(turns), [turns])
+  /*
+   * 正在行内编辑的用户消息(一次至多一条,Codex 同)。
+   * 只有最新一轮的用户消息可编辑(Codex 实测:历史轮没有 Edit 按钮)。
+   */
+  const [editingTurnKey, setEditingTurnKey] = useState<string | null>(null)
 
   /*
    * 把扁平的 request/response 行合回 turn。
@@ -72,6 +77,12 @@ export function ChatView(): React.JSX.Element {
     for (let i = rows.length - 1; i >= 0; i--) if (rows[i].kind === 'response') return rows[i].id
     return null
   }, [rows])
+
+  const lastRequestKey = useMemo(() => {
+    for (let i = turnGroups.length - 1; i >= 0; i--)
+      if (turnGroups[i].request) return turnGroups[i].key
+    return null
+  }, [turnGroups])
 
   return (
     <ChatActionsProvider respondToApproval={respondToApproval}>
@@ -104,15 +115,40 @@ export function ChatView(): React.JSX.Element {
         {turnGroups.map((group) => {
           const req = group.request?.kind === 'request' ? group.request : undefined
           const res = group.response?.kind === 'response' ? group.response : undefined
-          const text = res ? responsePlainText(res) : ''
-          // 尾部连续的 markdown = 最终输出;它之前的一切都是过程
-          const split = splitTurnContent(res?.content ?? [])
-          const process = split.process
-          const final = split.final
+          /*
+           * Edit message 的显隐门(Codex `onEditUserMessage` 的 undefined 分支):
+           * 最新一轮 + 轮次不在跑 + 会话可写。
+           */
+          const canEdit =
+            req != null &&
+            group.key === lastRequestKey &&
+            !readOnly &&
+            (res == null || res.isComplete)
           return (
             <ThreadTurn key={group.key} turnKey={group.key}>
               {req && (
-                <ThreadUserMessage unitKey={group.key}>
+                <ThreadUserMessage
+                  unitKey={group.key}
+                  sentTime={formatUserMessageTime(req.timestamp)}
+                  actions={
+                    <UserMessageActions
+                      text={req.text}
+                      onEdit={canEdit ? () => setEditingTurnKey(group.key) : undefined}
+                    />
+                  }
+                  editing={
+                    editingTurnKey === group.key ? (
+                      <UserMessageEditForm
+                        initialText={req.text}
+                        onCancel={() => setEditingTurnKey(null)}
+                        onSubmit={(text) => {
+                          setEditingTurnKey(null)
+                          void editUserMessage(group.key, text).catch(() => {})
+                        }}
+                      />
+                    ) : undefined
+                  }
+                >
                   <MarkdownPart
                     content={{ kind: 'markdownContent', content: req.text, phase: null }}
                     textStyle="user-message"
@@ -120,65 +156,7 @@ export function ChatView(): React.JSX.Element {
                 </ThreadUserMessage>
               )}
               {req && res && <ThreadTurnGap />}
-              {/*
-               * 过程段 —— Codex 的 turn 是**三段式**:用户消息 / 过程(可折叠) /
-               * 最终回复,三者是兄弟,段间夹 `div.w-full[aria-hidden]`。
-               * 之前 WS 把思考、工具调用和最终 markdown 全塞在同一个
-               * ThreadAssistantMessage 里,所以既没有「Worked for」折叠头,
-               * 过程也没法收起来。
-               *
-               * 怎么分:最终输出是**尾部连续的 markdown**,它前面的一切
-               * (思考、工具调用、进度、hook…)都算过程。实测依据是中间推理文字
-               * 与最终回复用的是同一套结构,区别只在最终那段的父级带
-               * `data-local-conversation-final-assistant` —— 所以按"位置"分而不是
-               * 按"类型"分,才和 Codex 一致。
-               */}
-              {res && process.length > 0 && (
-                <>
-                  <ThreadProcessSection
-                    showToggle={shouldShowProcessToggle({
-                      final,
-                      process,
-                      cancelled: res.isCanceled
-                    })}
-                    summary={turnSummaryLabel(res.startedAtMs, res.completedAtMs, process.length)}
-                  >
-                    <ThreadItems>
-                      {process.map((content, index) => (
-                        <ThreadItem key={contentKey(content, index)}>
-                          <ChatContentPart content={content} />
-                        </ThreadItem>
-                      ))}
-                    </ThreadItems>
-                  </ThreadProcessSection>
-                  <ThreadTurnGap />
-                </>
-              )}
-              {res && (
-                <ThreadAssistantMessage
-                  unitKey={group.key}
-                  targetId={res.id}
-                  sentTime={
-                    res.completedAtMs != null ? formatClockTime(res.completedAtMs) : undefined
-                  }
-                  actions={
-                    // 流式期间不给操作条:此时复制会拿到半截内容
-                    res.isComplete && text.length > 0 ? (
-                      <ChatResponseFooter text={text} />
-                    ) : undefined
-                  }
-                >
-                  <div
-                    data-markdown-text-style="assistant-message"
-                    className="codex-MarkdownRoot [&>*:last-child]:mb-0 [&>ol:first-child]:mt-0 [&>ul:first-child]:mt-0"
-                  >
-                    {final.map((content, index) => (
-                      <ChatContentPart key={contentKey(content, index)} content={content} />
-                    ))}
-                  </div>
-                </ThreadAssistantMessage>
-              )}
-              {res && res.id === lastResponseId && <ThreadTurnGap />}
+              {res && <ThreadTurnBody row={res} isLastResponse={res.id === lastResponseId} />}
             </ThreadTurn>
           )
         })}
@@ -187,7 +165,9 @@ export function ChatView(): React.JSX.Element {
   )
 }
 
-/** `span[data-assistant-message-sent-time]` 里那个时间 —— Codex 实测形如 `Friday 12:01 AM` */
-function formatClockTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+/** 用户消息悬浮行里的时间 —— Codex 实测形如 `Aug 16, 2:28 PM` */
+function formatUserMessageTime(ms: number | null): string | undefined {
+  if (ms == null) return undefined
+  const d = new Date(ms)
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
 }

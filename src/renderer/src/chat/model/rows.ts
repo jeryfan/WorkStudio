@@ -26,8 +26,14 @@ export interface ChatRequestRow {
 export interface ChatResponseRow {
   kind: 'response'
   id: string
-  /** 按到达顺序排列的内容块 */
+  /** 按到达顺序排列的内容块(不含推理 —— 推理不进渲染流,见 content.ts) */
   content: ChatContent[]
+  /**
+   * 轮次状态行的文案来源 —— 最新一条推理的最后一行(Codex 的
+   * `thinkingFallbackMessage`,经 `extractLastHeading` 从推理正文提取)。
+   * 没有推理时为 null,状态行显示 "Thinking"。
+   */
+  thinkingFallback: string | null
   /** 轮次已收尾（无论成功、失败还是被停） */
   isComplete: boolean
   /** 被用户停止 */

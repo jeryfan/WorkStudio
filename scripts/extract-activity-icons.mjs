@@ -75,6 +75,11 @@ const ICONS = [
     name: 'RawOutputIcon',
     exportName: 'xG',
     doc: 'MCP 活动行右下角「查看原始输出」的触发按钮 —— 尖括号包一条斜杠(`</>`)'
+  },
+  {
+    name: 'ActivityMcpIcon',
+    exportName: 'WV',
+    doc: 'MCP/集成工具的兜底图标 —— 四个圆点连成回环。Codex `Fg` 的 mcp-tool-call 分支在拿不到服务器 logo 时用它(`kg` 的 fallback `Ui`)'
   }
 ]
 
@@ -100,6 +105,12 @@ const LOCAL_ICONS = [
     file: 'subagent-activity-chip-group-DtZM0hSI.js',
     local: 'vg',
     doc: '流中断(stream-error)—— wifi 弧线。Codex 用连接图标而不是错误图标表达断流'
+  },
+  {
+    name: 'ExpandTableIcon',
+    file: null,
+    local: 'eDr',
+    doc: '表格的「Expand table」按钮 —— 右下角一个放大箭头。在 app-initial 就地定义(无导出名)'
   }
 ]
 
@@ -250,7 +261,10 @@ for (const icon of CHUNK_ICONS) {
 }
 
 for (const icon of LOCAL_ICONS) {
-  const src = fs.readFileSync(path.join(CHUNKS, icon.file), 'utf8')
+  const src = fs.readFileSync(
+    icon.file == null ? BUNDLE : path.join(CHUNKS, icon.file),
+    'utf8'
+  )
   const body = arrowBody(src, icon.local)
   fs.writeFileSync(path.join(outDir, `${icon.name}.tsx`), component(icon, body))
   written.push(icon.name)

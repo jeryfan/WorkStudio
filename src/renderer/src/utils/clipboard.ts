@@ -31,3 +31,22 @@ export async function copyText(text: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * 复制富文本(text/plain + text/html)—— Codex 复制表格时的双格式
+ *(`bV({"text/plain": markdownSource, "text/html": htmlText})`)。
+ * ClipboardItem 不可用时退化成纯文本。
+ */
+export async function copyRichText(plain: string, html: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' })
+      })
+    ])
+    return true
+  } catch {
+    return copyText(plain)
+  }
+}

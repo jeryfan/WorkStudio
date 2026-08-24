@@ -77,6 +77,14 @@ export interface TerminalToolData {
  */
 export interface InputOutputToolData {
   kind: 'inputOutput'
+  /**
+   * 这条调用来自 MCP 还是动态工具 —— 组聚合(Codex `fr`)按它分流:
+   * MCP 进 `mcp-sources` 段(按服务器聚合),动态工具逐工具一段。
+   * MCP 额外带服务器名与连接器信息,供组摘要命名与 logo 解析。
+   */
+  source:
+    | { kind: 'mcp'; server: string; connectorId: string | null; appName: string | null }
+    | { kind: 'dynamic' }
   /** 解析后的 MCP 内容块。动态工具的文本被包成单个 text 块 */
   blocks: McpContentBlock[]
   /** 结果整体是一段 JSON 时的缩进串；否则 null */
@@ -108,20 +116,17 @@ export interface FileEditToolData {
 }
 
 /**
- * 检索类工具（webSearch、代码搜索）。
+ * 检索类工具（webSearch）。
  *
- * 上游对"带结果的工具"会渲染成一个可折叠的结果列表（`ChatResultListSubPart`），
- * 只有确实没结果时才是光秃秃一行标题。这里跟它对齐。
- *
- * `results` 在协议里是 `Array<JsonValue>`，注释明确说是**不透明 JSON**
- * （"so new result fields and result types can pass through without a Codex
- * release"）。所以 adapter 只做尽力而为的抽取：认得出 url/title 就用，
- * 认不出就把整条 JSON 当标题——总比把结果丢掉好。
+ * Codex 的 `nO` 只渲染一行双段摘要（不渲染结果列表、没有展开体），
+ * 所以这里只保留摘要要用的字段；协议的 `results`（不透明 JSON）
+ * 不再进渲染模型。
  */
 export interface SearchToolData {
   kind: 'search'
   query: string
-  results: { title: string; url: string | null }[]
+  /** 检索动作 —— 协议与 Codex 同款(search/openPage/findInPage/other) */
+  action: import('@shared/protocol/generated/v2/WebSearchAction').WebSearchAction | null
 }
 
 export type ToolSpecificData =

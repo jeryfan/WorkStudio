@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import type { InputOutputToolData, ToolInvocation } from '../../model/toolInvocation'
-import { toolStatus, toolSummary } from '../../model/toolDisplay'
+import { toolRunning } from '../../model/toolDisplay'
 import { CodeBlockPart } from '../CodeBlockPart'
-import { ToolActivityDisclosure } from '../activity'
+import { ActivityHeaderRow, DisclosureBody } from '../activity'
+import { CadencedShimmer } from '../CadencedShimmer'
 import { RawOutputIcon } from '../../../components/icons'
 import { McpContentBlockPart } from './McpContentBlockPart'
 import { RawOutputDialog } from './RawOutputDialog'
@@ -10,33 +11,24 @@ import { ToolActivityIcon } from './ToolActivityIcon'
 import { cx } from '../../../utils/cx'
 
 /**
- * 通用工具(MCP / dynamic)的活动行。
+ * 通用工具(MCP / dynamic)的活动行 —— Codex 的 `ew`
+ *(`subagent-activity-chip-group` 的 mcp-tool-call 分支)。
  *
- * 结构照 Codex 的 `ew`(`subagent-activity-chip-group`),展开体是:
+ * ## 展开态是单状态,用户控制、默认收起
  *
- * ```
- * ActivityBody variant="grouped"                 ← 不缩进、不加 gap-2/pt-2
- * ├ div.[&_*]:text-token-non-assistant-body-descendant.flex.flex-col.gap-0.5
- * │   └ McpContentBlockPart × n                  ← 散文
- * ├ CodeSnippet(json, max-h-48)                  ← 结果整体是 JSON 时
- * └ div.inline-flex.w-fit > button               ← 「原始输出」触发器(hover 才显)
- * ```
+ * 不是 `ToolActivityDisclosure`(Codex `Y`)的运行档默认展开 —— 这个构建里
+ * 会话工具行没有用 Y 的:exec 行(`MS`)与 MCP 行(`ew`)都是
+ * `useState` 收起默认。`Y` 只在 WebMCP 工具定义那一处出现(WS 没有)。
  *
- * ## 与上一版的三处差别(都是实测比对出来的)
+ * ## 展开条件(`Ne`)
  *
- * 1. **不再有入参代码块。** Codex 的展开体里只有结果;入参连同 callId、耗时、
- *    原始 result 一起收进「原始输出」对话框。折叠一行的目的是回答"这次调用干了
- *    什么",请求体是排查时才要的东西,常驻会把结果挤下去。
- * 2. **结果按内容分流,不是一律代码块。** 上一版把整个 `content` 数组
- *    `JSON.stringify` 塞进代码块 —— 等宽 + `whitespace-pre!`(不换行),
- *    MCP 返回的长 URL 直接横向溢出;而 MCP 结果**经常就是散文**。
- *    现在:整体是 JSON → 代码块;否则 → `McpContentBlockPart` 的散文排版。
- * 3. **展开体 variant 是 `grouped` 且不缩进。** `ToolActivityDisclosure` 的默认档
- *    (`default` + `indent`)会给出 `gap-2 pt-2 pb-1 ps-6`,Codex 这里是
- *    `gap-[var(--conversation-grouped-item-gap,4px)] pt-1` 且没有 `ps-6`。
+ * `e.completed || e.result != null` —— 还在跑且什么都没回来时行不可点
+ * (没有 chevron);完成后总有内容(空了也是一句 "Tool returned no content")。
  *
- * `group` 类挂在行的外层容器上,给「原始输出」按钮的 `group-hover:opacity-100`
- * 提供作用域 —— 按钮平时是透明的,鼠标进到这一行才浮出来。
+ * ## 展开体只有结果,没有入参
+ *
+ * 入参连同 callId、耗时收进「原始输出」对话框。结果按内容分流:
+ * 散文块(`McpContentBlockPart`)/ 整体 JSON(代码块)/ 错误(危险色块)。
  */
 export function InputOutputToolPart({
   invocation,
@@ -46,82 +38,88 @@ export function InputOutputToolPart({
   data: InputOutputToolData
 }): React.JSX.Element {
   const [rawOpen, setRawOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
+  const running = toolRunning(invocation)
   const hasResult = data.blocks.length > 0 || data.structuredJson != null || data.error != null
-  const running = toolStatus(invocation) === 'running'
+  const expandable = !running || hasResult
 
   return (
     <>
-      <ToolActivityDisclosure
+      <ActivityHeaderRow
         className="group"
         icon={<ToolActivityIcon invocation={invocation} />}
-        status={toolStatus(invocation)}
-        summary={toolSummary(invocation)}
-        bodyVariant="grouped"
-        indentContent={false}
-      >
-        {/*
-         * 运行中还没有任何结果时不给展开体 —— 有 children 就会长出 chevron,
-         * 点开却是空的。Codex 同理:`De`/`N`/`Oe` 全空且未完成时那一支是 null。
-         */}
-        {hasResult || !running ? (
-          <>
-            {data.error != null ? (
-              /*
-               * 错误走 Codex 的 danger callout(`Ti level="danger" fullWidth`):
-               * 整块红底 + `max-h-48` 滚动窗。错误文案经常是一整段 stack trace,
-               * 不封高度会把整个会话流顶下去。
-               */
-              <div className="w-full rounded-lg border border-transparent bg-token-charts-red/10 p-2 text-token-charts-red">
-                <div className="max-h-48 overflow-auto text-size-chat whitespace-pre-wrap">
-                  {data.error}
+        summary={
+          // Codex 的 MCP 行摘要是 `{tool}`(句首大写名)—— leading 类与流光照 `Ie`;
+          // 不拼耗时(它在「原始输出」对话框里,不在行上)
+          <CadencedShimmer
+            active={running}
+            className="min-w-0 shrink truncate text-size-chat text-token-conversation-summary-leading group-hover/activity-header:text-token-foreground"
+          >
+            {invocation.invocationMessage}
+          </CadencedShimmer>
+        }
+        disclosure={expandable ? { expanded, onToggle: () => setExpanded((v) => !v) } : undefined}
+        body={
+          expandable ? (
+            <DisclosureBody expanded={expanded} variant="grouped" indent={false}>
+              {data.error != null ? (
+                /*
+                 * 错误走 Codex 的 danger callout(`Ti level="danger" fullWidth`):
+                 * 整块红底 + `max-h-48` 滚动窗。错误文案经常是一整段 stack trace,
+                 * 不封高度会把整个会话流顶下去。
+                 */
+                <div className="w-full rounded-lg border border-transparent bg-token-charts-red/10 p-2 text-token-charts-red">
+                  <div className="max-h-48 overflow-auto text-size-chat whitespace-pre-wrap">
+                    {data.error}
+                  </div>
                 </div>
-              </div>
-            ) : data.blocks.length > 0 ? (
-              <div className="[&_*]:text-token-non-assistant-body-descendant flex flex-col gap-0.5">
-                {data.blocks.map((block, i) => (
-                  <McpContentBlockPart key={i} block={block} />
-                ))}
-              </div>
-            ) : data.structuredJson != null ? null : (
-              <p className="text-token-description-foreground/80">Tool returned no content</p>
-            )}
+              ) : data.blocks.length > 0 ? (
+                <div className="[&_*]:text-token-non-assistant-body-descendant flex flex-col gap-0.5">
+                  {data.blocks.map((block, i) => (
+                    <McpContentBlockPart key={i} block={block} />
+                  ))}
+                </div>
+              ) : data.structuredJson != null ? null : (
+                <p className="text-token-description-foreground/80">Tool returned no content</p>
+              )}
 
-            {data.structuredJson == null ? null : (
-              <CodeBlockPart
-                code={data.structuredJson}
-                lang="json"
-                codeContainerClassName="max-h-48 overflow-auto"
-              />
-            )}
+              {data.structuredJson == null ? null : (
+                <CodeBlockPart
+                  code={data.structuredJson}
+                  lang="json"
+                  codeContainerClassName="max-h-48 overflow-auto"
+                />
+              )}
 
-            {/*
-             * 「原始输出」触发器。Codex 的类名逐字:`color="ghost"` + `size="icon"`
-             * (`electron:p-1 electron:[&>svg]:icon-sm flex items-center justify-center
-             * p-0.5` + `rounded-full electron:rounded-md`),外面套一层
-             * `div.inline-flex.w-fit` 让它不撑满整行。
-             */}
-            <div className="inline-flex w-fit">
-              <button
-                type="button"
-                aria-label="Show raw tool call output"
-                onClick={() => setRawOpen(true)}
-                className={cx(
-                  'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none',
-                  'focus:outline-none disabled:cursor-not-allowed disabled:opacity-40',
-                  'focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:ring-offset-0',
-                  'text-token-text-tertiary enabled:hover:bg-token-list-hover-background border-transparent',
-                  'flex items-center justify-center p-0.5 electron:p-1 electron:[&>svg]:icon-sm',
-                  'rounded-full electron:rounded-md',
-                  'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100'
-                )}
-              >
-                <RawOutputIcon aria-hidden className="icon-xxs" />
-              </button>
-            </div>
-          </>
-        ) : undefined}
-      </ToolActivityDisclosure>
+              {/*
+               * 「原始输出」触发器。Codex 的类名逐字:`color="ghost"` + `size="icon"`
+               * (`electron:p-1 electron:[&>svg]:icon-sm flex items-center justify-center
+               * p-0.5` + `rounded-full electron:rounded-md`),外面套一层
+               * `div.inline-flex.w-fit` 让它不撑满整行。
+               */}
+              <div className="inline-flex w-fit">
+                <button
+                  type="button"
+                  aria-label="Show raw tool call output"
+                  onClick={() => setRawOpen(true)}
+                  className={cx(
+                    'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none',
+                    'focus:outline-none disabled:cursor-not-allowed disabled:opacity-40',
+                    'focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:ring-offset-0',
+                    'text-token-text-tertiary enabled:hover:bg-token-list-hover-background border-transparent',
+                    'flex items-center justify-center p-0.5 electron:p-1 electron:[&>svg]:icon-sm',
+                    'rounded-full electron:rounded-md',
+                    'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100'
+                  )}
+                >
+                  <RawOutputIcon aria-hidden className="icon-xxs" />
+                </button>
+              </div>
+            </DisclosureBody>
+          ) : undefined
+        }
+      />
 
       {rawOpen && (
         <RawOutputDialog

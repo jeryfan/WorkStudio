@@ -10,7 +10,6 @@
  * | ActivityHeaderContent / ActivityChevron / ActivityHeader | `y` / `C` / `D` |
  * | ActivityHeaderRow | `F` |
  * | DisclosureBody | 五处逐字重复的 `motion.div` 展开壳(抽出来的) |
- * | ToolActivityDisclosure | `Y` |
  * | ScrollFadeStack | `OT`(subagent-activity-chip-group) |
  * | DiffCounts | `CZ`(app-initial) |
  * | useElementHeight | `B` |
@@ -23,6 +22,5 @@ export { ActivityRow, ConversationItem } from './ActivityRow'
 export { DiffCounts } from './DiffCounts'
 export { DisclosureBody } from './DisclosureBody'
 export { ScrollFadeStack } from './ScrollFadeStack'
-export { ToolActivityDisclosure } from './ToolActivityDisclosure'
 export { DISCLOSURE_TRANSITION } from './transition'
 export { useElementHeight } from './useElementHeight'

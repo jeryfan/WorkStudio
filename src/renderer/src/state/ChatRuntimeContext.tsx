@@ -96,6 +96,11 @@ interface ChatRuntimeValue {
   editQueuedMessage(id: string): string | null
   /** Codex "Resume"(Queue paused because you interrupted) */
   resumeInterruptedQueue(): void
+  /**
+   * 编辑一条已发送的用户消息:回滚到该轮(含)并拿编辑后的文本重新发起。
+   * 对应 Codex 的 `onEditUserMessage`(仅最新一轮、且不在运行中才可编辑)。
+   */
+  editUserMessage(turnId: string, text: string): Promise<void>
   /** 回答一条审批。key 取自 `PendingApproval.requestKey` */
   respondToApproval(requestKey: string, decision: ApprovalDecision): void
 }
@@ -213,6 +218,8 @@ function useChatRuntimeCore(chatId: string | null): {
   sendQueuedMessageNow(id: string): Promise<void>
   editQueuedMessage(id: string): string | null
   resumeInterruptedQueue(): void
+  /** 编辑一条已发送的用户消息(回滚该轮起 + 重发) */
+  editUserMessage(turnId: string, text: string): Promise<void>
   respondToApproval(requestKey: string, decision: ApprovalDecision): void
   /** startChat 新建的会话没有历史,resume 会清掉乐观追加的 pending turn —— 跳过 */
   markFresh(threadId: string): void
@@ -692,6 +699,7 @@ function useChatRuntimeCore(chatId: string | null): {
   const startTurnRef = useRef(startTurn)
   const steerRef = useRef(steer)
   const phaseRef = useRef(phase)
+  const turnsRef = useRef(turns)
   useEffect(() => {
     startTurnRef.current = startTurn
   }, [startTurn])
@@ -701,6 +709,9 @@ function useChatRuntimeCore(chatId: string | null): {
   useEffect(() => {
     phaseRef.current = phase
   }, [phase])
+  useEffect(() => {
+    turnsRef.current = turns
+  }, [turns])
 
   /**
    * 出队消费 —— Codex 的队列消费循环:轮次结束且队列未暂停时自动发下一条。
@@ -774,6 +785,24 @@ function useChatRuntimeCore(chatId: string | null): {
     consumeQueue()
   }, [consumeQueue])
 
+  /*
+   * Codex `onEditUserMessage`:编辑一条已发送的用户消息。
+   * 语义 = 从该轮(含)开始回滚 + 拿新文本重新发起一轮。
+   * 入口侧已保证只有最新一轮、且不在运行中可编辑(见 ThreadUserMessage 的 gating)。
+   */
+  const editUserMessage = useCallback(async (turnId: string, text: string): Promise<void> => {
+    const threadId = activeRef.current
+    if (!threadId) throw new Error('No active chat')
+    const idx = turnsRef.current.findIndex((t) => t.id === turnId)
+    if (idx === -1) throw new Error(`No such turn: ${turnId}`)
+    await rpc.request(M.chatRollback, {
+      threadId,
+      numTurns: turnsRef.current.length - idx
+    })
+    setTurns((prev) => prev.slice(0, idx))
+    await startTurnRef.current(threadId, text)
+  }, [])
+
   return {
     turns,
     approvals,
@@ -793,6 +822,7 @@ function useChatRuntimeCore(chatId: string | null): {
     sendQueuedMessageNow,
     editQueuedMessage,
     resumeInterruptedQueue,
+    editUserMessage,
     respondToApproval,
     markFresh
   }
@@ -854,6 +884,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
       sendQueuedMessageNow: core.sendQueuedMessageNow,
       editQueuedMessage: core.editQueuedMessage,
       resumeInterruptedQueue: core.resumeInterruptedQueue,
+      editUserMessage: core.editUserMessage,
       respondToApproval: core.respondToApproval
     }),
     [
@@ -879,6 +910,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
       core.sendQueuedMessageNow,
       core.editQueuedMessage,
       core.resumeInterruptedQueue,
+      core.editUserMessage,
       core.respondToApproval
     ]
   )
@@ -930,6 +962,7 @@ export function SideChatRuntimeProvider({
       sendQueuedMessageNow: core.sendQueuedMessageNow,
       editQueuedMessage: core.editQueuedMessage,
       resumeInterruptedQueue: core.resumeInterruptedQueue,
+      editUserMessage: core.editUserMessage,
       respondToApproval: core.respondToApproval
     }),
     [
@@ -952,6 +985,7 @@ export function SideChatRuntimeProvider({
       core.sendQueuedMessageNow,
       core.editQueuedMessage,
       core.resumeInterruptedQueue,
+      core.editUserMessage,
       core.respondToApproval
     ]
   )

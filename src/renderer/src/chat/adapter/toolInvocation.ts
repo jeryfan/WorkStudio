@@ -18,13 +18,15 @@ import {
   parseMcpContentBlocks,
   stringifyJson,
   type McpContentBlock
-} from '../model/mcpContent'
+} from '../model/mcpContent.ts'
+import { humanizeToolName } from '../model/toolName.ts'
 import type {
   TerminalToolData,
   ToolInvocation,
   ToolSpecificData,
   ToolState
 } from '../model/toolInvocation'
+import { displayCommand } from '../model/shellCommand.ts'
 
 type Narrow<K extends Entry['type']> = Extract<Entry, { type: K }>
 
@@ -84,7 +86,8 @@ function commandLabels(entry: Narrow<'commandExecution'>): {
       case 'read':
         return { invocation: `Reading ${action.name}`, pastTense: `Read ${action.name}` }
       case 'listFiles': {
-        const where = action.path ? ` ${action.path}` : ''
+        // Codex `toolSummaryForCmd.exploredFilesInPath`:`Listed files in {path}`
+        const where = action.path ? ` in ${action.path}` : ''
         return { invocation: `Listing files${where}`, pastTense: `Listed files${where}` }
       }
       case 'search': {
@@ -117,17 +120,6 @@ function commandKind(entry: Narrow<'commandExecution'>): TerminalToolData['comma
       return 'search'
     case 'unknown':
       return 'unknown'
-  }
-}
-
-/** JSON 入参格式化。过长的单行 JSON 没法读，缩进后至少能扫 */
-function formatJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
   }
 }
 
@@ -180,34 +172,6 @@ function dynamicResultBlocks(entry: Narrow<'dynamicToolCall'>): McpContentBlock[
 }
 
 /**
- * 检索结果 → 可显示的条目。
- *
- * 协议把 `results` 声明成 `Array<JsonValue>` 并注明是**不透明 JSON**，理由是
- * "新的结果字段和结果类型不必等 Codex 发版就能透传"。所以这里不能按固定 schema
- * 解析，只能尽力抽：认得出 title/url 就用，认不出就把整条 JSON 当标题。
- *
- * 宁可显示一行难看的 JSON，也不要把结果丢掉——上游对有结果的工具是渲染成结果
- * 列表的（ChatResultListSubPart），只显示一行标题会让人以为搜索什么都没搜到。
- */
-function searchResults(raw: unknown): { title: string; url: string | null }[] {
-  if (!Array.isArray(raw)) return []
-  return raw.map((item) => {
-    if (typeof item === 'string') return { title: item, url: null }
-    if (item && typeof item === 'object') {
-      const o = item as Record<string, unknown>
-      const url = typeof o.url === 'string' ? o.url : null
-      const title =
-        (typeof o.title === 'string' && o.title) ||
-        (typeof o.name === 'string' && o.name) ||
-        (typeof o.snippet === 'string' && o.snippet) ||
-        url
-      if (title) return { title, url }
-    }
-    return { title: formatJson(item), url: null }
-  })
-}
-
-/**
  * 条目 → 统一的工具调用；不是工具条目则返回 null。
  */
 export function toToolInvocation(entry: Entry): ToolInvocation | null {
@@ -218,7 +182,8 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
         kind: 'terminal',
         commandKind: commandKind(entry),
         command: entry.command,
-        commandForDisplay: entry.command,
+        // Codex 的 `Ae`:剥掉 `/bin/zsh -lc '…'` 与引号包装,展示用户写的命令本身
+        commandForDisplay: displayCommand(entry.command),
         cwd: entry.cwd,
         output: entry.aggregatedOutput,
         exitCode: entry.exitCode
@@ -238,15 +203,24 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
       }
     }
 
-    case 'mcpToolCall':
+    case 'mcpToolCall': {
+      // Codex 的 MCP 行摘要是 `{tool}` —— 句首大写的工具名(`pf(tool, 'sentence')`),
+      // 没有 Running/Ran 包装;进行中的状态由流光表达,不兼职文案。
+      const label = humanizeToolName(entry.tool, { style: 'sentence' })
       return {
         id: entry.id,
         toolId: `${entry.server}/${entry.tool}`,
-        invocationMessage: `Running ${entry.tool}`,
-        pastTenseMessage: `Ran ${entry.tool}`,
+        invocationMessage: label,
+        pastTenseMessage: label,
         state: mapStatus(entry.status, entry.durationMs),
         data: {
           kind: 'inputOutput',
+          source: {
+            kind: 'mcp',
+            server: entry.server,
+            connectorId: entry.appContext?.connectorId ?? null,
+            appName: entry.appContext?.appName ?? null
+          },
           ...mcpResult(entry),
           error: entry.error ? entry.error.message : null,
           rawJson: stringifyJson({
@@ -257,21 +231,26 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
           })
         }
       }
+    }
 
     case 'dynamicToolCall': {
       const name = entry.namespace ? `${entry.namespace}.${entry.tool}` : entry.tool
       const state = mapStatus(entry.status, entry.durationMs)
+      // 动态工具同 MCP:摘要就是工具名本身(Codex 的动态工具摘要在 `lS`,
+      // 按工具的注册渲染;WS 没有注册表,给句首大写名)
+      const label = humanizeToolName(entry.tool, { style: 'sentence' })
       return {
         id: entry.id,
         toolId: name,
-        invocationMessage: `Running ${name}`,
-        pastTenseMessage: `Ran ${name}`,
+        invocationMessage: label,
+        pastTenseMessage: label,
         state:
           state.type === 'completed' && entry.success === false
             ? { ...state, success: false }
             : state,
         data: {
           kind: 'inputOutput',
+          source: { kind: 'dynamic' },
           blocks: dynamicResultBlocks(entry),
           structuredJson: null,
           error: null,
@@ -308,14 +287,16 @@ export function toToolInvocation(entry: Entry): ToolInvocation | null {
       return {
         id: entry.id,
         toolId: 'web_search',
-        invocationMessage: `Searching the web for ${entry.query}`,
-        pastTenseMessage: `Searched the web for ${entry.query}`,
+        // 摘要在 SearchToolPart 里组装(双段 + 查询词清理,Codex `nO`),
+        // 这里只提供时态所需的动词
+        invocationMessage: 'Searching the web',
+        pastTenseMessage: 'Searched the web',
         // webSearch 条目只在完成时推来，没有状态字段
         state: { type: 'completed', success: true, durationMs: null },
         data: {
           kind: 'search',
           query: entry.query,
-          results: searchResults(entry.results)
+          action: entry.action
         }
       }
 

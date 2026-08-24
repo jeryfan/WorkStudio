@@ -4,9 +4,7 @@ import { ChatErrorPart } from './ChatErrorPart'
 import { ChatContextCompactionPart } from './ChatContextCompactionPart'
 import { ChatReconnectPart } from './ChatReconnectPart'
 import { ChatReviewModePart } from './ChatReviewModePart'
-import { ChatWorkingPart } from './ChatWorkingPart'
 import { HookPart } from './HookPart'
-import { ThinkingPart } from './ThinkingPart'
 import { ToolInvocationPart } from './ToolInvocationPart'
 
 /**
@@ -24,14 +22,10 @@ export function ChatContentPart({ content }: { content: ChatContent }): React.JS
     case 'markdownContent':
       // ChatView 已在助手回复外层套了 codex-MarkdownRoot,这里不能再套一层
       return <MarkdownPart content={content} withRoot={false} />
-    case 'working':
-      return <ChatWorkingPart content={content} />
     case 'errorDetails':
       return <ChatErrorPart content={content} />
     case 'contextCompaction':
       return <ChatContextCompactionPart />
-    case 'thinking':
-      return <ThinkingPart content={content} />
     case 'toolInvocation':
       return <ToolInvocationPart content={content} />
     case 'hook':

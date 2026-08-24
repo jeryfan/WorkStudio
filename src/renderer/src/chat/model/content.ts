@@ -82,25 +82,11 @@ export interface ChatHookContent {
 }
 
 /**
- * "工作中"指示 —— 对应上游的 `IChatWorkingProgress` /
- * `ChatWorkingProgressContentPart`。
- *
- * 追加在**未完成**回复的末尾，填补"已经发出去了、但还什么都没回来"的空档。
- * 上游把触发条件写在 `chatListRenderer.ts shouldShowWorkingProgress`，第一条
- * 就是 `!lastPart`——即这里最需要它的场景。
- *
- * 与上游的两点不同，都是为了让 adapter 保持纯函数：
- *
- * 1. 上游每次重渲染随机挑一句、靠 1200ms 防抖避免闪烁；这里按轮次 id 取模，
- *    同一轮永远是同一句，不需要计时器，也就不会闪。
- * 2. 上游在正文流式输出的间隙也会显示（靠 `hasBeenCaughtUpLongEnough` 判断
- *    "卡住了"）；那需要时间状态，这里干脆在有正文之后就不显示——正文正在
- *    一个字一个字冒出来，本身就是最好的进度指示。
+ * "工作中"指示不作为内容块存在 —— Codex 里它是轮次级的
+ * `thinking-placeholder`(`local-conversation-turn` 的 `Po`/`No`),
+ * 是 turn 的兄弟段、不在可折叠的过程段里,显示条件由轮次状态决定。
+ * 文案恒为 "Thinking" 或最新推理标题,没有轮换词表。
  */
-export interface ChatWorkingContent {
-  kind: 'working'
-  label: string
-}
 
 /** 轮次级失败/中断 */
 export interface ChatErrorContent {
@@ -144,10 +130,8 @@ export interface ChatReviewModeContent {
 
 export type ChatContent =
   | ChatMarkdownContent
-  | ChatThinkingContent
   | ChatToolInvocationContent
   | ChatHookContent
-  | ChatWorkingContent
   | ChatErrorContent
   | ChatContextCompactionContent
   | ChatReconnectContent

@@ -9,6 +9,8 @@ import { useSyncExternalStore } from 'react'
  */
 
 const WORD_WRAP_KEY = 'wrapCodeDiff.2'
+/** markdown 代码块的 word wrap —— Codex 是另一个独立 atom(`Zpa` 里的 `Raa`),键名未能从产物确认 */
+const CODE_BLOCK_WRAP_KEY = 'wrapCodeBlock'
 
 function readBool(key: string): boolean {
   try {
@@ -19,6 +21,7 @@ function readBool(key: string): boolean {
 }
 
 let wordWrap = readBool(WORD_WRAP_KEY)
+let codeBlockWrap = readBool(CODE_BLOCK_WRAP_KEY)
 const listeners = new Set<() => void>()
 
 export function isWordWrapEnabled(): boolean {
@@ -35,6 +38,20 @@ export function toggleWordWrap(): void {
   listeners.forEach((l) => l())
 }
 
+export function isCodeBlockWrapEnabled(): boolean {
+  return codeBlockWrap
+}
+
+export function toggleCodeBlockWrap(): void {
+  codeBlockWrap = !codeBlockWrap
+  try {
+    localStorage.setItem(CODE_BLOCK_WRAP_KEY, String(codeBlockWrap))
+  } catch {
+    /* 静默 */
+  }
+  listeners.forEach((l) => l())
+}
+
 function subscribe(l: () => void): () => void {
   listeners.add(l)
   return () => listeners.delete(l)
@@ -42,4 +59,9 @@ function subscribe(l: () => void): () => void {
 
 export function useWordWrap(): boolean {
   return useSyncExternalStore(subscribe, isWordWrapEnabled)
+}
+
+/** markdown 代码块的 word wrap(Codex 的 `user-controlled` 档) */
+export function useCodeBlockWrap(): boolean {
+  return useSyncExternalStore(subscribe, isCodeBlockWrapEnabled)
 }

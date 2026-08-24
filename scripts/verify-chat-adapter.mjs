@@ -13,6 +13,14 @@
  *   node scripts/verify-chat-adapter.mjs
  */
 import { latestTodos, turnsToRows } from '../src/renderer/src/chat/adapter/entryToContent.ts'
+import {
+  demoteSingleItemGroup,
+  formatUnit,
+  groupIntoRenderUnits,
+  summarizeGroup,
+  summaryPartText
+} from '../src/renderer/src/chat/model/renderUnits.ts'
+import { thinkingRowState } from '../src/renderer/src/chat/model/turnSections.ts'
 
 let failed = 0
 function check(name, cond, extra) {
@@ -129,47 +137,49 @@ console.log('无用户消息的轮次不产出空 request 行')
   )
 }
 
-console.log('推理条目现在会渲染成 thinking 块')
+console.log('推理条目不产生内容块(Codex:reasoning 不进渲染单元)')
 {
   const rows = turnsToRows([turn('t1', [userMsg('u1', 'hi'), reasoning('r1'), answer('a1', 'x')])])
-  check('thinking 在回答之前', kinds(rows[1]).join() === 'thinking,markdownContent', kinds(rows[1]))
+  check('只有回答进流', kinds(rows[1]).join() === 'markdownContent', kinds(rows[1]))
 }
 
-console.log('推理 → thinking')
+console.log('推理标题 → thinkingFallback(轮次状态行文案)')
 {
   const r = (id, summary, content = []) => ({ type: 'reasoning', id, summary, content })
 
+  // 取最新一条推理的最后一行(Codex 的 extractLastHeading)
   const done = turnsToRows([
-    turn('t1', [userMsg('u1', 'hi'), r('r1', ['**读代码**\n看了注册表']), answer('a1', 'x')])
+    turn('t1', [
+      userMsg('u1', 'hi'),
+      r('r1', ['**先看 A**\n…', '正在核对求值规则\n颜色默认值里有透明通道']),
+      answer('a1', 'x')
+    ])
   ])
-  const think = done[1].content.find((c) => c.kind === 'thinking')
-  check('产出 thinking 块', !!think, kinds(done[1]))
-  check('标题取加粗小标题而不是正文', think?.title === '读代码', think?.title)
-  check('后面还有条目 → 已结束', think?.isActive === false, think?.isActive)
-
-  // 标题取最新一段：前面几段是已经想完的，标题该反映当前进度
-  const multi = turnsToRows([
-    turn('t1', [r('r1', ['**先看 A**\n…', '**再看 B**\n…'])], { status: 'inProgress' })
-  ])
-  const t2 = multi[0].content[0]
-  check('标题取最新一段', t2?.title === '再看 B', t2?.title)
-  check('轮次进行中且是最后一条 → 进行中', t2?.isActive === true, t2?.isActive)
-
-  // 没有加粗小标题时退回首行，而不是最后一行（最后一行是半句正文）
-  const noBold = turnsToRows([turn('t1', [r('r1', ['检查依赖版本\n然后跑一遍构建'])])])
   check(
-    '无加粗时取首行',
-    noBold[0].content[0]?.title === '检查依赖版本',
-    noBold[0].content[0]?.title
+    '取最新一段的最后一行',
+    done[1].thinkingFallback === '颜色默认值里有透明通道',
+    done[1].thinkingFallback
   )
 
-  // summary 为空时退回 content
-  const onlyContent = turnsToRows([turn('t1', [r('r1', [], ['完整推理'])])])
-  check('summary 为空时用 content', onlyContent[0].content[0]?.items?.join() === '完整推理')
+  // 最后一行是整行加粗时剥掉标记(Codex 的 strong-only-paragraph 分支)
+  const bold = turnsToRows([turn('t1', [r('r1', ['正文…\n**正在核对**'])])])
+  check('整行加粗剥成纯文本', bold[0].thinkingFallback === '正在核对', bold[0].thinkingFallback)
 
-  // 空白段落不该产出空条目
-  const blanks = turnsToRows([turn('t1', [r('r1', ['  ', '有内容', ''])])])
-  check('滤掉空白段', blanks[0].content[0]?.items?.join() === '有内容', blanks[0].content[0]?.items)
+  // content 为空时退回 summary(本机 agent 只发 summary)
+  const onlySummary = turnsToRows([turn('t1', [r('r1', ['研究一下 README'])])])
+  check(
+    'content 空时用 summary',
+    onlySummary[0].thinkingFallback === '研究一下 README',
+    onlySummary[0].thinkingFallback
+  )
+
+  // 全空 → null(状态行显示 "Thinking")
+  const empty = turnsToRows([turn('t1', [r('r1', [], [])])])
+  check('全空 → null', empty[0].thinkingFallback === null, empty[0].thinkingFallback)
+
+  // 没有推理 → null
+  const none = turnsToRows([turn('t1', [userMsg('u1', 'hi')])])
+  check('没有推理 → null', none[1].thinkingFallback === null)
 }
 
 console.log('工具条目 → toolInvocation（归一化）')
@@ -280,15 +290,39 @@ console.log('工具条目 → toolInvocation（归一化）')
 
   // MCP / dynamic
   check(
-    'mcp 入参是格式化的 JSON',
-    tools[1].data.kind === 'inputOutput' && tools[1].data.input.includes('"title"')
+    'mcp 摘要 = 句首大写工具名(Codex `pf` sentence)',
+    tools[1].invocationMessage === 'Create issue' && tools[1].pastTenseMessage === 'Create issue',
+    tools[1].invocationMessage
   )
-  check('mcp 出参序列化 content 数组', tools[1].data.output?.includes('"text"'))
   check(
-    'dynamic 拼接出参',
+    'mcp 带来源(服务器名,组聚合与 logo 用)',
+    tools[1].data.kind === 'inputOutput' &&
+      tools[1].data.source.kind === 'mcp' &&
+      tools[1].data.source.server === 'github',
+    tools[1].data
+  )
+  check(
+    'mcp 出参解析成内容块',
+    tools[1].data.kind === 'inputOutput' &&
+      tools[1].data.blocks[0]?.type === 'text' &&
+      tools[1].data.blocks[0].text === 'ok',
+    tools[1].data.blocks
+  )
+  check(
+    'mcp 原始 JSON 含入参(「原始输出」对话框)',
+    tools[1].data.kind === 'inputOutput' && tools[1].data.rawJson.includes('"title"'),
+    tools[1].data.rawJson
+  )
+  check(
+    'dynamic 拼出参为单文本块',
     turnsToRows([
       turn('t1', [dynamic('d1', { contentItems: [{ type: 'inputText', text: 'hello' }] })])
-    ])[0].content[0].invocation.data.output === 'hello'
+    ])[0].content[0].invocation.data.blocks[0]?.text === 'hello'
+  )
+  check(
+    'dynamic 无命名空间 → source.kind dynamic',
+    tools[2].data.kind === 'inputOutput' && tools[2].data.source.kind === 'dynamic',
+    tools[2].data
   )
   check(
     'dynamic success=false → failed',
@@ -528,80 +562,186 @@ console.log('钩子 / 审阅模式')
 
 // ── 「工作中」指示 ─────────────────────────────────────────────────
 
-console.log('工作中（填补"发出去了但还没回来"的空档）')
+console.log('「工作中」不进内容流(Codex 的 thinking-placeholder 是 turn 级状态行)')
 {
-  const running = (items, extra = {}) =>
-    turnsToRows([turn('t1', items, { status: 'inProgress', ...extra })])
+  // 运行中的空轮次:回复行没有内容块(状态行由渲染层的 thinkingRowState 产出)
+  const bare = turnsToRows([turn('t1', [userMsg('u1', 'hi')], { status: 'inProgress' })])
+  check('空回复没有内容块', bare[1].content.length === 0, kinds(bare[1]))
 
-  // 最要紧的一条：什么都还没回来时必须有东西在动
-  const bare = running([userMsg('u1', 'hi')])
-  check('空回复也要显示工作中', kinds(bare[1]).join() === 'working', kinds(bare[1]))
-  check(
-    '文案来自词表',
-    typeof bare[1].content[0].label === 'string' && bare[1].content[0].label.length > 0
-  )
-
-  // 同一轮文案恒定（纯函数 + 按 id 取模），否则每帧换一个词像抽风
-  const again = running([userMsg('u1', 'hi')])
-  check('同一轮文案稳定', again[1].content[0].label === bare[1].content[0].label)
-
-  // 已经有别的东西在表达进度时不叠加
-  const thinking = running([reasoning('r1')])
-  check('推理进行中不叠加', !kinds(thinking[0]).includes('working'), kinds(thinking[0]))
-
-  const execing = running([exec('c1', 'x', { status: 'inProgress' })])
-  check('工具执行中不叠加', !kinds(execing[0]).includes('working'), kinds(execing[0]))
-
-  const streaming = running([userMsg('u1', 'hi'), answer('a1', '正在写…')])
-  check('正文流式中不叠加', !kinds(streaming[1]).includes('working'), kinds(streaming[1]))
-
-  const reconnecting = turnsToRows([
-    turn('t1', [userMsg('u1', 'hi')], {
-      status: 'inProgress',
-      reconnect: { attempt: 1, maxAttempts: 5, serverOverloaded: false, detail: null }
-    })
-  ])
-  check('重连中不叠加', !kinds(reconnecting[1]).includes('working'), kinds(reconnecting[1]))
-
-  // 工具跑完、下一步还没来 —— 正是需要它的间隙
-  const between = running([userMsg('u1', 'hi'), exec('c1', 'ls')])
-  check(
-    '工具完成后的间隙要显示',
-    kinds(between[1]).join() === 'toolInvocation,working',
-    kinds(between[1])
-  )
-  check('永远排在最后', between[1].content.at(-1).kind === 'working')
-
-  // 轮次结束就撤掉
-  const done = turnsToRows([turn('t1', [userMsg('u1', 'hi'), answer('a1', 'ok')])])
-  check('轮次完成后不显示', !kinds(done[1]).includes('working'), kinds(done[1]))
+  // 推理流式中也不再有 thinking 块
+  const thinking = turnsToRows([turn('t1', [reasoning('r1')], { status: 'inProgress' })])
+  check('推理进行中不产生内容块', thinking[0].content.length === 0, kinds(thinking[0]))
 }
 
-console.log('检索结果（不透明 JSON 的尽力抽取）')
+// 一个 completed 的 MCP 调用(协议条目,分组段的夹具)
+const mcpLike = (id, server, tool) => ({
+  type: 'mcpToolCall',
+  id,
+  server,
+  tool,
+  status: 'completed',
+  arguments: {},
+  appContext: null,
+  pluginId: null,
+  readOnlyHint: null,
+  result: { content: [], structuredContent: null, _meta: null },
+  error: null,
+  durationMs: 5
+})
+
+console.log('渲染单元分组(Codex `Tr`/`Jr`)')
+{
+  const unitsOf = (rows) => groupIntoRenderUnits(rows.at(-1).content)
+  const kindsOf = (units) => units.map((u) => u.kind)
+
+  // 连续工具收成一组;助手文字打断分组
+  const grouped = unitsOf(
+    turnsToRows([
+      turn('t1', [
+        exec('c1', 'ls'),
+        mcpLike('m1', 'playwright', 'browser_navigate'),
+        mcpLike('m2', 'playwright', 'browser_evaluate'),
+        answer('a1', '中间插话'),
+        exec('c2', 'pwd')
+      ])
+    ])
+  )
+  check(
+    '连续工具成组、被文字打断',
+    kindsOf(grouped).join() === 'group,standalone,group',
+    kindsOf(grouped)
+  )
+  check('第一组三条成员', grouped[0].items.length === 3, grouped[0].items.length)
+
+  // 等待审批的调用不进组(Codex:permission-request 恒 standalone)
+  const approving = unitsOf(
+    turnsToRows(
+      [
+        turn('t1', [exec('c1', 'rm -rf build', { status: 'inProgress' })], { status: 'inProgress' })
+      ],
+      new Map([
+        [
+          'c1',
+          {
+            requestKey: 'c1',
+            itemId: 'c1',
+            turnId: 't1',
+            reason: null,
+            fallback: { kind: 'command', command: 'rm -rf build', cwd: '/' }
+          }
+        ]
+      ])
+    )
+  )
+  check('审批中的调用 standalone', kindsOf(approving).join() === 'standalone', kindsOf(approving))
+
+  // 聚合摘要:MCP 按服务器聚合 + 命令计数 + 网页搜索
+  const summary = summarizeGroup(grouped[0].items)
+  check(
+    '组摘要段序:Used Playwright integration, ran a command',
+    formatUnit(summary.parts.map((p, i) => summaryPartText(p, i === 0))) ===
+      'Used Playwright integration, ran a command',
+    summary.parts.map((p) => p.kind)
+  )
+  check(
+    '组图标取第一条 MCP',
+    summary.iconItem?.invocation.id === 'm1',
+    summary.iconItem?.invocation.id
+  )
+
+  // 单条目组在 summary 态降级
+  const single = groupIntoRenderUnits([
+    {
+      kind: 'toolInvocation',
+      invocation: turnsToRows([turn('t1', [exec('c1', 'ls')])])[0].content[0].invocation
+    }
+  ])
+  check(
+    '单条目组降级为 standalone',
+    demoteSingleItemGroup(single[0], { kind: 'summary' }).kind === 'standalone'
+  )
+  check(
+    '进行中不降级',
+    demoteSingleItemGroup(single[0], { kind: 'active', item: single[0].items[0] }).kind === 'group'
+  )
+}
+
+console.log('状态行显隐(Codex `ja`/`W`/`kn`)')
+{
+  // 空轮次在跑 → 显示
+  const bare = groupIntoRenderUnits([])
+  check(
+    '空轮次在跑 → 显示',
+    thinkingRowState({
+      isTurnInProgress: true,
+      assistantStarted: false,
+      hasFinalAnswerPhase: false,
+      hasBlockingRequest: false,
+      units: bare
+    }).visible === true
+  )
+
+  // 完成 → 不显示
+  check(
+    '轮次完成 → 不显示',
+    thinkingRowState({
+      isTurnInProgress: false,
+      assistantStarted: true,
+      hasFinalAnswerPhase: false,
+      hasBlockingRequest: false,
+      units: bare
+    }).visible === false
+  )
+
+  // 待审批 → 不显示(审批控件自己在等)
+  check(
+    '待审批 → 不显示',
+    thinkingRowState({
+      isTurnInProgress: true,
+      assistantStarted: false,
+      hasFinalAnswerPhase: false,
+      hasBlockingRequest: true,
+      units: bare
+    }).visible === false
+  )
+
+  // 回答流式中(phase null)→ 仍显示(Codex `On`)
+  check(
+    '回答流式中(phase 未知)→ 显示',
+    thinkingRowState({
+      isTurnInProgress: true,
+      assistantStarted: true,
+      hasFinalAnswerPhase: false,
+      hasBlockingRequest: false,
+      units: bare
+    }).visible === true
+  )
+  check(
+    '回答流式中(明确 final_answer)→ 不显示',
+    thinkingRowState({
+      isTurnInProgress: true,
+      assistantStarted: true,
+      hasFinalAnswerPhase: true,
+      hasBlockingRequest: false,
+      units: bare
+    }).visible === false
+  )
+}
+
+console.log('检索条目(Codex `nO`:只透传查询与动作,不抽结果)')
 {
   const web = (id, query, results) => ({ type: 'webSearch', id, query, action: null, results })
 
-  const rows = turnsToRows([
-    turn('t1', [
-      web('w1', 'q', [
-        { title: 'A', url: 'https://a', snippet: '…' },
-        { name: 'B', url: 'https://b' },
-        { url: 'https://c' },
-        'plain string',
-        { weird: 1 }
-      ])
-    ])
-  ])
+  const rows = turnsToRows([turn('t1', [web('w1', 'vscode agent window', [{ title: 'A' }])])])
   const data = rows[0].content[0].invocation.data
-  check('结果条数正确', data.results.length === 5, data.results)
-  check('优先取 title', data.results[0].title === 'A' && data.results[0].url === 'https://a')
-  check('退回 name', data.results[1].title === 'B')
-  check('都没有就用 url 当标题', data.results[2].title === 'https://c')
-  check('字符串结果直接当标题', data.results[3].title === 'plain string')
-  check('认不出的形状序列化成 JSON 而不是丢掉', data.results[4].title.includes('weird'))
-
-  const none = turnsToRows([turn('t1', [web('w1', 'q', null)])])
-  check('没有结果时是空数组而不是 null', none[0].content[0].invocation.data.results.length === 0)
+  check(
+    'kind=search 且 completed',
+    data.kind === 'search' && rows[0].content[0].invocation.state.type === 'completed'
+  )
+  check('查询词透传', data.query === 'vscode agent window', data.query)
+  check('动作透传', data.action === null, data.action)
+  // Codex 的检索行不渲染结果列表,模型不再抽取 results
+  check('结果不进渲染模型', !('results' in data), Object.keys(data))
 }
 
 // ── 轮次收尾 ────────────────────────────────────────────────────────

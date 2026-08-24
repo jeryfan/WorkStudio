@@ -1,15 +1,10 @@
 import { useState } from 'react'
 import type { FileEditToolData, ToolInvocation } from '../../model/toolInvocation'
 import { countDiffLines, parseDiff } from '../../model/diff'
-import { toolStatus, toolSummary } from '../../model/toolDisplay'
-import {
-  ActivityBody,
-  ActivityHeaderRow,
-  DiffCounts,
-  DisclosureBody,
-  ToolActivityDisclosure
-} from '../activity'
+import { toolRunning, toolSummary } from '../../model/toolDisplay'
+import { ActivityBody, ActivityHeaderRow, DiffCounts, DisclosureBody } from '../activity'
 import { CodeBlockPart } from '../CodeBlockPart'
+import { CadencedShimmer } from '../CadencedShimmer'
 import { InlineAnchor } from '../InlineAnchor'
 import { DiffView } from './DiffView'
 import { ToolActivityIcon } from './ToolActivityIcon'
@@ -74,11 +69,32 @@ export function FileEditToolPart({
     )
   }
 
+  return <MultiFileChangeRows invocation={invocation} data={data} totals={totals} />
+}
+
+/** 多文件:外面套一行汇总(Codex 走 turn-diff 聚合,WS 协议是单条带 N 个
+ * change —— 差异见文件头注释)。单状态、默认收起,与 patch 行一致。 */
+function MultiFileChangeRows({
+  invocation,
+  data,
+  totals
+}: {
+  invocation: ToolInvocation
+  data: FileEditToolData
+  totals: { added: number; removed: number }
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
   return (
-    <ToolActivityDisclosure
+    <ActivityHeaderRow
       icon={<ToolActivityIcon invocation={invocation} />}
-      status={toolStatus(invocation)}
-      summary={toolSummary(invocation)}
+      summary={
+        <CadencedShimmer
+          active={toolRunning(invocation)}
+          className="min-w-0 truncate text-size-chat text-token-conversation-summary-leading group-hover/activity-header:text-token-foreground"
+        >
+          {toolSummary(invocation)}
+        </CadencedShimmer>
+      }
       accessory={
         totals.added > 0 || totals.removed > 0 ? (
           <div className="flex items-center gap-1.5">
@@ -91,15 +107,21 @@ export function FileEditToolPart({
           </div>
         ) : undefined
       }
-    >
-      {data.changes.length > 0 ? (
-        <ActivityBody variant="grouped">
-          {data.changes.map((change) => (
-            <FileChangeRow key={change.path} change={change} />
-          ))}
-        </ActivityBody>
-      ) : undefined}
-    </ToolActivityDisclosure>
+      disclosure={
+        data.changes.length > 0 ? { expanded, onToggle: () => setExpanded((v) => !v) } : undefined
+      }
+      body={
+        data.changes.length > 0 ? (
+          <DisclosureBody expanded={expanded} variant="grouped">
+            <ActivityBody variant="grouped">
+              {data.changes.map((change) => (
+                <FileChangeRow key={change.path} change={change} />
+              ))}
+            </ActivityBody>
+          </DisclosureBody>
+        ) : undefined
+      }
+    />
   )
 }
 

@@ -3,7 +3,11 @@ import type { ChatMarkdownContent } from '../model/content'
 import { CodeBlockPart } from './CodeBlockPart'
 import { InlineAnchor } from './InlineAnchor'
 import { CheckIcon, CopyIcon } from '../../components/icons'
-import { copyText } from '../../utils/clipboard'
+import { ExpandTableIcon } from '../../components/icons/activity'
+import { copyRichText } from '../../utils/clipboard'
+import { cx } from '../../utils/cx'
+import { TablePreviewDialog } from './TablePreviewDialog'
+import { buildTableHtml, toMarkdownTable } from '../model/table'
 
 /**
  * Markdown 渲染。
@@ -115,24 +119,51 @@ function splitRow(line: string): string[] {
  */
 function Table({ head, rows }: { head: string[]; rows: string[][] }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
-  const plain = [head, ...rows].map((r) => r.join('\t')).join('\n')
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const markdown = toMarkdownTable(head, rows)
+  /*
+   * Codex 的单元格类:`SingleChildTableCell` = 只有一个子节点(纯文本),
+   * `NumericTableCell` = 纯数字文本(td)。这里的单元格内容来自 renderInline,
+   * 不含行内标记时等价于"一个子节点"。
+   */
+  const isSingleChild = (cell: string): boolean => !/[`*[]/.test(cell)
+  const isNumeric = (cell: string): boolean => /^\d+$/.test(cell.trim())
   return (
     <div className="codex-TableContainer" data-markdown-table="true" data-wide-block>
       <div className="codex-TableScroller horizontal-scroll-fade-mask">
         <div className="codex-TableWrapper">
-          <table>
+          <table className="codex-Table" dir="auto">
             <thead>
-              <tr>
+              <tr className="codex-TableRow">
                 {head.map((cell, i) => (
-                  <th key={i}>{renderInline(cell, `th${i}`)}</th>
+                  <th
+                    key={i}
+                    className={cx(
+                      'codex-TableHeaderCell',
+                      isSingleChild(cell) && 'codex-SingleChildTableCell'
+                    )}
+                    dir="auto"
+                  >
+                    {renderInline(cell, `th${i}`)}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="codex-TableBody">
               {rows.map((row, r) => (
-                <tr key={r}>
+                <tr key={r} className="codex-TableRow">
                   {row.map((cell, c) => (
-                    <td key={c}>{renderInline(cell, `td${r}-${c}`)}</td>
+                    <td
+                      key={c}
+                      className={cx(
+                        'codex-TableCell',
+                        isNumeric(cell) && 'codex-NumericTableCell',
+                        isSingleChild(cell) && 'codex-SingleChildTableCell'
+                      )}
+                      dir="auto"
+                    >
+                      {renderInline(cell, `td${r}-${c}`)}
+                    </td>
                   ))}
                 </tr>
               ))}
@@ -140,29 +171,49 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }): React.JSX.
           </table>
         </div>
       </div>
-      {/* Codex 把复制按钮放在 TableActions 里,并用 data-markdown-copy="exclude"
-          把它自己从"复制表格"的文本里排除掉 */}
+      {/* Codex 把动作放在 TableActions,并用 data-markdown-copy="exclude"
+          把它们从"复制表格"的文本里排除掉;sticky 包装与 Codex 逐字一致 */}
       <div className="codex-TableActions" data-markdown-copy="exclude">
         <div className="sticky top-0 flex flex-col items-start">
-          <button
-            type="button"
-            aria-label={copied ? 'Copied' : 'Copy table'}
-            onClick={() => {
-              void copyText(plain).then((ok) => {
-                if (!ok) return
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1200)
-              })
-            }}
-          >
-            {copied ? (
-              <CheckIcon aria-hidden className="icon-xs" />
-            ) : (
-              <CopyIcon aria-hidden className="icon-xs" />
-            )}
-          </button>
+          <span data-state="closed">
+            <button
+              type="button"
+              aria-label="Expand table"
+              aria-expanded={previewOpen}
+              aria-haspopup="dialog"
+              onClick={() => setPreviewOpen(true)}
+              className="m-1"
+            >
+              <ExpandTableIcon aria-hidden className="icon-2xs" />
+            </button>
+          </span>
+          <span data-state="closed">
+            <button
+              type="button"
+              aria-label={copied ? 'Copied' : 'Copy table'}
+              className="m-1"
+              onClick={() => {
+                // Codex 同时给 text/plain(markdown 源文)与 text/html(表格 HTML)
+                const html = buildTableHtml(head, rows)
+                void copyRichText(markdown, html).then((ok) => {
+                  if (!ok) return
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1200)
+                })
+              }}
+            >
+              {copied ? (
+                <CheckIcon aria-hidden className="icon-2xs" />
+              ) : (
+                <CopyIcon aria-hidden className="icon-2xs" />
+              )}
+            </button>
+          </span>
         </div>
       </div>
+      {previewOpen && (
+        <TablePreviewDialog head={head} rows={rows} onClose={() => setPreviewOpen(false)} />
+      )}
     </div>
   )
 }
@@ -298,6 +349,18 @@ export function MarkdownPart({
    * 让 [&>*:last-child]:mb-0 之类的选择器打在错误的层上。
    */
   if (!withRoot) return <>{renderBlocks(content.content)}</>
+  /*
+   * 用户气泡里的 markdown(Codex 实测):MarkdownRoot + 8 条紧凑覆写,
+   * **没有** `data-markdown-text-style`(气泡自己管字号),
+   * 也没有助手那套首末边距修正 —— 气泡是单段落短文本的常态。
+   */
+  if (textStyle === 'user-message') {
+    return (
+      <div className="codex-MarkdownRoot [&_li+li]:!mt-0 [&_li>ol]:!mt-0 [&_li>p+p]:!mt-0 [&_li>ul]:!mt-0 [&_ol]:!ps-6 [&_p]:!m-0 [&_p+p]:!mt-5 [&_ul]:!ps-6">
+        {renderBlocks(content.content)}
+      </div>
+    )
+  }
   return (
     <div
       data-markdown-text-style={textStyle}

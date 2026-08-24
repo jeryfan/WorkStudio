@@ -1,8 +1,10 @@
 import { Fragment, memo, useEffect, useRef, useState } from 'react'
 import { CheckIcon, CopyIcon } from '../../components/icons'
+import { WordWrapDisabledIcon, WordWrapEnabledIcon } from '../../components/icons'
 import { copyText } from '../../utils/clipboard'
 import { cx } from '../../utils/cx'
 import { useTheme } from '../theme/themeContext'
+import { useCodeBlockWrap, toggleCodeBlockWrap } from '../../state/fileViewerPrefs'
 import {
   highlightCode,
   resolveHighlightLanguage,
@@ -68,12 +70,16 @@ import {
 /** Codex 的 `Paa` —— 两次高亮之间至少隔这么久 */
 const HIGHLIGHT_THROTTLE_MS = 120
 
+/** 动作栏按钮(ghost/icon 档)—— 类名取自 Codex 运行时的实测 */
+const ACTION_BUTTON_CLASS =
+  'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 flex rounded-full electron:rounded-md text-token-text-tertiary enabled:hover:bg-token-list-hover-background data-[state=open]:bg-token-list-hover-background border-transparent electron:p-1 electron:[&>svg]:icon-sm flex items-center justify-center p-0.5'
+
 export function CodeBlockPart({
   code,
   lang,
   title,
   codeContainerClassName,
-  shouldWrapCode = false
+  deferEnhancementsUntilVisible = true
 }: {
   code: string
   /** 围栏上写的语言名,可能为空或不认识 */
@@ -82,14 +88,44 @@ export function CodeBlockPart({
   title?: string
   /** 代码容器的附加类。工具输出那边传 `max-h-48 overflow-auto` */
   codeContainerClassName?: string
-  /** Codex 的 `shouldWrapCode`:切 `whitespace-pre!` / `whitespace-pre-wrap!` */
-  shouldWrapCode?: boolean
+  /**
+   * Codex 的 `deferEnhancementsUntilVisible`:IntersectionObserver(rootMargin
+   * 600px) 之外不高亮 —— 长会话里几十个视口外代码块一起跑高亮会掉帧。
+   * 默认开(会话流里的形态);工具输出对话框之类一眼可见的可以关。
+   */
+  deferEnhancementsUntilVisible?: boolean
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   const [highlighted, setHighlighted] = useState<HighlightResult | null>(null)
   const { variant } = useTheme()
   const isDark = variant === 'dark'
   const language = resolveHighlightLanguage(lang)
+  // Codex `Zpa`:wrap 是全局持久化偏好(user-controlled 档)
+  const shouldWrapCode = useCodeBlockWrap()
+
+  // IntersectionObserver(rootMargin 600px) 之内才开始高亮(Codex `Taa`)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(!deferEnhancementsUntilVisible)
+  useEffect(() => {
+    if (visible) return
+    const el = rootRef.current
+    if (el == null) return
+    if (typeof IntersectionObserver === 'undefined') {
+      const t = window.setTimeout(() => setVisible(true), 0)
+      return () => window.clearTimeout(t)
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          io.disconnect()
+        }
+      },
+      { rootMargin: '600px 0px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visible])
 
   /*
    * 节流的高亮循环 —— 结构照 Codex:一个可变的 state 对象记住"最新的内容/语言",
@@ -121,6 +157,8 @@ export function CodeBlockPart({
     state.latestCode = code
     state.latestLanguage = language
     if (state.timeout != null) return
+    // 视口外的块不跑高亮(Codex `deferEnhancementsUntilVisible`)
+    if (!visible) return
 
     const now = performance.now()
     const since =
@@ -140,7 +178,7 @@ export function CodeBlockPart({
 
     if (wait === 0) run()
     else state.timeout = window.setTimeout(run, wait)
-  }, [code, language])
+  }, [code, language, visible])
 
   // 缓存只在当前内容以它为前缀时可用 —— 流式是追加,命中率很高
   const cached = highlighted != null && code.startsWith(highlighted.code) ? highlighted : null
@@ -149,12 +187,14 @@ export function CodeBlockPart({
 
   return (
     <div
+      ref={rootRef}
       data-markdown-copy="code-block"
       data-markdown-copy-text={code}
       data-theme={isDark ? 'dark' : 'light'}
       className={cx(
         'relative w-full min-w-0 overflow-clip rounded-lg contain-inline-size',
         'bg-token-text-code-block-background',
+        'codex-CodeBlock',
         isDark ? 'dark' : 'light'
       )}
     >
@@ -164,23 +204,41 @@ export function CodeBlockPart({
       >
         <div className="min-w-0 flex-1 truncate">{title ?? lang ?? 'plaintext'}</div>
         <div className="ms-auto flex shrink-0 items-center">
-          <button
-            type="button"
-            aria-label={copied ? 'Copied' : 'Copy code'}
-            onClick={() => {
-              void copyText(code).then((ok) => {
-                if (!ok) return
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1200)
-              })
-            }}
-          >
-            {copied ? (
-              <CheckIcon aria-hidden className="icon-xs" />
-            ) : (
-              <CopyIcon aria-hidden className="icon-xs" />
-            )}
-          </button>
+          {/* Codex 的 wrap 切换 + 复制 —— 按钮是 ghost/icon 那一档,各包一层 tooltip span */}
+          <span data-state="closed">
+            <button
+              type="button"
+              aria-label={shouldWrapCode ? 'Disable word wrap' : 'Enable word wrap'}
+              onClick={() => toggleCodeBlockWrap()}
+              className={ACTION_BUTTON_CLASS}
+            >
+              {shouldWrapCode ? (
+                <WordWrapEnabledIcon aria-hidden className="icon-2xs" />
+              ) : (
+                <WordWrapDisabledIcon aria-hidden className="icon-2xs" />
+              )}
+            </button>
+          </span>
+          <span data-state="closed">
+            <button
+              type="button"
+              aria-label={copied ? 'Copied' : 'Copy'}
+              onClick={() => {
+                void copyText(code).then((ok) => {
+                  if (!ok) return
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1200)
+                })
+              }}
+              className={ACTION_BUTTON_CLASS}
+            >
+              {copied ? (
+                <CheckIcon aria-hidden className="icon-2xs" />
+              ) : (
+                <CopyIcon aria-hidden className="icon-2xs" />
+              )}
+            </button>
+          </span>
         </div>
       </div>
       {/*
@@ -191,7 +249,8 @@ export function CodeBlockPart({
        * 会跟着文档方向翻,代码不能翻。
        */}
       <div className={cx('text-size-chat overflow-auto p-2', codeContainerClassName)} dir="ltr">
-        <code className={cx(shouldWrapCode ? 'whitespace-pre-wrap!' : 'whitespace-pre!', 'hljs')}>
+        {/* Codex 的 `Aaa`:`whitespace-pre!` ↔ `whitespace-pre-wrap!`(wrap 开) */}
+        <code className={shouldWrapCode ? 'whitespace-pre-wrap!' : 'whitespace-pre!'}>
           {lines == null ? (
             <span>{code}</span>
           ) : (

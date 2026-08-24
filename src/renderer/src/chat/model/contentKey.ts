@@ -12,17 +12,12 @@ import type { ChatContent } from './content'
 
 export function contentKey(content: ChatContent, index: number): string {
   switch (content.kind) {
-    case 'thinking':
     case 'hook':
     case 'contextCompaction':
     case 'reviewMode':
       return `${content.kind}:${content.id}`
     case 'toolInvocation':
       return `tool:${content.invocation.id}`
-    // 每条回复至多一个，且永远在末尾——用固定 key 让它在流式过程中不被重建，
-    // 否则 shimmer 每帧都从头开始，看着像卡住
-    case 'working':
-      return 'working'
     default:
       return `${content.kind}:${index}`
   }

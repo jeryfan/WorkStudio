@@ -7,6 +7,7 @@ import {
   BrowserGlobeIcon,
   SearchIcon
 } from '../../../components/icons'
+import { McpToolIcon } from './McpToolIcon'
 import type { TerminalToolData, ToolInvocation } from '../../model/toolInvocation'
 
 /**
@@ -39,7 +40,7 @@ export function ToolActivityIcon({
   invocation
 }: {
   invocation: ToolInvocation
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const interrupted =
     invocation.state.type === 'cancelled' && invocation.state.reason === 'interrupted'
   if (interrupted) {
@@ -57,9 +58,20 @@ export function ToolActivityIcon({
     case 'search':
       return <BrowserGlobeIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
     case 'inputOutput':
-      // MCP / dynamic 工具。Codex 这一档会去查 MCP 服务器的 logo,
-      // 拿不到时落到终端图标 —— WS 没有 logo 通道,直接用终端图标。
-      return <ActivityTerminalIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
+      /*
+       * MCP / dynamic 工具 —— Codex `Fg` 这一档走 `kg`:logo 级联
+       * (连接器 app → 服务器自报 icon),都拿不到时是四点兜底图标。
+       * dynamic 工具没有服务器名,Codex 那里走工具注册的图标,
+       * WS 没有注册表,同样落兜底。
+       */
+      return data.source.kind === 'mcp' ? (
+        <McpToolIcon server={data.source.server} connectorId={data.source.connectorId} />
+      ) : /*
+       * dynamic-tool-call:Codex `Fg` 这一档是 `renderAgentActivityIcon`
+       * 注册表,查不到注册的工具**不渲染图标**(返回 null)。
+       * WS 没有注册表,同样不渲染。
+       */
+      null
   }
 }
 
