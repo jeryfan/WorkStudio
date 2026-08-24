@@ -10,6 +10,8 @@ interface PopoverProps {
   height?: number
   onClose(): void
   ariaLabel?: string
+  /** Codex:菜单列表(role=menu:模型/权限)与对话框(role=dialog:项目选择)两种 */
+  role?: 'menu' | 'dialog'
   children: ReactNode
 }
 
@@ -30,6 +32,7 @@ export function Popover({
   height,
   onClose,
   ariaLabel,
+  role = 'dialog',
   children
 }: PopoverProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -78,9 +81,10 @@ export function Popover({
       <div className="fixed inset-0 z-[49]" onMouseDown={onClose} />
       <div
         ref={ref}
-        role="dialog"
+        role={role}
         aria-label={ariaLabel}
-        className="fixed z-50 flex select-none flex-col overflow-hidden rounded-[15px] border-[0.5px] border-token-menu-border bg-token-dropdown-background p-1 text-token-foreground shadow-[0_0_0_0.5px_rgb(26_28_31/0.08),0_8px_16px_-4px_rgb(0_0_0/0.12)] backdrop-blur-[8px]"
+        data-state="open"
+        className="fixed no-drag z-50 m-px flex select-none flex-col overflow-y-auto px-1 py-1 bg-token-dropdown-background/90 text-token-foreground ring-token-border rounded-xl ring-[0.5px] shadow-xl-spread backdrop-blur-sm"
         style={{
           left: pos?.left ?? anchor.left,
           top: pos?.top ?? anchor.top,

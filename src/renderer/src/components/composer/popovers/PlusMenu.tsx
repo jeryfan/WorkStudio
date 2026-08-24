@@ -1,145 +1,125 @@
-import type { ComponentType } from 'react'
 import {
-  DocumentsIcon,
-  GoalIcon,
-  PaperclipIcon,
-  PdfIcon,
-  PlanModeIcon,
-  PresentationsIcon,
-  RecordSkillIcon,
-  SpreadsheetsIcon,
-  TemplateIcon,
-  VisualizeIcon,
-  WorkProjectIcon,
-  type IconProps
+  PlusFilesAndFoldersIcon,
+  PlusGoalIcon,
+  PlusPlanModeIcon,
+  PlusRecordSkillIcon
 } from '../../icons'
-
-interface PlusMenuItem {
-  id: string
-  title: string
-  desc?: string
-  icon: ComponentType<IconProps>
-}
-
-interface PlusMenuSection {
-  heading: string
-  items?: PlusMenuItem[]
-  /** 无条目时的占位文案（chat.html .tm-empty） */
-  emptyText?: string
-}
+import type { ComposerMenuSection } from '../ComposerTopMenuShell'
+import documentsUrl from '../../../assets/codex/plugin-icons/documents.png'
+import pdfUrl from '../../../assets/codex/plugin-icons/pdf.png'
+import spreadsheetsUrl from '../../../assets/codex/plugin-icons/spreadsheets.png'
+import presentationsUrl from '../../../assets/codex/plugin-icons/presentations.png'
+import templateCreatorUrl from '../../../assets/codex/plugin-icons/template-creator.png'
+import computerUrl from '../../../assets/codex/plugin-icons/computer.png'
+import visualizeUrl from '../../../assets/codex/plugin-icons/visualize.svg'
 
 /**
- * 菜单内容（chat.html #topMenu）：Add / Plugins / Agents / Files 四个分区。
- * 附件、目标、计划模式、技能录制等动作随 M4 会话输入（UserInput）接入，
- * 当前只有结构与本文件中声明的 id。
+ * "+" 菜单(Add files and more)的分区数据 —— Codex 运行时实测(见
+ * docs/codex-alignment-progress.md C 块):
+ *
+ * - **不是 portal 弹层**:与 slash/@ 菜单共用 `_ComposerTopMenuShell`
+ *   (内联锚在 composer 上方,`mb-1`),焦点留在输入框,输入即查询。
+ * - 三个吸顶分区(sticky):Add / Plugins / Files;Files 空态文案
+ *   "Type to search for files"。
+ * - Add:Files and folders / Goal / Plan mode / Record a skill(21×21 svg 图标)
+ * - Plugins:Documents / PDF / Spreadsheets / Presentations / Template Creator /
+ *   Computer / Visualize(官方插件的打包位图图标,已提取到 assets/codex/plugin-icons)
+ *
+ * Codex 里没有 "Work in a project"(项目归属走工具条的项目 pill)
+ * 也没有 "Agents" 分区 —— 旧实现里的这两处是自创,已删。
  */
-const SECTIONS: PlusMenuSection[] = [
-  {
-    heading: 'Add',
-    items: [
-      { id: 'files', title: 'Files and folders', icon: PaperclipIcon },
-      {
-        id: 'work-in-project',
-        title: 'Work in a project',
-        desc: 'Choose project for new chats',
-        icon: WorkProjectIcon
-      },
-      { id: 'goal', title: 'Goal', desc: 'Set a goal to keep pursuing', icon: GoalIcon },
-      { id: 'plan-mode', title: 'Plan mode', desc: 'Turn plan mode on', icon: PlanModeIcon },
-      { id: 'record-skill', title: 'Record a skill', icon: RecordSkillIcon }
-    ]
-  },
-  {
-    heading: 'Plugins',
-    items: [
-      {
-        id: 'plugin-documents',
-        title: 'Documents',
-        desc: 'Create and edit document artifacts',
-        icon: DocumentsIcon
-      },
-      {
-        id: 'plugin-pdf',
-        title: 'PDF',
-        desc: 'Read, create, and verify PDF files',
-        icon: PdfIcon
-      },
-      {
-        id: 'plugin-spreadsheets',
-        title: 'Spreadsheets',
-        desc: 'Create and edit spreadsheet files',
-        icon: SpreadsheetsIcon
-      },
-      {
-        id: 'plugin-presentations',
-        title: 'Presentations',
-        desc: 'Create and edit presentations',
-        icon: PresentationsIcon
-      },
-      {
-        id: 'plugin-template',
-        title: 'Template Creator',
-        desc: 'Create or update reusable templates from reference content',
-        icon: TemplateIcon
-      },
-      {
-        id: 'plugin-visualize',
-        title: 'Visualize',
-        desc: 'Turn ideas and data into interactive visuals',
-        icon: VisualizeIcon
-      }
-    ]
-  },
-  { heading: 'Agents', emptyText: 'No agents available' },
-  { heading: 'Files', emptyText: 'Type to search for files' }
-]
-
-interface PlusMenuProps {
-  /** 选中某个菜单项；调用方决定动作（本组件只负责结构与展示） */
-  onSelect(id: string): void
+export function buildPlusMenuSections(): ComposerMenuSection[] {
+  return [
+    {
+      heading: 'Add',
+      items: [
+        {
+          id: 'files',
+          title: 'Files and folders',
+          icon: <PlusFilesAndFoldersIcon className="icon-xs shrink-0" />
+        },
+        {
+          id: 'goal',
+          title: 'Goal',
+          description: 'Set a goal to keep pursuing',
+          icon: <PlusGoalIcon className="icon-xs shrink-0" />
+        },
+        {
+          id: 'plan-mode',
+          title: 'Plan mode',
+          description: 'Turn plan mode on',
+          icon: <PlusPlanModeIcon className="icon-xs shrink-0" />
+        },
+        {
+          id: 'record-skill',
+          title: 'Record a skill',
+          icon: <PlusRecordSkillIcon className="icon-xs shrink-0" />
+        }
+      ]
+    },
+    {
+      heading: 'Plugins',
+      items: [
+        {
+          id: 'plugin-documents',
+          title: 'Documents',
+          description: 'Create and edit documents',
+          icon: pluginIcon(documentsUrl)
+        },
+        {
+          id: 'plugin-pdf',
+          title: 'PDF',
+          description: 'Read, create, and verify PDFs',
+          icon: pluginIcon(pdfUrl)
+        },
+        {
+          id: 'plugin-spreadsheets',
+          title: 'Spreadsheets',
+          description: 'Create and edit spreadsheets',
+          icon: pluginIcon(spreadsheetsUrl)
+        },
+        {
+          id: 'plugin-presentations',
+          title: 'Presentations',
+          description: 'Create and edit presentations',
+          icon: pluginIcon(presentationsUrl)
+        },
+        {
+          id: 'plugin-template',
+          title: 'Template Creator',
+          description: 'Create or update reusable templates from reference content',
+          icon: pluginIcon(templateCreatorUrl)
+        },
+        {
+          id: 'plugin-computer',
+          title: 'Computer',
+          description: 'Control Mac apps from ChatGPT',
+          icon: pluginIcon(computerUrl)
+        },
+        {
+          id: 'plugin-visualize',
+          title: 'Visualize',
+          description: 'Turn ideas and data into interactive visuals',
+          icon: pluginIcon(visualizeUrl, true)
+        }
+      ]
+    },
+    { heading: 'Files', items: [], emptyText: 'Type to search for files' }
+  ]
 }
 
-/**
- * "+" 顶部菜单（chat.html #topMenu，320px 高、吸顶分区标题）。
- * 由 Popover 承载定位与关闭逻辑，本组件只管滚动列表内容。
- */
-export function PlusMenu({ onSelect }: PlusMenuProps): React.JSX.Element {
+/** 插件位图图标(Codex:`span.block.overflow-hidden.rounded-2xs.icon-xs.shrink-0 > img`) */
+function pluginIcon(src: string, contain?: boolean): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      {SECTIONS.map((section, i) => (
-        <div key={section.heading}>
-          <div
-            className={`sticky top-0 z-10 bg-token-dropdown-background px-2 py-1 text-[13px] leading-[18.57px] text-token-description-foreground ${
-              i > 0 ? 'pt-2' : ''
-            }`}
-          >
-            {section.heading}
-          </div>
-          {section.items?.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-              className="flex w-full items-center gap-2 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground/75 hover:bg-token-list-hover-background hover:text-token-foreground"
-            >
-              <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden rounded">
-                <item.icon className="size-4" />
-              </span>
-              <span className="shrink-0 whitespace-nowrap">{item.title}</span>
-              {item.desc && (
-                <span className="min-w-0 flex-1 truncate text-token-description-foreground">
-                  {item.desc}
-                </span>
-              )}
-            </button>
-          ))}
-          {section.emptyText && (
-            <div className="px-2 py-[5px] text-[13px] leading-[18.57px] text-token-input-placeholder-foreground">
-              {section.emptyText}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
+    <span className="block overflow-hidden rounded-2xs icon-xs shrink-0">
+      <img
+        alt=""
+        src={src}
+        draggable={false}
+        className={
+          contain ? 'object-contain rounded-2xs icon-xs shrink-0' : 'h-full w-full object-cover'
+        }
+      />
+    </span>
   )
 }

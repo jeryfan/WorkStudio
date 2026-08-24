@@ -46,6 +46,7 @@ export const M = {
   fsWatch: 'fs/watch',
   fsUnwatch: 'fs/unwatch',
   fileSearch: 'fuzzyFileSearch',
+  skillsList: 'skills/list',
 
   // 终端
   execStart: 'command/exec',

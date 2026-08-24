@@ -60,7 +60,7 @@ export interface ChatService {
 
 /** 权限 pill 的一个可选策略 */
 export interface AccessPolicy {
-  id: 'ask' | 'full'
+  id: 'ask' | 'auto' | 'full'
   label: string
   description: string
   /** 协议审批策略（AskForApproval） */
@@ -78,6 +78,15 @@ export const ACCESS_POLICIES: AccessPolicy[] = [
     label: 'Ask for approval',
     description: 'Always ask to edit external files and use the internet',
     approval: 'on-request',
+    sandbox: 'workspace-write',
+    warn: false
+  },
+  {
+    /* Codex 权限菜单的中间档("agent 模式"):工作区内自动,危险/越界动作才问 */
+    id: 'auto',
+    label: 'Approve for me',
+    description: 'Only ask for actions detected as potentially unsafe',
+    approval: 'never',
     sandbox: 'workspace-write',
     warn: false
   },

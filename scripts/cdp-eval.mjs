@@ -1,52 +1,42 @@
 #!/usr/bin/env node
-/**
- * 在运行中的 WorkStudio 渲染进程里执行一段 JS,取回结果。
- *
- * 样式对齐必须拿计算样式和上游逐项比数值 —— 截图只能看出"差不少",
- * 看不出差在哪个 token。dev 下主进程会开 CDP 端口(见 src/main/index.ts)。
- *
- *   node scripts/cdp-eval.mjs <js 文件路径>   # 表达式需返回 JSON 可序列化的值
- */
-import fs from 'node:fs'
-import process from 'node:process'
-
-const PORT = process.env.CDP_PORT ?? '9333'
-const targets = await fetch(`http://127.0.0.1:${PORT}/json`).then((r) => r.json())
-// Codex 打开 Browser tab 后会出现第二个 page target(被控浏览器,about:blank),
-// 默认取第一个会打错 —— 用 CDP_URL_FILTER 按 URL 子串锁定目标(如 8214)。
-const filter = process.env.CDP_URL_FILTER
-const pages = targets.filter((t) => t.type === 'page')
-const page = filter ? pages.find((t) => t.url.includes(filter)) : pages[0]
+// 通过 CDP 在指定调试端口的页面里执行表达式,打印结果。
+// 用法: node cdp-eval.mjs <port> <url-match> <expression>
+// 用法: node cdp-eval.mjs <port> <url-match> <expression>
+// 依赖: 无(Node 22+ 内置 WebSocket)
+const [port, urlMatch, expr] = process.argv.slice(2)
+const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json())
+const page = targets.find((t) => t.type === 'page' && t.url.includes(urlMatch))
 if (!page) {
-  console.error('没有匹配的 page target —— 应用没在 dev 模式下运行?(可用 CDP_URL_FILTER 过滤)')
+  console.error('no page matching', urlMatch, targets.map((t) => `${t.type} ${t.url}`).join(' | '))
   process.exit(1)
 }
-
-const expression = fs.readFileSync(process.argv[2], 'utf8')
-const ws = new WebSocket(page.webSocketDebuggerUrl)
-
-await new Promise((resolve, reject) => {
-  ws.addEventListener('open', resolve)
-  ws.addEventListener('error', reject)
-})
-
-const result = await new Promise((resolve, reject) => {
-  ws.addEventListener('message', (event) => {
-    const msg = JSON.parse(event.data)
-    if (msg.id !== 1) return
-    if (msg.error) return reject(new Error(msg.error.message))
-    const r = msg.result?.result
-    if (r?.subtype === 'error') return reject(new Error(r.description))
-    resolve(r?.value)
+const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false })
+let id = 0
+const pending = new Map()
+const send = (method, params = {}) =>
+  new Promise((resolve, reject) => {
+    const mid = ++id
+    pending.set(mid, { resolve, reject })
+    ws.send(JSON.stringify({ id: mid, method, params }))
   })
-  ws.send(
-    JSON.stringify({
-      id: 1,
-      method: 'Runtime.evaluate',
-      params: { expression, returnByValue: true, awaitPromise: true }
-    })
-  )
+ws.addEventListener('message', (event) => {
+  const msg = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString())
+  if (msg.id && pending.has(msg.id)) {
+    const { resolve, reject } = pending.get(msg.id)
+    pending.delete(msg.id)
+    msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result)
+  }
 })
-
-console.log(JSON.stringify(result, null, 2))
+await new Promise((r) => ws.addEventListener('open', r))
+const result = await send('Runtime.evaluate', {
+  expression: expr,
+  returnByValue: true,
+  awaitPromise: true
+})
+if (result.exceptionDetails) {
+  console.error('EXCEPTION:', JSON.stringify(result.exceptionDetails).slice(0, 2000))
+} else {
+  console.log(typeof result.result.value === 'string' ? result.result.value : JSON.stringify(result.result.value, null, 1))
+}
 ws.close()
+process.exit(0)

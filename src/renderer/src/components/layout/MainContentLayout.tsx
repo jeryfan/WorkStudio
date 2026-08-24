@@ -148,40 +148,43 @@ export function MainContentLayout({
                   {/* data-vscode-context 是 Codex 给内嵌 VS Code 组件传上下文用的,
                     tabindex=0 让主区可以整体接收键盘焦点 */}
                   {/*
-                   * Codex 在 data-vscode-context **之上**有两层路由容器,
-                   * 首页与 thread 的类名各自不同(实测):
+                   * Codex 在 data-vscode-context 内外的容器顺序,首页与 thread **不同**
+                   * (2026-08 运行时实测复核):
                    *
-                   *   首页   div.relative.min-h-0.flex-1   > div.h-full.min-h-0 > div.flex.h-full.flex-col
-                   *   thread div.relative.h-full.min-h-0  > div.h-full.min-h-0 > div.relative.flex.h-full.flex-col.min-h-0
+                   *   首页   div.flex.h-full.flex-col[vscode] > div.relative.min-h-0.flex-1 > div.h-full.min-h-0
+                   *   thread div.relative.h-full.min-h-0   > div.h-full.min-h-0 > div.relative.flex.h-full.flex-col.min-h-0[vscode]
                    *
-                   * 注意顺序:**外两层是路由容器,data-vscode-context 在最里面**。
-                   * 我一开始写反了(把 data-vscode-context 放最外),结果 thread 态
-                   * 高度链断掉 —— 滚动容器量到 0 高。
+                   * 首页的 vscode 层在路由容器**外面**:路由容器是它的 flex item,
+                   * 高度才有确定值。写反了(路由容器在外)时,路由容器的父级是 block,
+                   * `flex-1` 失效 → 高度链断 → 内部 0 高,首页整片被 overflow 裁剪
+                   * (DOM 在、屏幕全白)。
                    *
                    * 这两层归 MainContentLayout 而非各视图:视图切换时它们不重建,
                    * 滚动位置和动画上下文才保得住。
                    */}
-                  <div
-                    className={
-                      routeLayout === 'thread'
-                        ? 'relative h-full min-h-0'
-                        : 'relative min-h-0 flex-1'
-                    }
-                  >
-                    <div className="h-full min-h-0">
-                      <div
-                        className={
-                          routeLayout === 'thread'
-                            ? 'relative flex h-full flex-col min-h-0'
-                            : 'flex h-full flex-col'
-                        }
-                        data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
-                        tabIndex={0}
-                      >
-                        {children}
+                  {routeLayout === 'thread' ? (
+                    <div className="relative h-full min-h-0">
+                      <div className="h-full min-h-0">
+                        <div
+                          className="relative flex h-full flex-col min-h-0"
+                          data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
+                          tabIndex={0}
+                        >
+                          {children}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div
+                      className="flex h-full flex-col"
+                      data-vscode-context='{"chatgpt.supportsNewChatMenu": true}'
+                      tabIndex={0}
+                    >
+                      <div className="relative min-h-0 flex-1">
+                        <div className="h-full min-h-0">{children}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

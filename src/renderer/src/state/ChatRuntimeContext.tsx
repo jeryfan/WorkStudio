@@ -40,6 +40,21 @@ import type {
 /** 一次轮次的运行状态，驱动发送按钮在"发送/停止"之间切换 */
 export type TurnPhase = 'idle' | 'running'
 
+/**
+ * 排队中的 follow-up(Codex queued-message-list 的消息形状裁剪版:
+ * 附件/批注上下文随 M4 接入,当前只有文本)。
+ *
+ * Codex 的队列本体在桌面宿主层维护(不经 app-server),提交时才走协议:
+ * 出队 = `turn/start`,Send now = `turn/steer`。这里同样把队列放在
+ * 渲染层运行时里,协议零改动。
+ */
+export interface QueuedFollowUp {
+  id: string
+  text: string
+  /** 发送失败后被暂停(Codex `pausedReason` → 行内 Retry);正常排队为 null */
+  pausedReason: 'failed' | null
+}
+
 interface ChatRuntimeValue {
   /** 当前打开的会话 id；null = 首页 */
   activeChatId: string | null
@@ -54,18 +69,48 @@ interface ChatRuntimeValue {
   error: string | null
   openChat(chatId: string): void
   closeChat(): void
-  sendMessage(text: string): Promise<void>
+  /**
+   * 发送一轮。接受协议的 UserInput 序列(文本段 + skill/mention 变体,
+   * 由 Composer 的 ProseMirror 文档序列化而来);纯字符串自动包成单文本段。
+   */
+  sendMessage(input: UserInput[] | string): Promise<void>
   startChat(params: StartChatParams): Promise<string>
   interrupt(): Promise<void>
+  /**
+   * 运行中提交 follow-up(Codex 的 Steer):不打断当前轮次,把输入注入活动轮。
+   * 对应协议的 `turn/steer`,需要当前活动轮次的真实 id 作前置条件。
+   */
+  steer(input: UserInput[] | string): Promise<void>
+  /** 排队中的 follow-up(Codex `queued-follow-ups`);按提交顺序排列 */
+  queuedFollowUps: QueuedFollowUp[]
+  /** 队列被 interrupt 暂停(Codex `isInterrupted`,面板显示 banner + Resume) */
+  queueInterrupted: boolean
+  /** followUpQueueMode='queue' 时的运行中提交入口 */
+  enqueueFollowUp(text: string): void
+  deleteQueuedMessage(id: string): void
+  /** dnd 重排(Codex `onReorderMessages`,arrayMove 语义) */
+  reorderQueuedMessages(activeId: string, overId: string): void
+  /** Codex "Send now":出队并立即 steer(运行中)或 turn/start */
+  sendQueuedMessageNow(id: string): Promise<void>
+  /** Codex "Edit message":出队并返回文本,由 Composer 回填输入框 */
+  editQueuedMessage(id: string): string | null
+  /** Codex "Resume"(Queue paused because you interrupted) */
+  resumeInterruptedQueue(): void
   /** 回答一条审批。key 取自 `PendingApproval.requestKey` */
   respondToApproval(requestKey: string, decision: ApprovalDecision): void
 }
 
 export interface StartChatParams {
-  text: string
+  /** 首条消息的协议输入(文本段 + skill/mention 变体) */
+  input: UserInput[]
   cwd: string
   approvalPolicy: AskForApproval
   sandbox: SandboxMode
+}
+
+/** 纯字符串 → 单文本段输入(队列等纯文本路径用) */
+function toUserInputs(input: UserInput[] | string): UserInput[] {
+  return typeof input === 'string' ? [{ type: 'text', text: input, text_elements: [] }] : input
 }
 
 export type { RuntimeTurn } from './turnStore'
@@ -157,8 +202,17 @@ function useChatRuntimeCore(chatId: string | null): {
   readOnly: boolean
   readOnlyReason: string | null
   error: string | null
-  sendMessage(text: string): Promise<void>
+  sendMessage(input: UserInput[] | string): Promise<void>
   interrupt(): Promise<void>
+  steer(input: UserInput[] | string): Promise<void>
+  queuedFollowUps: QueuedFollowUp[]
+  queueInterrupted: boolean
+  enqueueFollowUp(text: string): void
+  deleteQueuedMessage(id: string): void
+  reorderQueuedMessages(activeId: string, overId: string): void
+  sendQueuedMessageNow(id: string): Promise<void>
+  editQueuedMessage(id: string): string | null
+  resumeInterruptedQueue(): void
   respondToApproval(requestKey: string, decision: ApprovalDecision): void
   /** startChat 新建的会话没有历史,resume 会清掉乐观追加的 pending turn —— 跳过 */
   markFresh(threadId: string): void
@@ -170,6 +224,24 @@ function useChatRuntimeCore(chatId: string | null): {
   const [readOnly, setReadOnly] = useState(false)
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * follow-up 队列(Codex 宿主层队列的 WS 等价物)。
+   * state 供渲染,ref 供事件回调(turn/completed 的消费循环注册一次,
+   * 闭包里读 state 会拿到旧快照 —— 与 approvals 的双副本同理)。
+   */
+  const [queuedFollowUps, setQueuedFollowUps] = useState<QueuedFollowUp[]>([])
+  const [queueInterrupted, setQueueInterrupted] = useState(false)
+  const queueRef = useRef<QueuedFollowUp[]>([])
+  const interruptedRef = useRef(false)
+  /* 消费循环定义在订阅 effect 之后(它依赖 startTurn),回调经 ref 调用,
+   * 避免在 deps 里引用未初始化的 const(TDZ)。 */
+  const consumeQueueRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    queueRef.current = queuedFollowUps
+  }, [queuedFollowUps])
+  useEffect(() => {
+    interruptedRef.current = queueInterrupted
+  }, [queueInterrupted])
 
   // 绑定会话 id 的即时副本:通知回调在闭包里读它,避免因 state 未刷新而误判
   // 事件归属。切换会话的入口都会同步写这个 ref,不在 render 期间赋值。
@@ -379,6 +451,8 @@ function useChatRuntimeCore(chatId: string | null): {
         // 轮次自己带上了失败原因就撤掉全局横幅,否则同一条错误会显示两遍
         if (turn.error?.message) setError(null)
         setPhase('idle')
+        // Codex 队列消费:当前轮结束,自动发下一条排队的 follow-up
+        consumeQueueRef.current()
       }),
       rpc.on('turn/plan/updated', (p) => {
         if (!mine(p)) return
@@ -535,35 +609,38 @@ function useChatRuntimeCore(chatId: string | null): {
     }
   }, [])
 
-  const startTurn = useCallback(async (threadId: string, text: string): Promise<void> => {
-    const input: UserInput[] = [{ type: 'text', text, text_elements: [] }]
-    const clientId = crypto.randomUUID()
-    const pending = createPendingTurn(clientId, {
-      type: 'userMessage',
-      id: `${PENDING_TURN}${clientId}`,
-      clientId,
-      content: input
-    })
-    setTurns((prev) => [...prev, pending])
-    setPhase('running')
-    try {
-      await rpc.request(M.turnStart, {
-        threadId,
-        input,
-        clientUserMessageId: clientId
+  const startTurn = useCallback(
+    async (threadId: string, input: UserInput[] | string): Promise<void> => {
+      const inputs = toUserInputs(input)
+      const clientId = crypto.randomUUID()
+      const pending = createPendingTurn(clientId, {
+        type: 'userMessage',
+        id: `${PENDING_TURN}${clientId}`,
+        clientId,
+        content: inputs
       })
-    } catch (err) {
-      setTurns((prev) => prev.filter((t) => t.id !== pending.id))
-      setPhase('idle')
-      throw err
-    }
-  }, [])
+      setTurns((prev) => [...prev, pending])
+      setPhase('running')
+      try {
+        await rpc.request(M.turnStart, {
+          threadId,
+          input: inputs,
+          clientUserMessageId: clientId
+        })
+      } catch (err) {
+        setTurns((prev) => prev.filter((t) => t.id !== pending.id))
+        setPhase('idle')
+        throw err
+      }
+    },
+    []
+  )
 
   const sendMessage = useCallback(
-    async (text: string): Promise<void> => {
+    async (input: UserInput[] | string): Promise<void> => {
       const id = activeRef.current
       if (!id) throw new Error('No active chat')
-      await startTurn(id, text)
+      await startTurn(id, input)
     },
     [startTurn]
   )
@@ -571,9 +648,131 @@ function useChatRuntimeCore(chatId: string | null): {
   const interrupt = useCallback(async (): Promise<void> => {
     const id = activeRef.current
     if (!id) return
+    /*
+     * Codex:interrupt 暂停队列(“Queue paused because you interrupted”)。
+     * 必须在 rpc 之前置标志 —— 服务端一收到 interrupt 就推 turn/completed,
+     * 等 rpc 返回再置,消费循环会在标志生效前把队列排空。
+     * interruptedRef 同步改,不经 effect。
+     */
+    if (queueRef.current.length > 0) {
+      setQueueInterrupted(true)
+      interruptedRef.current = true
+    }
     await rpc.request(M.turnInterrupt, { threadId: id })
     setPhase('idle')
   }, [])
+
+  /**
+   * Codex `turn/steer`:运行中带着文字提交 = 把 follow-up 转向进活动轮。
+   * 前置条件是活动轮次的真实 id(`expectedTurnId`)——turn/started 还没到
+   * (本地 pending 轮)时没有可 steer 的目标,直接抛错,调用方负责把文本
+   * 还给输入框。
+   */
+  const steer = useCallback(
+    async (input: UserInput[] | string): Promise<void> => {
+      const id = activeRef.current
+      if (!id) throw new Error('No active chat')
+      const activeTurn = [...turns]
+        .reverse()
+        .find((t) => !t.id.startsWith(PENDING_TURN) && t.status === 'inProgress')
+      if (!activeTurn) throw new Error('No active turn to steer')
+      await rpc.request(M.turnSteer, {
+        threadId: id,
+        input: toUserInputs(input),
+        clientUserMessageId: crypto.randomUUID(),
+        expectedTurnId: activeTurn.id
+      })
+    },
+    [turns]
+  )
+
+  /* ==================== follow-up 队列(Codex queued-follow-ups) ==================== */
+
+  // 事件回调在 mount 时注册一次,经 ref 拿最新动作/状态,避免闭包快照
+  const startTurnRef = useRef(startTurn)
+  const steerRef = useRef(steer)
+  const phaseRef = useRef(phase)
+  useEffect(() => {
+    startTurnRef.current = startTurn
+  }, [startTurn])
+  useEffect(() => {
+    steerRef.current = steer
+  }, [steer])
+  useEffect(() => {
+    phaseRef.current = phase
+  }, [phase])
+
+  /**
+   * 出队消费 —— Codex 的队列消费循环:轮次结束且队列未暂停时自动发下一条。
+   * 发送失败的消息回队首并标 pausedReason(面板行内 Retry)。
+   */
+  const consumeQueue = useCallback((): void => {
+    if (interruptedRef.current) return
+    const [next, ...rest] = queueRef.current
+    if (!next) return
+    const threadId = activeRef.current
+    if (!threadId) return
+    setQueuedFollowUps(rest)
+    startTurnRef.current(threadId, next.text).catch(() => {
+      setQueuedFollowUps((prev) => [{ ...next, pausedReason: 'failed' }, ...prev])
+    })
+  }, [])
+  useEffect(() => {
+    consumeQueueRef.current = consumeQueue
+  }, [consumeQueue])
+
+  const enqueueFollowUp = useCallback((text: string): void => {
+    setQueuedFollowUps((prev) => [...prev, { id: crypto.randomUUID(), text, pausedReason: null }])
+  }, [])
+
+  const deleteQueuedMessage = useCallback((id: string): void => {
+    setQueuedFollowUps((prev) => prev.filter((m) => m.id !== id))
+  }, [])
+
+  const reorderQueuedMessages = useCallback((activeId: string, overId: string): void => {
+    setQueuedFollowUps((prev) => {
+      const from = prev.findIndex((m) => m.id === activeId)
+      const to = prev.findIndex((m) => m.id === overId)
+      if (from < 0 || to < 0 || from === to) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }, [])
+
+  /**
+   * Codex "Send now"(tooltip 原文 "Submit without interrupting the model"):
+   * 出队,运行中走 steer,空闲走 turn/start;失败回队首 + pausedReason。
+   */
+  const sendQueuedMessageNow = useCallback(async (id: string): Promise<void> => {
+    const msg = queueRef.current.find((m) => m.id === id)
+    const threadId = activeRef.current
+    if (!msg || !threadId) return
+    setQueuedFollowUps((prev) => prev.filter((m) => m.id !== id))
+    try {
+      if (phaseRef.current === 'running') await steerRef.current(msg.text)
+      else await startTurnRef.current(threadId, msg.text)
+    } catch {
+      setQueuedFollowUps((prev) => [{ ...msg, pausedReason: 'failed' }, ...prev])
+    }
+  }, [])
+
+  /** Codex "Edit message":出队并返回文本,由 Composer 回填输入框 */
+  const editQueuedMessage = useCallback((id: string): string | null => {
+    const msg = queueRef.current.find((m) => m.id === id)
+    if (!msg) return null
+    setQueuedFollowUps((prev) => prev.filter((m) => m.id !== id))
+    return msg.text
+  }, [])
+
+  /** Codex "Resume"(“Queue paused because you interrupted” 的恢复键) */
+  const resumeInterruptedQueue = useCallback((): void => {
+    setQueueInterrupted(false)
+    // interruptedRef 正常由 effect 同步,这里先改再消费,不等下一帧
+    interruptedRef.current = false
+    consumeQueue()
+  }, [consumeQueue])
 
   return {
     turns,
@@ -585,6 +784,15 @@ function useChatRuntimeCore(chatId: string | null): {
     error,
     sendMessage,
     interrupt,
+    steer,
+    queuedFollowUps,
+    queueInterrupted,
+    enqueueFollowUp,
+    deleteQueuedMessage,
+    reorderQueuedMessages,
+    sendQueuedMessageNow,
+    editQueuedMessage,
+    resumeInterruptedQueue,
     respondToApproval,
     markFresh
   }
@@ -607,7 +815,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
   }, [])
 
   const startChat = useCallback(
-    async ({ text, cwd, approvalPolicy, sandbox }: StartChatParams): Promise<string> => {
+    async ({ input, cwd, approvalPolicy, sandbox }: StartChatParams): Promise<string> => {
       const { thread } = await rpc.request<{ thread: Chat }>(M.chatStart, {
         cwd,
         approvalPolicy,
@@ -616,7 +824,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
       // 新建会话没有历史:标记跳过 resume,直接开始第一轮
       core.markFresh(thread.id)
       setActiveChatId(thread.id)
-      await core.sendMessage(text)
+      await core.sendMessage(input)
       return thread.id
     },
     [core]
@@ -637,6 +845,15 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
       sendMessage: core.sendMessage,
       startChat,
       interrupt: core.interrupt,
+      steer: core.steer,
+      queuedFollowUps: core.queuedFollowUps,
+      queueInterrupted: core.queueInterrupted,
+      enqueueFollowUp: core.enqueueFollowUp,
+      deleteQueuedMessage: core.deleteQueuedMessage,
+      reorderQueuedMessages: core.reorderQueuedMessages,
+      sendQueuedMessageNow: core.sendQueuedMessageNow,
+      editQueuedMessage: core.editQueuedMessage,
+      resumeInterruptedQueue: core.resumeInterruptedQueue,
       respondToApproval: core.respondToApproval
     }),
     [
@@ -653,6 +870,15 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
       core.sendMessage,
       startChat,
       core.interrupt,
+      core.steer,
+      core.queuedFollowUps,
+      core.queueInterrupted,
+      core.enqueueFollowUp,
+      core.deleteQueuedMessage,
+      core.reorderQueuedMessages,
+      core.sendQueuedMessageNow,
+      core.editQueuedMessage,
+      core.resumeInterruptedQueue,
       core.respondToApproval
     ]
   )
@@ -695,6 +921,15 @@ export function SideChatRuntimeProvider({
       sendMessage: core.sendMessage,
       startChat: () => Promise.reject(new Error('side chat 不支持 startChat')),
       interrupt: core.interrupt,
+      steer: core.steer,
+      queuedFollowUps: core.queuedFollowUps,
+      queueInterrupted: core.queueInterrupted,
+      enqueueFollowUp: core.enqueueFollowUp,
+      deleteQueuedMessage: core.deleteQueuedMessage,
+      reorderQueuedMessages: core.reorderQueuedMessages,
+      sendQueuedMessageNow: core.sendQueuedMessageNow,
+      editQueuedMessage: core.editQueuedMessage,
+      resumeInterruptedQueue: core.resumeInterruptedQueue,
       respondToApproval: core.respondToApproval
     }),
     [
@@ -708,6 +943,15 @@ export function SideChatRuntimeProvider({
       core.error,
       core.sendMessage,
       core.interrupt,
+      core.steer,
+      core.queuedFollowUps,
+      core.queueInterrupted,
+      core.enqueueFollowUp,
+      core.deleteQueuedMessage,
+      core.reorderQueuedMessages,
+      core.sendQueuedMessageNow,
+      core.editQueuedMessage,
+      core.resumeInterruptedQueue,
       core.respondToApproval
     ]
   )

@@ -149,3 +149,157 @@ DndContext 上移到 MainContentSurface(右/底共用)。
 **Phase 3 换库**(每个都会漏进 DOM 影响视觉)
 monaco-editor(5.1MB,最大单块)、react-virtuoso、react-resizable-panels、
 react-arborist、@vscode/codicons → 均替换为 Codex 的实现方式
+
+## 2026-08-24:Composer 逆向复刻(输入框 + 排队 + 触发菜单)
+
+**范围**:对话输入框全家桶(home / thread / side chat),源码逆向 + 运行时对照。
+
+### A 块:结构纠错(对照 Codex 运行时实测)
+
+- **thread/side-chat 不再渲染 utility bar**(项目/运行位置/分支 pill 是 home 专属;
+  Codex `showUtilityBar` 仅 home 为 true,运行时实测 thread 无此条)。
+- `data-composer-utility-bar-variant` 改 `'home'|'default'`(原误传 placement 值);
+  `data-composer-surface-overflow` home=visible / thread=auto;根类 thread=`min-w-0`、
+  home=`min-w-0 w-full`;补 `data-above-composer-conversation-id`。
+- **提交按钮模型**(Codex `HUs` + `submitButtonMode`):
+  运行中且无文字→Stop(icon=Codex `Gh` 实心方块);运行中有文字→Steer;
+  空输入不是 disabled 是 blocked(`cursor-interaction`+`opacity-50`);
+  submitting 显示 spinner。
+- 表面 root 加 Codex `D_o` 的 onMouseDown 点空白聚焦(含 `k_o` 交互元素排除选择器)。
+- 属性补齐:`data-composer-navigation-target`(6 处)、`data-codex-intelligence-trigger`、
+  `data-selected-reasoning-effort`(协议值,`effortProtocolValue` 逆映射)、
+  触发器 `aria-haspopup/aria-expanded/data-state`。
+- thread composer DOM 与 Codex 实测 81:81 行,差异仅属性顺序与 radix id。
+
+### B 块:排队 follow-ups(宿主层队列,协议零改动)
+
+- Codex 的队列**不在 app-server 协议里**(二进制 0.147.0 无 queue 方法/通知),
+  是桌面宿主层客户端状态:`thread-queued-followups-changed` 为宿主桥事件,
+  `thread-follower-set-queued-follow-ups-state` 是多客户端经宿主路由的同步消息。
+  提交时才碰协议:出队 `turn/start`、Send now `turn/steer`。WS 队列放
+  ChatRuntimeContext core(每会话一份,主会话与 side chat 各自独立)。
+- `followUpQueueMode`('queue'|'steer',Codex 默认 'queue')入 SessionContext;
+  运行中提交默认入队,菜单可切 steer。
+- `QueuedMessageList`(queued-message-list chunk 移植):dnd-kit 排序
+  (PointerSensor distance:6 + verticalListSortingStrategy,与 Codex 同款库),
+  framer-motion 行进出动画(height/opacity 0.18s),暂停行 warning + Retry,
+  ⋯ 菜单(Edit/Open in side chat/Turn on|off queueing)。
+- interrupt 暂停队列("Queue paused because you interrupted" + Resume)。
+  **关键时序:暂停标志必须在 rpc 之前置位**——服务端收到 interrupt 立刻推
+  turn/completed,晚了消费循环会把队列排空(实测踩中)。
+- side chat 支持 `initialMessage`(Codex `we()` 的指令后缀逐字照搬),
+  队列消息可 "Open in side chat"(出队 + fork 带引用文本)。
+
+### C 块:触发式弹窗(`/`、`@`)
+
+- ProseMirror autocomplete 插件:state 对齐 Codex `{active, kind, trigger, from, query}`;
+  `/` 限段首,`@` 段首或空白后;插件 state 为唯一事实源(reportAutocomplete 读
+  getState,否则 Esc 关掉的菜单下一帧被重算弹回)。
+- 菜单激活时插件拦截 ArrowUp/Down/Enter/Tab/Escape(先于 keymap,Enter 此时是选中)。
+- `ComposerTopMenuShell` 按运行时抓取 DOM 逐层复刻(`_ComposerTopMenuShell`
+  定位 `absolute left-0 right-0 bottom-full mb-2 z-50`,内联非 portal;
+  `data-list-navigation-item`/`aria-selected`/逐字符标题 span)。
+- 数据源:slash = 内置 Compact(thread/compact/start)+ skills/list;
+  `@` = fuzzyFileSearch(150ms debounce)。选中插入 mention chip
+  (PM atom 节点 `span.codex-ComposerMention`),提交序列化成协议
+  `skill`/`mention` UserInput 变体(sendMessage/steer/startChat 全链路支持 UserInput[])。
+- home utility bar 在菜单激活时隐藏(Codex `pn` 语义)。
+
+### 已标记偏差(不影响结构)
+
+- utility bar 进场动画未复刻(直接渲染 framer 终态内联样式;rAF 节流窗口下
+  framer-motion 会卡 initial=隐形的坑,见下方踩坑)。
+- 提交 spinner 路径 / Grip 六点 / 警告三角图标未逐像素确认(bundle 导出名压扁)。
+- 队列消息纯文本(Codex 带附件/批注 context);队列面板行容器 `fe` 基础类未确认;
+  "Edit message" 为取回 composer 而非行内编辑(桌面端行内编辑 UI 未确认)。
+- mention chip DOM(`codex-ComposerMention`)为本地约定,Codex chip 结构未确认。
+- Compact 动作仅验证调用路径,未核对服务端效果。
+
+**踩坑新条目:**
+- **mount-once 的 EditorView 不吃 HMR**:ProseMirror 编辑器在 mount effect 里创建,
+  改插件代码后 HMR 只换模块不换实例,行为还是旧代码 —— 测插件改动必须先 reload。
+- **CDP 合成事件测 React 状态有帧差**:点击后同一脚本里读断言必过期,
+  状态变更与断言读取要拆成两次 CDP 调用(间隔 ≥300ms);否则极易误判为 bug。
+- **`execCommand('delete')` 在 ProseMirror 里不可靠**(残留文本导致串联),
+  清空用 `selectAll` + `insertText('')`。
+
+## 2026-08-24 补:弹层样式系统对齐(slash/加号/模型/权限/项目选择)
+
+**起因**:弹层与图标和 Codex 不一致。逐项从运行时 DOM 逆向后重写。
+
+### 弹层容器(一处统一,全部生效)
+
+- Popover 容器类换成 Codex 菜单原语:`no-drag z-50 m-px flex select-none flex-col
+  overflow-y-auto px-1 py-1 bg-token-dropdown-background/90 text-token-foreground
+  ring-token-border rounded-xl ring-[0.5px] shadow-xl-spread backdrop-blur-sm`。
+- role 分两种:菜单列表 `role=menu`(模型/权限)、对话框 `role=dialog`(项目选择,cmdk)。
+
+### 菜单项基类
+
+`no-drag outline-hidden rounded-lg px-[var(--padding-row-x)] py-[var(--padding-row-y)]
+text-sm … cursor-interaction`(旧实现 `rounded-[12.5px] text-[13px]` 是 prototype 的
+旧样式,非 Codex 桌面端)。
+
+### 各弹层
+
+- **slash 菜单**:内置命令补 New chat / Reasoning(动态显示当前 effort)/
+  Side(与 Compact 共四项,图标全部从运行时 DOM 提取);技能标题 =
+  `interface.displayName ?? 名字推导`(分段大写 + 小词规则,"Chrome: Control Chrome"、
+  "Code to Spec" 与 Codex 逐项一致);技能通用图标提取;Compact 带上下文用量环
+  (12×12 svg,用量数据未接入恒空环)。其余 9 项内建命令待流程接入(图标已备)。
+- **加号菜单**:从 portal Popover 改为 `_ComposerTopMenuShell` 内联菜单(mb-1,
+  与 slash/@ 同族),吸顶分区 Add/Plugins/Files;Add 区 21×21 svg(提取),
+  Plugins 区官方打包位图(提取至 assets/codex/plugin-icons,6 PNG + 1 SVG);
+  删掉自创的 "Work in a project" 与 "Agents" 分区;焦点留在输入框、输入即过滤、
+  Files 分区 debounce 搜索、选中文件插 mention chip、方向键/Enter/Escape 导航。
+- **模型选择**:从"平铺列表 + effort 滑块"重写为 Codex 的双子菜单:
+  根菜单 w-56 两行(Model/Effort,带当前值 + chevron),悬停右侧出子菜单
+  (与父菜单顶对齐),选中带 check(effort 项 `data-reasoning-selected`),选中即关。
+- **权限选择**:补中间档 "Approve for me"(never + workspace-write);
+  标题改 "How should ChatGPT actions be approved?" + Learn more;
+  Full access 警告色标题/描述/勾选。
+- **项目选择**:重写为 cmdk 结构(sr-only label + combobox input + listbox/option
+  + `aria-selected` 键盘光标 + 选中项 check + 底部 New project / Don't work)。
+
+### 图标资产
+
+- 18 个 composer 实测 SVG(icons/extracted/composer/):slash 13 内建命令 +
+  技能通用 + 加号 4 项,全部从运行时 DOM 逐项提取(scripts/gen-composer-icons.mjs)。
+- 7 个插件官方位图(assets/codex/plugin-icons/):Documents/PDF/Spreadsheets/
+  Presentations/Template Creator/Computer(PNG)+ Visualize(SVG)。
+
+### 答案备查:"是不是有两套样式?"
+
+不是。差异三个来源:① 旧弹层是按 prototype 复刻的自创样式(已按 Codex 桌面端
+实测重写);② 图标用了近似品(已换真资产);③ 数据差异:模型列表/技能/effort 档位
+全部由后端 model/list、skills/list 驱动 —— 自定义 provider 只有一个模型时
+Codex 的 Model 子菜单本来就是空的(实测如此),官方账号则列出 gpt 系列。
+同一套样式系统,按账号数据渲染。
+
+**踩坑新条目:**
+- **Codex 子菜单锚点是父菜单而非触发行**:子菜单顶边与父菜单顶边对齐
+  (side=right align=start),实现时取 `closest('[role=dialog],[role=menu]')` 的 rect。
+- **vite 资源路径错一层就白屏**:`../../assets` vs `../../../assets`,
+  报错只能在 vite dev 响应里看到(页面无声挂掉)。
+
+## 2026-08-24 补2:首页整片白屏(高度链断裂)—— MainContentLayout 层级纠错
+
+**现象**:新会话(home)页面主区全白,输入框/hero/建议卡 DOM 都在但一个不渲染。
+根因不是 Composer —— 是 MainContentLayout 的路由容器顺序与 Codex 不一致:
+
+- **Codex 首页**:`h-full.min-h-0.min-w-0.flex-1` > `flex.h-full.flex-col[vscode]`(flex 列)
+  > `relative.min-h-0.flex-1`(路由容器,作为 flex item 拿到确定高)> `h-full.min-h-0`
+- **WS 错版**:路由容器 `relative.min-h-0.flex-1` 与 vscode 层写反(路由容器在外),
+  其父级是 block,`flex-1` 失效 → 路由容器高度塌成 0 → 内部 `h-full` 链全断 →
+  `[container-type:size].overflow-y-auto` 滚动容器 0 高,把 141px 的 composer 整片裁掉。
+
+thread 态结构与 Codex 一致(所以 thread 一直正常)。已按 Codex 实测顺序修正:
+home/thread 两个分支分别渲染。截图验证:hero/建议卡/utility bar/composer 全部可见。
+
+**踩坑新条目:**
+- **DOM 健康 ≠ 渲染健康**。本次所有 CDP 断言(getBoundingClientRect/opacity/visibility)
+  全部通过,页面照样全白 —— 中间容器 0 高 + overflow 裁剪不影响后代自身的 rect。
+  **视觉验证必须有截图环节**(scripts/cdp-screenshot.mjs),elementFromPoint 命中祖先
+  而非目标元素是"被裁剪/被遮挡"的信号。
+- 修过一次的层级注释也可能是错的:旧注释断言的 Codex 顺序与本次运行时实测相反,
+  以运行时为准并更新了注释。

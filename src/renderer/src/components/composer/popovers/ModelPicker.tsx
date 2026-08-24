@@ -1,112 +1,176 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSession } from '../../../state/SessionContext'
-import { CheckIcon } from '../../icons'
+import { CheckIcon, ChevronIcon } from '../../icons'
+import { cx } from '../../../utils/cx'
 
-interface EffortSliderProps {
-  /** 当前模型支持的档位，从低到高 */
-  efforts: string[]
-  value: string | null
-  onChange(effort: string): void
-}
+/** Codex 菜单项基类(与运行时逐项一致) */
+const MENU_ITEM_CLASS =
+  'no-drag outline-hidden rounded-lg px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm text-token-foreground group hover:bg-token-list-hover-background focus:bg-token-list-hover-background cursor-interaction flex flex-col'
+
+/** Codex 子菜单容器类(role=menu,与根菜单同一套菜单原语) */
+const SUBMENU_CLASS =
+  'z-50 flex min-w-[180px] select-none flex-col overflow-y-auto m-px px-1 py-1 bg-token-dropdown-background/90 text-token-foreground ring-token-border rounded-xl ring-[0.5px] shadow-xl-spread backdrop-blur-sm'
 
 /**
- * effort 滑块（chat.html #popModel .mp-slider）：
- * 轨道上均匀分布圆点（已达成档实心），旋钮吸附到最近档位；
- * 点击轨道或拖拽旋钮都可调整（pointer capture）。
+ * 模型/effort 选择 —— Codex 的双子菜单(运行时实测):
+ *
+ *   根菜单(w-56)
+ *   ├ div[role=menuitem][aria-haspopup=menu][aria-label="Model …"]   ← 子菜单触发行
+ *   │ └ div.flex.w-full.min-w-0.items-center.gap-3
+ *   │   ├ span > span[data-model-picker-model-row] "Model"
+ *   │   ├ span.flex.min-w-0.flex-1.justify-end.text-token-text-tertiary > 当前模型名
+ *   │   └ [chevron]
+ *   └ div[role=menuitem][aria-label="Effort …"]                      ← 同上,值是当前 effort
+ *
+ *   悬停行 → 右侧子菜单(side=right,与父菜单顶对齐):
+ *   ├ div[header] "Model" / "Effort"
+ *   └ 单选列表,选中项带 check(effort 项带 data-reasoning-selected="true")
+ *
+ * 选择结果存入 SessionContext,随 turn/start 下发。Codex 每档选择即关闭;
+ * 悬停打开的子菜单在指针离开根菜单 + 子菜单区域后收回。
  */
-function EffortSlider({ efforts, value, onChange }: EffortSliderProps): React.JSX.Element {
-  const trackRef = useRef<HTMLDivElement>(null)
-  const count = efforts.length
-  const index = Math.max(0, value ? efforts.indexOf(value) : 0)
-  const pct = (i: number): number => (count > 1 ? (i / (count - 1)) * 100 : 0)
+export function ModelPicker({ onClose }: { onClose(): void }): React.JSX.Element {
+  const { models, model, effort, selectModel, selectEffort } = useSession()
+  const [submenu, setSubmenu] = useState<'model' | 'effort' | null>(null)
+  const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number } | null>(null)
+  const closeTimer = useRef<number | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
-  const setFromClientX = (clientX: number): void => {
-    const track = trackRef.current
-    if (!track || count === 0) return
-    const rect = track.getBoundingClientRect()
-    const ratio = (clientX - rect.left) / rect.width
-    const i = Math.max(0, Math.min(count - 1, Math.round(ratio * (count - 1))))
-    if (efforts[i] !== value) onChange(efforts[i])
+  const openSubmenu = (kind: 'model' | 'effort', row: HTMLElement): void => {
+    if (closeTimer.current != null) {
+      window.clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+    // 与 Codex 一致:子菜单顶边与父菜单顶边对齐(side=right align=start)
+    const dialog = row.closest('[role=dialog], [role=menu]') ?? rootRef.current
+    const rect = dialog?.getBoundingClientRect()
+    if (rect) setSubmenuPos({ left: rect.right, top: rect.top })
+    setSubmenu(kind)
+  }
+
+  const scheduleClose = (): void => {
+    if (closeTimer.current != null) window.clearTimeout(closeTimer.current)
+    closeTimer.current = window.setTimeout(() => setSubmenu(null), 120)
+  }
+
+  const cancelClose = (): void => {
+    if (closeTimer.current != null) {
+      window.clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
   }
 
   return (
-    <div className="flex h-9 items-center px-2.5 pb-2">
+    <div ref={rootRef} className="contents" onPointerLeave={scheduleClose}>
+      {/* Model 行 */}
       <div
-        ref={trackRef}
-        role="slider"
-        aria-label="Reasoning effort"
-        aria-valuemin={0}
-        aria-valuemax={count - 1}
-        aria-valuenow={index}
-        aria-valuetext={value ?? undefined}
-        tabIndex={0}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId)
-          setFromClientX(e.clientX)
-        }}
-        onPointerMove={(e) => {
-          if ((e.buttons & 1) === 1) setFromClientX(e.clientX)
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' && index > 0) onChange(efforts[index - 1])
-          if (e.key === 'ArrowRight' && index < count - 1) onChange(efforts[index + 1])
-        }}
-        className="relative h-4 flex-1 cursor-pointer touch-none outline-none"
+        role="menuitem"
+        tabIndex={-1}
+        aria-haspopup="menu"
+        aria-expanded={submenu === 'model'}
+        aria-label={`Model ${model?.id ?? ''}`}
+        className={cx(MENU_ITEM_CLASS, 'flex w-full items-center')}
+        onPointerEnter={(e) => openSubmenu('model', e.currentTarget)}
+        onClick={(e) => openSubmenu('model', e.currentTarget)}
       >
-        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-sm bg-token-foreground/[0.12]" />
-        {efforts.map((effort, i) => (
-          <span
-            key={effort}
-            className={`absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-              i <= index ? 'bg-token-foreground' : 'bg-token-foreground/25'
-            }`}
-            style={{ left: `${pct(i)}%` }}
-          />
-        ))}
-        <span
-          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-token-foreground shadow-[0_1px_3px_rgb(0_0_0/0.25)]"
-          style={{ left: `${pct(index)}%` }}
-        />
+        <div className="flex w-full min-w-0 items-center gap-3">
+          <span>
+            <span data-model-picker-model-row="true">Model</span>
+          </span>
+          <span className="flex min-w-0 flex-1 justify-end text-token-text-tertiary">
+            <span className="min-w-0 truncate">
+              <span className="flex min-w-0 items-center gap-1 tabular-nums">
+                <span className="truncate whitespace-nowrap">{model?.displayName ?? '…'}</span>
+              </span>
+            </span>
+          </span>
+          <ChevronIcon className="icon-xs shrink-0 -rotate-90" />
+        </div>
       </div>
+      {/* Effort 行 */}
+      <div
+        role="menuitem"
+        tabIndex={-1}
+        aria-haspopup="menu"
+        aria-expanded={submenu === 'effort'}
+        aria-label={`Effort ${effort ?? ''}`}
+        className={cx(MENU_ITEM_CLASS, 'flex w-full items-center')}
+        onPointerEnter={(e) => openSubmenu('effort', e.currentTarget)}
+        onClick={(e) => openSubmenu('effort', e.currentTarget)}
+      >
+        <div className="flex w-full min-w-0 items-center gap-3">
+          <span>Effort</span>
+          <span className="flex min-w-0 flex-1 justify-end text-token-text-tertiary">
+            <span className="min-w-0 truncate">{effort ?? '…'}</span>
+          </span>
+          <ChevronIcon className="icon-xs shrink-0 -rotate-90" />
+        </div>
+      </div>
+
+      {submenu != null &&
+        submenuPos != null &&
+        createPortal(
+          <div
+            role="menu"
+            aria-orientation="vertical"
+            data-state="open"
+            tabIndex={-1}
+            className={cx(SUBMENU_CLASS, 'fixed', submenu === 'model' && 'w-[280px]')}
+            style={{ left: submenuPos.left, top: submenuPos.top }}
+            onPointerEnter={cancelClose}
+            onPointerLeave={scheduleClose}
+          >
+            <div dir="ltr">
+              <div className="text-token-description-foreground flex min-h-6 items-center truncate px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm leading-4">
+                {submenu === 'model' ? 'Model' : 'Effort'}
+              </div>
+              {submenu === 'model' ? (
+                <div className="vertical-scroll-fade-mask flex max-h-[250px] flex-col overflow-y-auto">
+                  {models.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      role="menuitem"
+                      tabIndex={-1}
+                      onClick={() => {
+                        selectModel(m.id)
+                        onClose()
+                      }}
+                      className={MENU_ITEM_CLASS}
+                    >
+                      <div className="flex w-full items-center gap-1.5">
+                        <span className="flex-1 min-w-0 truncate">{m.displayName}</span>
+                        {m.id === model?.id && <CheckIcon className="size-4 shrink-0" />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                (model?.efforts ?? []).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    data-reasoning-selected={level === effort ? 'true' : undefined}
+                    onClick={() => {
+                      selectEffort(level)
+                      onClose()
+                    }}
+                    className={MENU_ITEM_CLASS}
+                  >
+                    <div className="flex w-full items-center gap-1.5">
+                      <span className="flex-1 min-w-0 truncate">{level}</span>
+                      {level === effort && <CheckIcon className="size-4 shrink-0" />}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
-  )
-}
-
-/**
- * 模型选择弹层（chat.html #popModel，224px + 设计文档 §5.4 的 model/list）：
- * 上半部分是模型单选列表，下半部分是当前模型的 effort 滑块；
- * 选择结果存入 SessionContext，随 turn/start 下发。
- * 点选后不自动关闭——用户通常接着调 effort；点遮罩 / Escape 关闭。
- */
-export function ModelPicker(): React.JSX.Element {
-  const { models, model, effort, selectModel, selectEffort } = useSession()
-
-  return (
-    <>
-      {models.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => selectModel(m.id)}
-          className="flex w-full items-center gap-1.5 rounded-[12.5px] px-2 py-[5px] text-left text-[13px] leading-[18.57px] text-token-foreground hover:bg-token-list-hover-background"
-        >
-          <span className="min-w-0 flex-1 truncate">{m.displayName}</span>
-          {m.id === model?.id && <CheckIcon className="size-4 shrink-0 opacity-75" />}
-        </button>
-      ))}
-
-      {model && model.efforts.length > 0 && (
-        <>
-          <div className="px-2 py-1">
-            <div className="h-px w-full bg-token-menu-border" />
-          </div>
-          <div className="flex items-center justify-between px-2 pb-1 pt-2 text-xs text-token-description-foreground">
-            <span>Faster</span>
-            <span>Smarter</span>
-          </div>
-          <EffortSlider efforts={model.efforts} value={effort} onChange={selectEffort} />
-        </>
-      )}
-    </>
   )
 }

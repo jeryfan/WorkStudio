@@ -24,3 +24,12 @@ export function formatEffort(effort: string): string {
   if (effort === 'xhigh') return 'Extra High'
   return effort.charAt(0).toUpperCase() + effort.slice(1)
 }
+
+/**
+ * formatEffort 的逆运算 —— Codex 的 `data-selected-reasoning-effort` 挂的是
+ * 协议值("xhigh"),不是展示值("Extra High")。
+ */
+export function effortProtocolValue(display: string): string {
+  if (display === 'Extra High') return 'xhigh'
+  return display.toLowerCase()
+}

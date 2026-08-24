@@ -21,7 +21,8 @@ export async function openSideChat({
   controller,
   sourceChatId,
   cwd,
-  panelOpen
+  panelOpen,
+  initialMessage
 }: {
   controller: AppShellTabPanelController
   /** 源会话(当前 thread);Codex 要求非空(launcher 条件 `j = _ != null`) */
@@ -29,6 +30,11 @@ export async function openSideChat({
   cwd: string | null
   /** 目标面板当前是否开着(决定 activate;Codex 读面板信号) */
   panelOpen: boolean
+  /**
+   * 引用文本(Codex `initialMessage`):排队消息/选中文本开 side chat 时带上,
+   * fork 时拼进 developerInstructions(见 sideChatService)
+   */
+  initialMessage?: string
 }): Promise<void> {
   const count =
     controller.tabs.filter(
@@ -48,7 +54,7 @@ export async function openSideChat({
 
   let forkedId: string | null = null
   try {
-    const thread = await forkSideChatConversation(sourceChatId, cwd)
+    const thread = await forkSideChatConversation(sourceChatId, cwd, initialMessage)
     forkedId = thread.id
     seedForkedThread(thread)
     controller.openTab(createSideChatTabDescriptor(controller, thread.id, title), {

@@ -31,6 +31,12 @@ interface SessionContextValue {
   /** 权限 pill 当前策略 */
   access: AccessPolicy
   setAccess(policy: AccessPolicy): void
+  /**
+   * 运行中收到 follow-up 的默认行为(Codex 设置项 `followUpQueueMode`):
+   * 'queue' = 排进队列等当前轮结束;'steer' = 立即转向活动轮。Codex 默认 'queue'。
+   */
+  followUpQueueMode: 'queue' | 'steer'
+  setFollowUpQueueMode(mode: 'queue' | 'steer'): void
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null)
@@ -42,6 +48,7 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
   const [modelId, setModelId] = useState<string | null>(null)
   const [effort, setEffort] = useState<string | null>(null)
   const [access, setAccess] = useState<AccessPolicy>(DEFAULT_ACCESS)
+  const [followUpQueueMode, setFollowUpQueueMode] = useState<'queue' | 'steer'>('queue')
 
   // 挂载时拉取模型目录（设计文档 §5.4），失败由 service 内部回退兜底目录
   useEffect(() => {
@@ -83,8 +90,18 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
 
   const value = useMemo<SessionContextValue>(() => {
     const model = models.find((m) => m.id === modelId) ?? null
-    return { models, model, effort, selectModel, selectEffort, access, setAccess }
-  }, [models, modelId, effort, selectModel, selectEffort, access])
+    return {
+      models,
+      model,
+      effort,
+      selectModel,
+      selectEffort,
+      access,
+      setAccess,
+      followUpQueueMode,
+      setFollowUpQueueMode
+    }
+  }, [models, modelId, effort, selectModel, selectEffort, access, followUpQueueMode])
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }
