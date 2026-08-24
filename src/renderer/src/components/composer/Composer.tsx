@@ -47,9 +47,12 @@ import { Popover } from './popovers/Popover'
 import { ProjectPicker } from './popovers/ProjectPicker'
 import { AccessPicker } from './popovers/AccessPicker'
 import { ModelPicker } from './popovers/ModelPicker'
+import { RunLocationDropdown } from './popovers/RunLocationDropdown'
+import { BranchDropdown } from './popovers/BranchDropdown'
+import { currentBranch } from '../../services/workspace/gitBranchService'
 
-/** Composer 的三个 portal 弹层身份(radix 系);同一时刻只打开一个 */
-type PopoverId = 'project' | 'access' | 'model'
+/** Composer 的五个 portal 弹层身份(radix 系);同一时刻只打开一个 */
+type PopoverId = 'project' | 'access' | 'model' | 'run-location' | 'branch'
 
 interface PopoverState {
   id: PopoverId
@@ -212,6 +215,24 @@ export function Composer({
   const [plusOpen, setPlusOpen] = useState(false)
   const [plusActiveId, setPlusActiveId] = useState<string | null>(null)
   const [plusFiles, setPlusFiles] = useState<ComposerMenuItem[]>([])
+  /* 当前分支名(utility bar 分支 pill / 分支下拉;git 仓库加载,非 git 隐藏 pill) */
+  const [branch, setBranch] = useState<string | null>(null)
+  const projectRoot = currentProject?.rootPaths[0] ?? null
+  useEffect(() => {
+    let alive = true
+    void (
+      projectRoot == null
+        ? Promise.resolve(null)
+        : currentBranch(projectRoot)
+            .then((name) => (name.length > 0 ? name : null))
+            .catch(() => null)
+    ).then((name) => {
+      if (alive) setBranch(name)
+    })
+    return () => {
+      alive = false
+    }
+  }, [projectRoot])
 
   /** 外部写文本(清空/回填)的统一入口:hasContent 一并重算 */
   const applyText = useCallback((next: string): void => {
@@ -777,9 +798,12 @@ export function Composer({
                     <button
                       type="button"
                       aria-haspopup="menu"
-                      aria-expanded={false}
-                      data-state="closed"
+                      aria-expanded={popover?.id === 'run-location'}
+                      data-state={popover?.id === 'run-location' ? 'open' : 'closed'}
                       data-composer-navigation-target="run-location"
+                      onClick={(e) =>
+                        togglePopover('run-location', e.currentTarget.getBoundingClientRect())
+                      }
                       className={`${COMPOSER_BUTTON_BASE} codex-ComposerFooterDropdown h-token-button-composer-sm px-1.5 py-0 text-sm leading-[18px] in-data-[composer-placement=home]:px-2 outline-hidden`}
                     >
                       <ComposerDropdownLabel
@@ -797,13 +821,16 @@ export function Composer({
                         </span>
                       </ComposerDropdownLabel>
                     </button>
-                    {currentProject && (
+                    {currentProject && branch != null && (
                       <button
                         type="button"
                         aria-haspopup="menu"
-                        aria-expanded={false}
-                        data-state="closed"
+                        aria-expanded={popover?.id === 'branch'}
+                        data-state={popover?.id === 'branch' ? 'open' : 'closed'}
                         data-composer-navigation-target="branch"
+                        onClick={(e) =>
+                          togglePopover('branch', e.currentTarget.getBoundingClientRect())
+                        }
                         className={`${COMPOSER_BUTTON_BASE} codex-ComposerFooterDropdown h-token-button-composer-sm px-1.5 py-0 text-sm leading-[18px] in-data-[composer-placement=home]:px-2 outline-hidden cursor-interaction px-0`}
                       >
                         <ComposerDropdownLabel
@@ -815,7 +842,7 @@ export function Composer({
                             <ChevronIcon className="codex-ComposerDropdownLabelChevron" />
                           }
                         >
-                          main
+                          {branch}
                         </ComposerDropdownLabel>
                       </button>
                     )}
@@ -1075,6 +1102,26 @@ export function Composer({
           ariaLabel="Select model"
         >
           <ModelPicker onClose={closePopover} />
+        </Popover>
+      )}
+      {popover?.id === 'run-location' && (
+        <Popover
+          anchor={popover.anchor}
+          role="menu"
+          onClose={closePopover}
+          ariaLabel="Choose where to run this chat"
+        >
+          <RunLocationDropdown />
+        </Popover>
+      )}
+      {popover?.id === 'branch' && currentProject && projectRoot != null && (
+        <Popover anchor={popover.anchor} role="menu" onClose={closePopover} ariaLabel="Branches">
+          <BranchDropdown
+            root={projectRoot}
+            projectName={currentProject.name}
+            onBranchChange={setBranch}
+            onClose={closePopover}
+          />
         </Popover>
       )}
     </div>

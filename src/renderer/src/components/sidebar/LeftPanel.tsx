@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { motion, useMotionValue, useSpring } from 'framer-motion'
 import { useOverlay } from '../../state/OverlayContext'
 import { useWorkspace } from '../../state/WorkspaceContext'
 import {
@@ -14,7 +15,11 @@ import { SidebarItem } from './SidebarItem'
 import { SidebarModeSwitcher } from './SidebarModeSwitcher'
 import { ResizeHandle } from '../layout/ResizeHandle'
 import { usePanelResize } from '../../utils/usePanelResize'
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../../state/AppShellContext'
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH
+} from '../../state/AppShellContext'
 import { IconButtonSm, SectionHeader, SidebarSection } from './SectionHeader'
 import { SidebarProjectRow } from './SidebarProjectRow'
 import { SidebarRowList, SidebarSortableItem, SidebarThreadDragItem } from './SidebarSortableRow'
@@ -184,7 +189,27 @@ function LeftPanelBody({
   width: number
   onResize(desired: number): void
 }): React.JSX.Element {
-  const resize = usePanelResize({ edge: 'right', size: width, onResize })
+  /*
+   * 侧栏宽度的丝滑路径(Codex 对齐):
+   * - aside 是 motion.aside,宽度由 MotionValue + spring 驱动,拖拽中 DOM 直写
+   *   60fps,**不经 React 渲染**(旧实现每次 pointermove 都 setState,整个
+   *   AppShellContext 逐帧重渲染,就是卡顿来源);
+   * - 拖拽过程中只动 MotionValue;收手(onResizeEnd)才一次性提交 React state
+   *   (Codex Tkr 也是 didMove 门槛 + 收手持久化);
+   * - 收手宽度 < MIN(240,Codex `WHn(240)`) = 折叠(Codex 同阈值)。
+   */
+  const widthMV = useMotionValue(width)
+  const animatedWidth = useSpring(widthMV, { stiffness: 420, damping: 45 })
+  // 非拖拽来源(开关、窗口变化)同步进 MotionValue,spring 顺带播开/关动画
+  useEffect(() => {
+    widthMV.set(width)
+  }, [width, widthMV])
+  const resize = usePanelResize({
+    edge: 'right',
+    size: width,
+    onResize: (desired) => widthMV.set(Math.min(Math.max(desired, 0), SIDEBAR_MAX_WIDTH)),
+    onResizeEnd: (final) => onResize(final < SIDEBAR_MIN_WIDTH ? 0 : final)
+  })
   // collapseAllProjects 保留在 WorkspaceContext 里 —— Codex 是从
   // Project sidebar options → Organize sidebar 子菜单触发,不是独立按钮。
   const { pinnedItems, unpinnedProjects, recentChats, chatsLoading, selectProject } = useWorkspace()
@@ -225,14 +250,15 @@ function LeftPanelBody({
    * 静态声明会被动画压掉(实测 WS 之前写的 40px/0px 就是死声明)。
    */
   return (
-    <aside
+    <motion.aside
       /*
        * 类名与 Codex 完全一致 —— 没有 h-full / w-full / flex-col。
-       * 高度靠主行的 align-items:stretch,宽度走内联 style(Codex 也是内联)。
+       * 高度靠主行的 align-items:stretch;宽度走 MotionValue(Codex 也是
+       * 内联 style,且由 motion 驱动)。
        * 折叠态 width:0 + overflow 由子层的 max-w-full.overflow-hidden 裁掉。
        */
       className="app-shell-left-panel pointer-events-auto relative flex overflow-visible browser:bg-token-main-surface-primary"
-      style={{ paddingTop: 'var(--height-toolbar)', width: `${width}px` }}
+      style={{ paddingTop: 'var(--height-toolbar)', width: animatedWidth }}
     >
       {/* Codex 在这层写内联 min-width/width/opacity —— 折叠动画期间靠它裁剪,
           min-width 和 width 同值是为了不让内容把它挤宽 */}
@@ -534,7 +560,11 @@ function LeftPanelBody({
         maximumSize={SIDEBAR_MAX_WIDTH}
         isResizing={resize.isResizing}
         onPointerDown={resize.onPointerDown}
+        onClick={(e) => {
+          // Codex Tkr:双击手柄复位到 defaultSize
+          if (e.detail === 2) onResize(SIDEBAR_DEFAULT_WIDTH)
+        }}
       />
-    </aside>
+    </motion.aside>
   )
 }

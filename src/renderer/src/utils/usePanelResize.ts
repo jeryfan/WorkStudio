@@ -38,6 +38,8 @@ export function usePanelResize({
   const onPointerDown: React.PointerEventHandler<HTMLDivElement> = (e) => {
     if (e.button !== 0) return
     e.preventDefault()
+    // Codex Tkr:setPointerCapture —— 拖快了指针移出 16px 热区也不断线
+    e.currentTarget.setPointerCapture?.(e.pointerId)
 
     // 上一次若因异常没收尾,这里先摘干净
     abortRef.current?.abort()
@@ -49,6 +51,8 @@ export function usePanelResize({
     const startSize = size
     const pointerId = e.pointerId
     let lastSize = startSize
+    // Codex `didMove`:没拖动的点击不触发 onResizeEnd(双击复位走 onClick)
+    let didMove = false
     setIsResizing(true)
 
     window.addEventListener(
@@ -63,7 +67,10 @@ export function usePanelResize({
               : edge === 'top'
                 ? startY - ev.clientY
                 : ev.clientY - startY
-        lastSize = startSize + delta
+        const next = startSize + delta
+        if (next === lastSize) return
+        didMove = true
+        lastSize = next
         onResize(lastSize)
       },
       { signal: ac.signal }
@@ -73,7 +80,7 @@ export function usePanelResize({
       ac.abort()
       abortRef.current = null
       setIsResizing(false)
-      onResizeEnd?.(lastSize)
+      if (didMove) onResizeEnd?.(lastSize)
     }
     window.addEventListener('pointerup', finish, { signal: ac.signal })
     window.addEventListener('pointercancel', finish, { signal: ac.signal })

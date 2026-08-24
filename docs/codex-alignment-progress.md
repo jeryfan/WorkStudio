@@ -303,3 +303,52 @@ home/thread 两个分支分别渲染。截图验证:hero/建议卡/utility bar/c
   而非目标元素是"被裁剪/被遮挡"的信号。
 - 修过一次的层级注释也可能是错的:旧注释断言的 Codex 顺序与本次运行时实测相反,
   以运行时为准并更新了注释。
+
+## 2026-08-24 补3:侧栏拖拽丝滑化(MotionValue 化)
+
+**起因**:侧栏 resize 拖拽卡顿。对照 Codex bundle(`Tkr` + `yJr`)发现三处不一致:
+
+| 机制 | Codex | 旧实现 |
+|---|---|---|
+| 宽度驱动 | `motion.aside` + framer-motion MotionValue/spring,拖拽中 DOM 直写 60fps,不经 React 渲染 | 每次 pointermove `setSidebarWidthState` → 全 AppShellContext 逐帧重渲染 |
+| 指针捕获 | `e.currentTarget.setPointerCapture?.(e.pointerId)` | 无 |
+| 提交时机 | `didMove` 门槛,收手(onResizeEnd)才持久化;双击手柄复位 defaultSize | 每动一下都写 state(连带 lastWidth/open 联动),无双击复位 |
+
+**修法(对齐 Codex)**:
+- LeftPanel 的 aside → `motion.aside`,宽度 = `useSpring(useMotionValue(width),
+  {stiffness:420, damping:45})`;React state 变化(开关/窗口)经 effect 同步进 MV,
+  spring 顺带播开/关动画(Codex 开/关也动画)。
+- usePanelResize:加 `setPointerCapture` + `didMove` 门槛(没拖动的点击不再触发
+  onResizeEnd);拖拽中 LeftPanel 只写 MV,收手才一次性提交 React state;
+  收手 <240(Codex `WHn(240)`)= 折叠。
+- ResizeHandle 加双击复位(Codex `e.detail===2 → defaultSize`)。
+
+**实测**(CDP 合成拖拽):340→460(跟随)、拖过阈值→0(折叠)、Show sidebar→460
+(恢复)、双击→340(复位)、拖拽中内层 div 宽度不变(证明无 React 重渲染)。
+
+**注意**:右面板/底部面板/文件树的拖拽仍是 per-move React state(同一 hook 路径),
+如后续报告卡顿,同一 MotionValue 模式可平移(Codex 全部面板都是这一套)。
+
+**踩坑新条目:**
+- **Electron 后台窗口 rAF 节流会让 spring"看起来不动"**(本环境 rAF 600ms 仅 1 帧),
+  拖拽中读到的宽度是旧值,收手后才跳 —— 前台使用无此问题,验证动画类行为要知悉。
+
+## 2026-08-24 补4:utility bar 三个下拉(项目/运行位置/分支)
+
+**项目选择器**:上一轮已对齐 cmdk 结构,本轮无改动。
+
+**运行位置下拉**(新增 `RunLocationDropdown`,Codex `local-remote-dropdown` 实测):
+- "Work in" 头 + Local(当前,check)/ Connect Codex web(`<a role=menuitem>` →
+  openExternal chatgpt.com/codex/cloud)/ Send to cloud(禁用,实测同)。
+- "New worktree" 未渲染(worktree 流程缺失,图标已提取备用)。
+
+**分支下拉**(新增 `BranchDropdown` + `gitBranchService`):
+- w-72,搜索框占位 "Search <project> branches","Branches" 标签,当前分支带
+  check + "Uncommitted: N files"(git status --porcelain 实测行数),
+  "Create and checkout new branch…"。
+- 数据走协议 `command/exec`(git -C <root>),pill 改真实分支名(原硬编码 "main");
+  非 git 项目 pill 隐藏(Codex 该处显示 "Create git repository",未实现,已标记)。
+- **写操作沙箱教训**:默认策略下 git 写操作触发审批(首页无会话承载 → 永远挂着);
+  `workspace-write` 沙箱禁止写 .git(cannot lock ref)。最终写操作用
+  `dangerFullAccess`(用户显式发起的分支切换)。
+- 实测:create+checkout 新分支(pill 同步)→ checkout main(同步)→ 清理,全链路通过。
