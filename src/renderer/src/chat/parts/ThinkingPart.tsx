@@ -111,7 +111,7 @@ export function ThinkingPart({ content }: { content: ChatThinkingContent }): Rea
                       )}
                     >
                       <MarkdownPart
-                        content={{ kind: 'markdownContent', content: body }}
+                        content={{ kind: 'markdownContent', content: body, phase: null }}
                         withRoot={false}
                       />
                     </div>

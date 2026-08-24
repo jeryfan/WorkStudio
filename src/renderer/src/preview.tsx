@@ -11,6 +11,7 @@ import {
   ThreadTurnGap,
   ThreadUserMessage
 } from './chat/ThreadTurn'
+import { shouldShowProcessToggle } from './chat/model/turnSections'
 import { ChatContentPart } from './chat/parts/ChatContentPart'
 import { MarkdownPart } from './chat/parts/MarkdownPart'
 import { contentKey } from './chat/model/contentKey'
@@ -78,7 +79,7 @@ const rows: ThreadRow[] = [
         ],
         isActive: false
       },
-      { kind: 'markdownContent', content: ANSWER },
+      { kind: 'markdownContent', content: ANSWER, phase: 'final_answer' },
       {
         kind: 'toolInvocation',
         invocation: {
@@ -296,7 +297,13 @@ const rows: ThreadRow[] = [
         level: 'error',
         message: '上游对话 CSS 引用了 2 个无来源的变量',
         isLast: true
-      }
+      },
+      /*
+       * `phase: null` —— 复刻「调研下工控猫」那种轮次:有最终助手文本,但 provider
+       * 没标 phase。Codex 在这种轮次上**不给折叠头**,过程条目直接摊开;
+       * 上一版 WS 会显示「Worked for …」。对照 t1(`phase: 'final_answer'`,有折叠头)。
+       */
+      { kind: 'markdownContent', content: '两个变量已经钉在注册表里了。', phase: null }
     ],
     isComplete: true,
     isCanceled: false,
@@ -545,7 +552,11 @@ function Preview(): React.JSX.Element {
                         <>
                           <ThreadUserMessage unitKey={g.key}>
                             <MarkdownPart
-                              content={{ kind: 'markdownContent', content: g.request.text }}
+                              content={{
+                                kind: 'markdownContent',
+                                content: g.request.text,
+                                phase: null
+                              }}
                             />
                           </ThreadUserMessage>
                           <ThreadTurnGap />
@@ -593,6 +604,10 @@ const TURN_GROUPS: {
  * 分段判据刻意简化成"最后一条 markdown 是最终输出":预览页的数据是写死的
  * fixture,不需要 ChatView 那套跳过尾部推理的逻辑;要测的是**结构**
  * (折叠头 + 发丝线 + 段间隔 + 活动行),不是分段算法。
+ *
+ * 但**折叠头的显隐走真函数**(`shouldShowProcessToggle`)—— 这一条不能简化,
+ * 它正是本轮要验的东西:t1 的最终文本标了 `final_answer` → 有折叠头;
+ * t2 的标了 `null` → 没有折叠头、条目摊开。
  */
 function PreviewTurnBody({
   row
@@ -608,7 +623,10 @@ function PreviewTurnBody({
     <>
       {process.length > 0 && (
         <>
-          <ThreadProcessSection summary={`Worked for 1m 28s`}>
+          <ThreadProcessSection
+            showToggle={shouldShowProcessToggle({ final, process, cancelled: row.isCanceled })}
+            summary={`Worked for 1m 28s`}
+          >
             <ThreadItems>
               {process.map((content, index) => (
                 <ThreadItem key={contentKey(content, index)}>

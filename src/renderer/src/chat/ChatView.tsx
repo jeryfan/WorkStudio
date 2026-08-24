@@ -13,8 +13,7 @@ import {
   ThreadTurnGap,
   ThreadUserMessage
 } from './ThreadTurn'
-import { formatDuration } from '../utils/time'
-import type { ChatContent } from './model/content'
+import { shouldShowProcessToggle, splitTurnContent, turnSummaryLabel } from './model/turnSections'
 import { ChatContentPart } from './parts/ChatContentPart'
 import { MarkdownPart } from './parts/MarkdownPart'
 import { ChatResponseFooter } from './parts/ChatResponseFooter'
@@ -115,7 +114,7 @@ export function ChatView(): React.JSX.Element {
               {req && (
                 <ThreadUserMessage unitKey={group.key}>
                   <MarkdownPart
-                    content={{ kind: 'markdownContent', content: req.text }}
+                    content={{ kind: 'markdownContent', content: req.text, phase: null }}
                     textStyle="user-message"
                   />
                 </ThreadUserMessage>
@@ -137,6 +136,11 @@ export function ChatView(): React.JSX.Element {
               {res && process.length > 0 && (
                 <>
                   <ThreadProcessSection
+                    showToggle={shouldShowProcessToggle({
+                      final,
+                      process,
+                      cancelled: res.isCanceled
+                    })}
                     summary={turnSummaryLabel(res.startedAtMs, res.completedAtMs, process.length)}
                   >
                     <ThreadItems>
@@ -181,93 +185,6 @@ export function ChatView(): React.JSX.Element {
       </ThreadScrollContainer>
     </ChatActionsProvider>
   )
-}
-
-/**
- * 把一轮回复拆成「过程」与「最终输出」—— 照 Codex 的
- * `splitItemsIntoRenderGroups`(`assets/split-items-into-render-groups-CBZe4KAV.js`)。
- *
- * ## Codex 的真实规则(上一版我猜错了)
- *
- * 我上一版写的是"**尾部连续的** markdown 全算最终输出"。Codex 的实现是:
- *
- * ```js
- * let z = R.length - 1
- * while (R[z]?.type === 'mcp-server-elicitation') --z        // 先跳过尾部的表单请求
- * if (!isAssistantMessage(R[z])) {                            // 最后一条不是回复?
- *   let e = z
- *   for (;;) {                                                // 继续往前跳
- *     let t = R[e]
- *     if (t?.type !== 'mcp-server-elicitation' &&
- *         t?.type !== 'subagent-activity' &&
- *         (t?.type !== 'reasoning' || !t.completed)) break     // 只跳这三类
- *     --e
- *   }
- *   if (isAssistantMessage(R[e]) && R[e].phase === 'final_answer') z = e
- * }
- * const V = isAssistantMessage(R[z]) ? R[z] : null
- * if (V) R.splice(z, 1)                                        // ← 只摘走**一条**
- * ```
- *
- * 两处关键差别:
- *
- * 1. **只有一条 assistant message 进最终段**(`splice(z, 1)`),它前面的 assistant
- *    message 全都留在过程段里。我那版会把尾部所有连续 markdown 一起搬走 ——
- *    模型分两段输出正文时(中间没有工具调用),第一段会被错误地当成最终输出的一部分。
- * 2. **可以跳过尾部的"已完成推理"去找它**。也就是说"回复之后又来了一段推理"时,
- *    最终输出仍然是那条回复,推理留在过程里。位置判据不是简单的"最后一条"。
- *
- * WS 的 `ChatContent` 没有 `phase` 字段(协议不给),所以 `phase === 'final_answer'`
- * 这一条落不了地 —— 退化成"取最后一条 markdown"。这是数据缺失,不是判断错误:
- * Codex 在拿不到 phase 时走的也是 `isAssistantMessage(R[z])` 那条直接分支。
- */
-function splitTurnContent(content: ChatContent[]): {
-  process: ChatContent[]
-  final: ChatContent[]
-} {
-  let z = content.length - 1
-  if (content[z]?.kind !== 'markdownContent') {
-    // 往前跳过"已完成的推理"(WS 没有 elicitation / subagent-activity 两类)
-    let e = z
-    while (e >= 0 && content[e].kind === 'thinking' && !isActiveThinking(content[e])) e -= 1
-    if (content[e]?.kind === 'markdownContent') z = e
-  }
-  if (content[z]?.kind !== 'markdownContent') return { process: content, final: [] }
-  // 只摘走这一条 —— 它前面的一切(含别的 markdown)都是过程
-  return { process: [...content.slice(0, z), ...content.slice(z + 1)], final: [content[z]] }
-}
-
-function isActiveThinking(item: ChatContent): boolean {
-  return item.kind === 'thinking' && item.isActive
-}
-
-/**
- * 过程段折叠头的文案 —— Codex 的 `CollapsedTurnSummary`(local-conversation-turn 源码 `ca`)。
- *
- * **三档**,不是一档:
- *
- * | 条件 | Codex 文案 id | 文案 |
- * |---|---|---|
- * | 有 `workedForItem`(运行中) | —— | 一个每秒 tick 的实时计时器 |
- * | 有 `workedDurationMs` | `localConversation.workedFor` | `Worked for {time}` |
- * | 都没有 | `localConversation.previousMessagesSummary` | `{count, plural, one {# previous message} other {# previous messages}}` |
- *
- * 上一版我在没有时长时编了一句 `Worked for a moment` —— Codex 不说这句,
- * 它换成**数条数**。这不是措辞偏好:没跑过工具的轮次谈"工作了多久"本身就没意义,
- * 而"N 条之前的消息"描述的是折叠起来的**内容量**,才是折叠头该给的信息。
- *
- * 运行中的实时计时器没做:WS 的 turn 模型没有"过程段仍在进行"这个状态位
- * (`res.completedAtMs == null` 只说明这一轮没结束,不等于过程段在跑)。
- */
-function turnSummaryLabel(
-  startedAtMs: number | null | undefined,
-  completedAtMs: number | null | undefined,
-  processCount: number
-): string {
-  if (startedAtMs != null && completedAtMs != null && completedAtMs > startedAtMs) {
-    return `Worked for ${formatDuration(completedAtMs - startedAtMs)}`
-  }
-  return processCount === 1 ? '1 previous message' : `${processCount} previous messages`
 }
 
 /** `span[data-assistant-message-sent-time]` 里那个时间 —— Codex 实测形如 `Friday 12:01 AM` */

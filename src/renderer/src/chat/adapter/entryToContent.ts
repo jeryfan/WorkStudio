@@ -76,7 +76,7 @@ export function reasoningTitle(parts: readonly string[]): string | null {
 function entryToContent(entry: Entry, ctx: EntryContext): ChatContent | null {
   switch (entry.type) {
     case 'agentMessage':
-      return { kind: 'markdownContent', content: entry.text }
+      return { kind: 'markdownContent', content: entry.text, phase: entry.phase }
 
     case 'reasoning': {
       // summary 是模型自己写的摘要，content 是完整推理。优先展示 summary——
@@ -98,7 +98,8 @@ function entryToContent(entry: Entry, ctx: EntryContext): ChatContent | null {
 
     // 排队消息：轮次开头之后又出现的用户消息，作为正文的一部分显示
     case 'userMessage':
-      return { kind: 'markdownContent', content: userText(entry) }
+      // 排队消息不是助手文本,谈不上 commentary / final_answer
+      return { kind: 'markdownContent', content: userText(entry), phase: null }
 
     /*
      * 计划**不在流里渲染**。

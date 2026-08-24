@@ -19,6 +19,22 @@ export interface ChatMarkdownContent {
   kind: 'markdownContent'
   /** 原始 Markdown 文本。不预解析：流式期间每帧都会变 */
   content: string
+  /**
+   * 这段助手文本是**中间旁白**还是**最终回答** —— 协议 `agentMessage.phase`。
+   *
+   * 字面值照抄协议(`MessagePhase = 'commentary' | 'final_answer'`)而不译成
+   * 驼峰:Codex 源码里判的也是 `phase === 'final_answer'`,两边写法一致才对得起来,
+   * 中间加一层映射只会多一个能写错的地方。
+   *
+   * `null` 是**「阶段未知」而不是「不是最终回答」**。协议注释写得很明确:
+   * "Providers do not emit this consistently, so callers must treat `None` as
+   * phase unknown and keep compatibility behavior for legacy models."
+   * 实测本机 agent **一条都不发**(见 ChatView 的 `hasFinalAssistantStarted`),
+   * 所以凡是拿它做判断的地方都要想清楚 null 该落到哪一边。
+   *
+   * 非助手来源的 markdown(排队的用户消息、推理正文里嵌的 markdown)一律 null。
+   */
+  phase: 'commentary' | 'final_answer' | null
 }
 
 /**

@@ -47,8 +47,7 @@ export function InputOutputToolPart({
 }): React.JSX.Element {
   const [rawOpen, setRawOpen] = useState(false)
 
-  const hasResult =
-    data.blocks.length > 0 || data.structuredJson != null || data.error != null
+  const hasResult = data.blocks.length > 0 || data.structuredJson != null || data.error != null
   const running = toolStatus(invocation) === 'running'
 
   return (

@@ -270,55 +270,90 @@ export function ThreadItem({
  *
  * 默认折叠:实测重新打开已完成会话时 `aria-expanded="false"`。
  * 运行中是否默认展开还没实测,所以把初始值交给调用方(`defaultExpanded`)。
+ *
+ * ## `showToggle` 为假时:**按钮和发丝线一起消失**
+ *
+ * 这不是"折叠头一直在、只是不能点",Codex 源码(`Io`)把两者放在同一个三元里:
+ *
+ * ```jsx
+ * {showToggle ? <>
+ *    <CollapsedTurnSummary …/>
+ *    <div className="pt-1 …"><div className="w-full border-t border-token-border"/></div>
+ * </> : null}
+ * …
+ * {!isCollapsed && content != null ? (
+ *   <motion.div …>{showToggle ? <Gap/> : null}{content}</motion.div>
+ * ) : null}
+ * ```
+ *
+ * 三个连带的细节:
+ * - `isCollapsed = showToggle && collapsed` —— 没有折叠头就不可能是折叠态,
+ *   过程条目**无条件摊开**。
+ * - 内容前面那个 16px 间隔槽也只在有折叠头时才有 —— 它隔开的是"发丝线与条目",
+ *   没有发丝线就没有要隔开的东西。
+ * - 入场动画的 `motion.div` **两种情况都在**(不是只在展开时才包),
+ *   所以摊开态的进入方式与展开态一致。
+ *
+ * 什么时候为假见 `ChatView` 的 `shouldShowProcessToggle` —— 一句话:
+ * 最终回答那条的 `phase` 不是 `final_answer` 就没有折叠头。
  */
 export function ThreadProcessSection({
   children,
   summary,
+  showToggle = true,
   defaultExpanded = false
 }: {
   children: ReactNode
-  /** 折叠头文案 —— `Worked for 1m 28s` 或 `3 previous messages`,见 workedForLabel */
+  /** 折叠头文案 —— `Worked for 1m 28s` 或 `3 previous messages`,见 turnSummaryLabel */
   summary: string
+  /** Codex 的 `showToggle`(`Ln`)。为假时没有按钮、没有发丝线,内容摊开 */
+  showToggle?: boolean
   defaultExpanded?: boolean
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded)
+  // Codex 的 `isCollapsed = Ln && Nn` —— 没有折叠头就谈不上折叠
+  const collapsed = showToggle && !expanded
   return (
     <div className="flex flex-col">
-      <div className="text-size-chat text-token-text-secondary">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={(e) => {
-            /*
-             * **先记基准,再改 state。** 滚动容器是反向 flex(贴底跟随),
-             * 于是内容长高时 P 之前的部分整体上移 —— 折叠头就在自己展开内容的
-             * 前面,点一下它自己就往上跳(实测 51px / 74px)。
-             *
-             * Codex 在**同一个位置**做同一件事:`Ge(e.currentTarget, u)`
-             * (local-conversation-turn 源码,`u` 是窗口 zoom),
-             * 详见 preserveViewportPosition 的注释。
-             * 基准必须在这个同步回调里取 —— 等到 effect 里布局已经变了。
-             */
-            preserveViewportPosition(e.currentTarget, windowZoom())
-            setExpanded((v) => !v)
-          }}
-          className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
-        >
-          <span>
-            <span className="text-token-conversation-body">{summary}</span>
-          </span>
-          <SubmenuChevronIcon
-            className={cx(
-              'icon-2xs text-token-conversation-summary-trailing transition-transform duration-basic',
-              // Codex 折叠时写的是显式的 `rotate-0`,不是"不加类" —— 照抄
-              expanded ? 'rotate-90' : 'rotate-0'
-            )}
-          />
-        </button>
-      </div>
-      <div className="pt-1 text-size-chat text-token-text-secondary">
-        <div className="w-full border-t border-token-border" />
-      </div>
+      {showToggle && (
+        <>
+          <div className="text-size-chat text-token-text-secondary">
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={(e) => {
+                /*
+                 * **先记基准,再改 state。** 滚动容器是反向 flex(贴底跟随),
+                 * 于是内容长高时 P 之前的部分整体上移 —— 折叠头就在自己展开内容的
+                 * 前面,点一下它自己就往上跳(实测 51px / 74px)。
+                 *
+                 * Codex 在**同一个位置**做同一件事:`Ge(e.currentTarget, u)`
+                 * (local-conversation-turn 源码,`u` 是窗口 zoom),
+                 * 详见 preserveViewportPosition 的注释。
+                 * 基准必须在这个同步回调里取 —— 等到 effect 里布局已经变了。
+                 */
+                preserveViewportPosition(e.currentTarget, windowZoom())
+                setExpanded((v) => !v)
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-transparent text-size-chat focus-visible:ring-2 focus-visible:ring-token-focus-border focus-visible:outline-none"
+            >
+              <span>
+                <span className="text-token-conversation-body">{summary}</span>
+              </span>
+              <SubmenuChevronIcon
+                className={cx(
+                  'icon-2xs text-token-conversation-summary-trailing transition-transform duration-basic',
+                  // Codex 折叠时写的是显式的 `rotate-0`,不是"不加类" —— 照抄
+                  expanded ? 'rotate-90' : 'rotate-0'
+                )}
+              />
+            </button>
+          </div>
+          <div className="pt-1 text-size-chat text-token-text-secondary">
+            <div className="w-full border-t border-token-border" />
+          </div>
+        </>
+      )}
       {/*
        * 展开的内容是**第三个兄弟**,而且带入场动画 —— Codex 用 AnimatePresence
        * 包一个 `motion.div`:透明度 0→1、`translateY(-8px)→0`,
@@ -326,13 +361,13 @@ export function ThreadProcessSection({
        * 之前是硬切,展开会"跳"出来。
        */}
       <AnimatePresence initial={false}>
-        {expanded && (
+        {!collapsed && (
           <motion.div
             initial={{ opacity: 0, transform: 'translateY(-8px)' }}
             animate={{ opacity: 1, transform: 'translateY(0)' }}
             transition={{ duration: 0.22, ease: [0.33, 1, 0.68, 1] }}
           >
-            <ThreadTurnGap />
+            {showToggle && <ThreadTurnGap />}
             <div className="flex flex-col gap-[var(--conversation-item-gap,16px)]">{children}</div>
           </motion.div>
         )}
