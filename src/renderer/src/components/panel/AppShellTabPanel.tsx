@@ -33,8 +33,10 @@ class TabPanelErrorBoundary extends Component<
     return { error }
   }
 
-  override componentDidCatch(error: Error): void {
+  override componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('[AppShellTabPanel] tab content crashed:', error)
+    // 组件栈单列输出,CDP 取证时按行好读
+    console.error('[AppShellTabPanel] component stack:', info.componentStack)
   }
 
   override componentDidUpdate(prevProps: { resetKey: string }): void {

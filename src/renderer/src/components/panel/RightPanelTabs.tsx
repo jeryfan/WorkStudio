@@ -1,4 +1,5 @@
 import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
+import { runCommand } from '../../state/commands'
 import { ExpandPanelIcon, RestorePanelIcon } from '../icons'
 import { Tooltip } from '../tooltip/Tooltip'
 import { APP_SHELL_BUTTON_CLASS, APP_SHELL_BUTTON_SECONDARY_CLASS } from './appShellButtonClass'
@@ -69,7 +70,9 @@ export function RightPanelTabs(): React.JSX.Element {
  * Codex 点开后若 active tab 是空 URL 的 browser tab 会聚焦其地址栏 —— WS 未接。
  */
 function ExpandPanelButton(): React.JSX.Element {
-  const { rightPanelWidthMode, toggleRightPanelFullWidth } = useAppShell()
+  // Codex:按钮走命令注册表 `xM('toggleMaximizeSidePanel', 'side_panel_full_width_button')`
+  // (app-initial:211187);handler 由 AppCommands 注册(TM)。
+  const { rightPanelWidthMode } = useAppShell()
   const full = rightPanelWidthMode === 'full'
   const label = full ? 'Restore panel width' : 'Expand panel'
   return (
@@ -79,7 +82,7 @@ function ExpandPanelButton(): React.JSX.Element {
           type="button"
           aria-label={label}
           aria-pressed={full}
-          onClick={toggleRightPanelFullWidth}
+          onClick={() => runCommand('toggleMaximizeSidePanel', 'side_panel_full_width_button')}
           className={full ? APP_SHELL_BUTTON_SECONDARY_CLASS : APP_SHELL_BUTTON_CLASS}
         >
           {full ? (

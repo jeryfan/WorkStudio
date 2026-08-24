@@ -9,6 +9,8 @@ import { BrowserTab } from './BrowserTab'
 export interface BrowserTabState {
   /** 当前 URL;空 = 新标签页(标题 "New tab",空态引导 "Start browsing") */
   url: string
+  /** 缩放百分比(Codex 每个 browser tab 各自的 zoomPercent;默认 100) */
+  zoomPercent: number
 }
 
 /** renderPanel 额外收到的 props(Codex browser tab 的 props 含初始 url 等) */
@@ -27,7 +29,7 @@ export function createBrowserTabDescriptor(url = ''): AppShellTabDescriptorInput
     tabId: newBrowserTabId(),
     title: 'New tab',
     icon: <BrowserGlobeIcon className="size-full" />,
-    defaultState: () => ({ url }),
+    defaultState: () => ({ url, zoomPercent: 100 }),
     renderPanel: (props) => <BrowserTab {...props} initialUrl={url} />
   }
 }

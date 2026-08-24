@@ -6,11 +6,12 @@ import {
   BrowserReloadIcon,
   BrowserGlobeIcon,
   OpenExternalIcon,
-  DotsIcon,
   AnnotateIcon
 } from '../icons'
 import { APP_SHELL_BUTTON_CLASS } from './appShellButtonClass'
 import { TAB_PREVIEW_PIN_EXEMPT } from './AppShellTabPanel'
+import { BrowserOptionsMenu } from './BrowserOptionsMenu'
+import { BrowserFindBar } from './BrowserFindBar'
 
 /** 地址栏输入归一化：无协议补 https://，仅允许 http/https */
 function normalizeUrl(input: string): string | null {
@@ -56,8 +57,16 @@ export function BrowserTab({
   const [canBack, setCanBack] = useState(false)
   const [canForward, setCanForward] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const viewRef = useRef<HTMLElement | null>(null)
   const addressRef = useRef<HTMLInputElement | null>(null)
+  const zoomPercent = tabState.zoomPercent
+
+  // 缩放应用到 webview(Codex:host 对受控浏览器 setZoom;WS:webview.setZoomFactor)
+  useEffect(() => {
+    const view = viewRef.current as unknown as { setZoomFactor?(f: number): void } | null
+    view?.setZoomFactor?.(zoomPercent / 100)
+  }, [zoomPercent, url])
 
   // 新 tab 自动聚焦地址栏(data-browser-sidebar-primary-focus-target="address",实测)
   useEffect(() => {
@@ -82,7 +91,7 @@ export function BrowserTab({
       const current = view.getURL()
       if (current) {
         setAddress(current)
-        setTabState({ url: current })
+        setTabState({ ...tabState, url: current })
       }
     }
     const onNavigate = (): void => syncNav()
@@ -121,7 +130,7 @@ export function BrowserTab({
     const next = normalizeUrl(input)
     if (!next) return
     setAddress(next)
-    setTabState({ url: next })
+    setTabState({ ...tabState, url: next })
     const view = viewRef.current as unknown as { loadURL(url: string): Promise<void> } | null
     view?.loadURL(next)?.catch(() => {})
   }
@@ -239,16 +248,26 @@ export function BrowserTab({
               </div>
               <span role="status" className="sr-only" />
               <div className="max-w-8 origin-right scale-100 overflow-visible opacity-100 transition-[max-width,opacity,transform] duration-basic ease-basic motion-reduce:transition-none">
-                {/* Browser options:菜单未实现(全是宿主浏览器能力),只落 trigger DOM */}
-                <button
-                  type="button"
-                  aria-label="Browser options"
-                  data-browser-sidebar-skip-address-commit="true"
-                  data-state="closed"
-                  className={`${APP_SHELL_BUTTON_CLASS} outline-hidden cursor-interaction`}
-                >
-                  <DotsIcon className="icon-xs rotate-90" />
-                </button>
+                {/* Browser options(Codex `thread.browser.options`;可实现的项全接) */}
+                <BrowserOptionsMenu
+                  zoomPercent={zoomPercent}
+                  pageActionsDisabled={url === ''}
+                  onZoomChange={(next) => setTabState({ ...tabState, zoomPercent: next })}
+                  onOpenFindInPage={() => setFindOpen(true)}
+                  onCaptureScreenshot={() => {
+                    const view = viewRef.current as unknown as {
+                      capturePage?: () => Promise<{ toDataURL(): string }>
+                    } | null
+                    void view?.capturePage?.().then((image) => {
+                      const host = new URL(url).hostname.replace(/\W+/g, '-') || 'page'
+                      void window.codexBridge.browser.saveDataUrl(
+                        image.toDataURL(),
+                        `screenshot-${host}.png`
+                      )
+                    })
+                  }}
+                  onClearData={(kind) => void window.codexBridge.browser.clearData(kind)}
+                />
               </div>
             </div>
           </div>
@@ -264,6 +283,11 @@ export function BrowserTab({
 
         {/* 内容区 */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Find in page:find bar 覆盖在内容区顶部(Codex 的查找条由宿主叠加层渲染,
+              DOM 不可取证;此处为同设计语义的推断实现) */}
+          {findOpen && url !== '' && (
+            <BrowserFindBar viewRef={viewRef} onClose={() => setFindOpen(false)} />
+          )}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
             {url === '' ? (
               <div className="flex w-full flex-col items-center justify-center px-4 py-8 text-center absolute inset-0 select-none">

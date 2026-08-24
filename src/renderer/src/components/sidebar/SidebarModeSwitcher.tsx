@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react-dom'
 import { CheckIcon, ChevronIcon } from '../icons'
@@ -65,6 +65,10 @@ export function SidebarModeSwitcher(): React.JSX.Element {
    * 触发器/浮层节点用 state 存而不是 ref —— 外部点击判定要在事件里读它们,
    * 用 ref 会被 react-hooks/refs 判成「渲染期访问 ref」(它只看名字)。
    * 存成 state 也顺带让 effect 能正确地依赖节点。
+   *
+   * 注意:ref 回调必须身份稳定(useCallback)——内联箭头每次渲染都是新函数,
+   * React 会先 detach(null) 再 attach(el),各触发一次 setState,形成
+   * 提交期死循环(Maximum update depth)。这是既有 bug,面板流把它暴露了。
    */
   const [triggerEl, setTriggerEl] = useState<HTMLButtonElement | null>(null)
   const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null)
@@ -75,6 +79,22 @@ export function SidebarModeSwitcher(): React.JSX.Element {
     middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate
   })
+
+  const setTriggerRef = useCallback(
+    (el: HTMLButtonElement | null) => {
+      setTriggerEl(el)
+      floating.refs.setReference(el)
+    },
+    [floating.refs]
+  )
+
+  const setMenuRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      setMenuEl(el)
+      floating.refs.setFloating(el)
+    },
+    [floating.refs]
+  )
 
   // Escape 与点击外部关闭 —— 菜单没有遮罩层(Codex 也没有)
   useEffect(() => {
@@ -101,10 +121,7 @@ export function SidebarModeSwitcher(): React.JSX.Element {
     <>
       <button
         type="button"
-        ref={(el) => {
-          setTriggerEl(el)
-          floating.refs.setReference(el)
-        }}
+        ref={setTriggerRef}
         aria-label={`Switch mode, current mode: ${currentMode.title}`}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -129,10 +146,7 @@ export function SidebarModeSwitcher(): React.JSX.Element {
       {open &&
         createPortal(
           <div
-            ref={(el) => {
-              setMenuEl(el)
-              floating.refs.setFloating(el)
-            }}
+            ref={setMenuRef}
             role="menu"
             aria-orientation="vertical"
             data-radix-menu-content=""

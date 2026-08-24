@@ -3,6 +3,10 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerFileIpc } from './fileIpc'
 import { registerThemeIpc } from './themeIpc'
+import { registerContextMenuIpc } from './contextMenuIpc'
+import { registerOpenInIpc } from './openInIpc'
+import { registerCommandIpc } from './commandIpc'
+import { registerBrowserIpc } from './browserIpc'
 import { AgentRuntime } from './agent/AgentRuntime'
 import { ProjectRegistry } from './workspace/ProjectRegistry'
 import { registerProjectMethods } from './workspace/projectMethods'
@@ -92,6 +96,10 @@ app.whenReady().then(() => {
   // 文件服务 IPC（file:listDir / file:readFile）
   registerFileIpc(projectRegistry)
   registerThemeIpc()
+  registerContextMenuIpc()
+  registerOpenInIpc()
+  registerCommandIpc()
+  registerBrowserIpc()
 
   // agent 运行时先于窗口启动：路由要在渲染层首次发消息前就位。
   // 二进制不可用时不阻塞界面，状态经 app/agent/status 暴露给渲染层。

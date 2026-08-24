@@ -1,36 +1,29 @@
 import { useEffect, useState } from 'react'
 import { fileService } from '../../../services'
 import { useWorkspace } from '../../../state/WorkspaceContext'
-import { ResizeHandle } from '../../layout/ResizeHandle'
-import { usePanelResize } from '../../../utils/usePanelResize'
 import { highlightCode } from './highlight'
 import { FileNavbar } from './FileNavbar'
 import { CodePane } from './CodePane'
-import { FileTreePane } from './FileTreePane'
+import { WorkspaceTreePane } from './WorkspaceTreePane'
 import { FilesFolderIcon } from '../../icons'
-import { TAB_PREVIEW_PIN_EXEMPT } from '../AppShellTabPanel'
+import { baseName } from '../../../utils/workspacePath'
+import { useWordWrap } from '../../../state/fileViewerPrefs'
 import type { FilesTabRenderProps } from '../filesTabDescriptor'
 
 /**
- * File tab —— 面板内容与 Codex 的 file viewer(`review.fileSource.*`)对齐中。
- *
- * 本轮:描述符 props 形态(Codex `HY` 的 props 模式:path 固定在 tab 上,
- * 换文件 = 开新 tab 而不是改 state)+ 外壳层级对齐实测:
+ * File tab —— Codex `ASo`(app-initial:425342)的结构移植:
  *
  *   div.flex.h-full.min-h-0.flex-col.bg-token-main-surface-primary
- *   ├ nav[aria-label="File path"]…(FileNavbar;Codex 结构 = 面包屑 ol +
- *   │   "Toggle file tree" 按钮,原型里的 VS Code 分段按钮下轮随树一起重写)
+ *   ├ s0a(FileNavbar):面包屑(可点下拉)+ 尾部控制组(options/Open in/Toggle tree)
  *   └ div.flex.min-h-0.flex-1
- *     ├ div.min-w-0.flex-1  ← 预览;无 path 时是 Codex 空态(h2 "Open file" +
+ *     ├ div.min-w-0.flex-1  ← 预览;无 path 时是 Codex 空态(Zyo 家族,h2 "Open file" +
  *     │   "Select a file from the workspace tree",32px 文件夹图标)
- *     └ div.relative.flex.h-full.shrink-0.border-l.border-token-border-default
- *         style: max-width:60%; width:<树宽>   [data-tab-preview-pin-exempt]
- *       ├ ResizeHandle(edge=left)
- *       └ div.flex.min-h-0.min-w-0.flex-1.flex-col  ← FileTreePane
+ *     └ WorkspaceTreePane(Codex `hyo` 外壳:全局开合 + 拖宽 + UPr 弹簧;内部 qfo)
  *
- * 已知的下轮项(Files tab 完整对齐,单独一轮):自绘虚拟树替 react-arborist、
- * 过滤框(input#workspace-directory-tree-search)、file-tree-container 自定义元素、
- * 面包屑 nav 内部结构、代码区的行号/滚动钉住。
+ * 与 Codex 的已知差异(标记):
+ * - 富编辑器(Codex `Myo`:pierre code viewer、markdown 富预览、git blame gutter)
+ *   未复刻 —— 预览仍是 shiki 静态高亮;options 菜单的 rich view / git blame 项
+ *   因而不渲染(Codex 对纯文本文件本就只有 copy ×2 + word wrap,实测一致)。
  */
 export function FileTab({
   path,
@@ -40,24 +33,14 @@ export function FileTab({
   const [html, setHtml] = useState<string | null>(null)
   const [lineCount, setLineCount] = useState(0)
   const [loading, setLoading] = useState(false)
-  /*
-   * 文件树宽度 —— Codex 实测默认 250、max-width 60%;手柄 edge='left'
-   * (指针右移 = 树变窄),与右面板同一种朝向。
-   */
-  const [treeWidth, setTreeWidth] = useState(250)
-  const [lastTreeWidth, setLastTreeWidth] = useState(250)
-  const treeVisible = treeWidth > 0
-  const applyTreeWidth = (desired: number): void => {
-    // 与侧栏同构:低于最小值先钉住,越过折叠阈值才收起
-    const next = desired <= 80 ? 0 : Math.min(Math.max(desired, 160), 480)
-    setTreeWidth(next)
-    if (next > 0) setLastTreeWidth(next)
-  }
-  const treeResize = usePanelResize({ edge: 'left', size: treeWidth, onResize: applyTreeWidth })
+  const wordWrap = useWordWrap()
 
   const projectId = projectIdProp ?? 'ideact'
   const { projects } = useWorkspace()
-  const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId
+  const project = projects.find((p) => p.id === projectId)
+  const projectName = project?.name ?? projectId
+  const rootAbsolutePath = project?.rootPaths[0] ?? null
+  const rootBaseName = rootAbsolutePath != null ? baseName(rootAbsolutePath) : projectName
 
   useEffect(() => {
     if (!path) {
@@ -92,10 +75,12 @@ export function FileTab({
   return (
     <div className="flex h-full min-h-0 flex-col bg-token-main-surface-primary">
       <FileNavbar
+        projectId={projectId}
         projectName={projectName}
+        rootBaseName={rootBaseName}
+        rootAbsolutePath={rootAbsolutePath}
         selectedPath={path === '' ? null : path}
-        treeVisible={treeVisible}
-        onToggleTree={() => setTreeWidth((w) => (w > 0 ? 0 : lastTreeWidth))}
+        onSelectFile={onSelectFile}
       />
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
@@ -117,34 +102,17 @@ export function FileTab({
               </div>
             </div>
           ) : (
-            <CodePane html={html} loading={loading} lineCount={lineCount} />
+            /* word wrap 是 Codex 的全局查看器偏好(vB),作用于代码容器 */
+            <div className={wordWrap ? '[&_.code-shiki]:whitespace-pre-wrap h-full' : 'h-full'}>
+              <CodePane html={html} loading={loading} lineCount={lineCount} />
+            </div>
           )}
         </div>
-        {treeVisible && (
-          // Codex 的树列带 data-tab-preview-pin-exempt:点树不 pin 预览 tab
-          <div
-            {...{ [TAB_PREVIEW_PIN_EXEMPT]: 'true' }}
-            className="relative flex h-full shrink-0 border-l border-token-border-default"
-            style={{ maxWidth: '60%', width: treeWidth }}
-          >
-            <ResizeHandle
-              edge="left"
-              ariaLabel="Resize file tree"
-              currentSize={treeWidth}
-              minimumSize={160}
-              maximumSize={480}
-              isResizing={treeResize.isResizing}
-              onPointerDown={treeResize.onPointerDown}
-            />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <FileTreePane
-                projectId={projectId}
-                selectedPath={path === '' ? null : path}
-                onPick={(p) => onSelectFile(p, { isPreview: true })}
-              />
-            </div>
-          </div>
-        )}
+        <WorkspaceTreePane
+          projectId={projectId}
+          activeFilePath={path === '' ? null : path}
+          onSelectFile={onSelectFile}
+        />
       </div>
     </div>
   )

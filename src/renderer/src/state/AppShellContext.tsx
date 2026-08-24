@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
+import type { AppContextMenuItem } from '../components/menu/AppContextMenu'
 
 /**
  * AppShell 状态 —— Codex 侧没有对应名的 React Context(它的状态是自研 signals store),
@@ -193,6 +194,18 @@ export interface AppShellTabDescriptor<S = any> {
   defaultState?: () => S
   /** Codex `resetState`:resetTabState 时在现有值上收敛(如清滚动位置);没有则回 defaultState */
   resetState?: (prev: S) => S
+  /**
+   * Codex `contextMenuItems`:tab 右键菜单里描述符自带的项(在 Close 组之前);
+   * 可以直接给数组,也可以返回 Promise(如文件 tab 需要先取 open targets)。
+   */
+  contextMenuItems?: () => AppContextMenuItem[] | Promise<AppContextMenuItem[]>
+  /**
+   * Codex `onBeforeClose`:关闭前否决钩子 —— 返回 false 阻止关闭
+   * (side chat 的关闭确认弹窗用它:否决 → 弹窗 → 确认后清掉钩子再关)。
+   */
+  onBeforeClose?: () => boolean
+  /** Codex `onClose`:tab 被关闭后回调(side chat 用它丢弃会话) */
+  onClose?: () => void
   renderPanel(props: AppShellTabRenderProps<S>): ReactNode
 }
 
@@ -255,10 +268,45 @@ export interface AppShellTabPanelController {
   reorderTab(fromId: string, toId: string): void
   /** 更新 tab 元信息;允许改 tabId(Files tab 选中文件后 id 跟随路径,实测行为) */
   updateTab(tabId: string, patch: Partial<AppShellTabDescriptor>): void
+  /** Codex `closeOtherTabs`:关闭除指定 tab 外所有可关 tab */
+  closeOtherTabs(tabId: string): void
+  /** Codex `closeTabsToRight`:关闭指定 tab 右侧所有可关 tab */
+  closeTabsToRight(tabId: string): void
   /** Codex `resetTabState`:key 自增(触发 tabpanel 重挂载)+ 值收敛 */
   resetTabState(tabId: string): void
   tabStateById: Record<string, TabStateEntry>
   setTabState(tabId: string, next: unknown | ((prev: unknown) => unknown)): void
+}
+
+/* ==================== 文件树(右面板 Files/Review 共用,Codex `dD`/`CWn`) ====================
+ *
+ * Codex:树的开合是**全局持久化 boolean**(localStorage `app-shell-file-tree-open`,
+ * 默认 false;`tWn`),宽度是全局内存值(默认 250,`CWn`)——不跟 tab 走。
+ * 拖拽/开合规则见 WorkspaceTreePane(Codex `hyo`)。
+ */
+export const FILE_TREE_DEFAULT_WIDTH = 250
+/** Codex `byo` —— 最小宽 */
+export const FILE_TREE_MIN_WIDTH = 200
+/** Codex `WHn(200)` —— 拖过此宽度直接收起 */
+export const FILE_TREE_COLLAPSE_AT = FILE_TREE_MIN_WIDTH * 0.5
+/** Codex `yyo` —— 最大宽 = 面板宽的比例上限 */
+export const FILE_TREE_MAX_RATIO = 0.6
+const FILE_TREE_OPEN_STORAGE_KEY = 'app-shell-file-tree-open'
+
+function readStoredFileTreeOpen(): boolean {
+  try {
+    return localStorage.getItem(FILE_TREE_OPEN_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeStoredFileTreeOpen(open: boolean): void {
+  try {
+    localStorage.setItem(FILE_TREE_OPEN_STORAGE_KEY, String(open))
+  } catch {
+    /* 静默 */
+  }
 }
 
 /* ==================== 底部面板高度(Codex `LPr`/`BPr`/`VPr`) ====================
@@ -350,6 +398,14 @@ interface AppShellContextValue {
   setHeaderSlotWidth(side: 'start' | 'end', width: number): void
   rightPanelController: AppShellTabPanelController
   bottomPanelController: AppShellTabPanelController
+  /** Codex `dD`:文件树全局开合(持久化) */
+  fileTreeOpen: boolean
+  /** Codex `CWn`:文件树宽度(内存值,默认 250) */
+  fileTreeWidth: number
+  /** Codex `$Un(scope, !w)`:开合切换(Toggle file tree 按钮 / ⌘⇧E) */
+  toggleFileTree(): void
+  /** 拖拽设置宽度(Codex hyo 的 setSize:低于折叠阈值收起,否则 clamp) */
+  setFileTreeWidth(desired: number, containerWidth: number): void
   slots: Partial<Record<AppShellSlotKey, ReactNode>>
   registerSlot(key: AppShellSlotKey, node: ReactNode): void
   unregisterSlot(key: AppShellSlotKey): void
@@ -374,6 +430,9 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [bottomPanelOpen, setBottomPanelOpen] = useState(false)
   const [rightPanelWidthMode, setRightPanelWidthMode] = useState<'regular' | 'full'>('regular')
+  // Codex `dD`/`CWn`:文件树开合(持久化,默认 false)与宽度(内存,默认 250)
+  const [fileTreeOpen, setFileTreeOpenState] = useState(readStoredFileTreeOpen)
+  const [fileTreeWidth, setFileTreeWidthState] = useState(FILE_TREE_DEFAULT_WIDTH)
   const [docks, setDocks] = useState<Record<PanelDock, DockState>>({
     right: emptyDock(),
     bottom: emptyDock()
@@ -524,6 +583,24 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     setRightPanelOpen(true)
   }, [])
 
+  // Codex `hyo` 的 setSize:`e < WHn(byo)` → 收起;否则 clamp(200, max(200, 容器*0.6))
+  const setFileTreeWidth = useCallback((desired: number, containerWidth: number): void => {
+    if (desired < FILE_TREE_COLLAPSE_AT) {
+      setFileTreeOpenState(false)
+      writeStoredFileTreeOpen(false)
+      return
+    }
+    const max = Math.max(FILE_TREE_MIN_WIDTH, containerWidth * FILE_TREE_MAX_RATIO)
+    setFileTreeWidthState(Math.min(Math.max(desired, FILE_TREE_MIN_WIDTH), max))
+  }, [])
+
+  const toggleFileTree = useCallback((): void => {
+    setFileTreeOpenState((open) => {
+      writeStoredFileTreeOpen(!open)
+      return !open
+    })
+  }, [])
+
   /* ---------- controller 方法(写 docks state;两个 dock 共用一套) ---------- */
 
   /** 关闭面板(right/bottom 各走各的;Codex iD(e,false):$E=false 退出全宽) */
@@ -562,6 +639,9 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         const state = prev[dock]
         const existing = state.tabs.find((t) => t.tabId === tabId)
         if (existing) {
+          // 幂等:已存在且已是 active → 返回 prev(不产生新 state,
+          // 避免树选中回调 → openTab → 重渲染 → 再回调的嵌套更新风暴)
+          if (state.activeTabId === existing.tabId) return prev
           return activate ? { ...prev, [dock]: { ...state, activeTabId: existing.tabId } } : prev
         }
         let tabs = state.tabs
@@ -603,6 +683,9 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
 
   const closeTab = useCallback(
     (dock: PanelDock, tabId: string): void => {
+      // Codex:tab 描述符可挂 onBeforeClose 否决关闭(返回 false)
+      const tab = docks[dock].tabs.find((t) => t.tabId === tabId)
+      if (tab?.onBeforeClose != null && tab.onBeforeClose() === false) return
       let closedLast = false
       setDocks((prev) => {
         const state = prev[dock]
@@ -620,9 +703,11 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         closedLast = tabs.length === 0
         return { ...prev, [dock]: { ...state, tabs, activeTabId, tabStateById } }
       })
+      // Codex:tab 描述符的 onClose 在关闭后调用(丢弃资源等)
+      tab?.onClose?.()
       if (closedLast) closePanel(dock)
     },
-    [closePanel]
+    [closePanel, docks]
   )
 
   const activateTab = useCallback((dock: PanelDock, tabId: string): void => {
@@ -746,6 +831,28 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     [docks, closeTab, rightPanelOpen, bottomPanelOpen]
   )
 
+  /* Codex `closeOtherTabs`/`closeTabsToRight`(app-initial:184276-184278 的方法表):
+     批量关闭时按顺序走 closeTab 的同一条路径(最后一个关掉时连面板一起关)。 */
+  const closeOtherTabs = useCallback(
+    (dock: PanelDock, tabId: string): void => {
+      const others = docks[dock].tabs.filter((t) => t.tabId !== tabId && t.isClosable)
+      for (const t of others) closeTab(dock, t.tabId)
+    },
+    [docks, closeTab]
+  )
+
+  const closeTabsToRight = useCallback(
+    (dock: PanelDock, tabId: string): void => {
+      const tabs = docks[dock].tabs
+      const index = tabs.findIndex((t) => t.tabId === tabId)
+      if (index === -1) return
+      for (const t of tabs.slice(index + 1)) {
+        if (t.isClosable) closeTab(dock, t.tabId)
+      }
+    },
+    [docks, closeTab]
+  )
+
   /** 组装单个 dock 的 controller(Codex `d1n` 工厂的产物) */
   const buildController = useCallback(
     (dock: PanelDock): AppShellTabPanelController => {
@@ -769,6 +876,8 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         pinTab: (tabId) => pinTab(dock, tabId),
         reorderTab: (fromId, toId) => reorderTab(dock, fromId, toId),
         updateTab: (tabId, patch) => updateTab(dock, tabId, patch),
+        closeOtherTabs: (tabId) => closeOtherTabs(dock, tabId),
+        closeTabsToRight: (tabId) => closeTabsToRight(dock, tabId),
         resetTabState: (tabId) => resetTabState(dock, tabId),
         tabStateById: state.tabStateById,
         setTabState: (tabId, next) => setTabState(dock, tabId, next)
@@ -783,6 +892,8 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       pinTab,
       reorderTab,
       updateTab,
+      closeOtherTabs,
+      closeTabsToRight,
       resetTabState,
       setTabState
     ]
@@ -815,6 +926,10 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setHeaderSlotWidth,
       rightPanelController,
       bottomPanelController,
+      fileTreeOpen,
+      fileTreeWidth,
+      toggleFileTree,
+      setFileTreeWidth,
       slots,
       registerSlot,
       unregisterSlot
@@ -841,6 +956,10 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setHeaderSlotWidth,
       rightPanelController,
       bottomPanelController,
+      fileTreeOpen,
+      fileTreeWidth,
+      toggleFileTree,
+      setFileTreeWidth,
       slots,
       registerSlot,
       unregisterSlot

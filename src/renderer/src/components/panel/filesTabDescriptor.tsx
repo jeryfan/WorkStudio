@@ -3,10 +3,13 @@ import type {
   AppShellTabPanelController,
   AppShellTabRenderProps
 } from '../../state/AppShellContext'
+import { fileService } from '../../services'
 import { fileTabId } from '../../state/AppShellContext'
 import { baseName } from '../../utils/workspacePath'
-import { FileGlyph } from './file/FileGlyph'
+import type { AppContextMenuItem } from '../menu/AppContextMenu'
+import { fileTypeIcon } from '../icons/fileTypes/fileTypeIcon'
 import { FileTab } from './file/FileTab'
+import { openInTarget, resolvePrimaryTarget, type OpenTarget } from './file/openTargets'
 
 /**
  * Files tab 状态 —— Codex 的 file tab defaultState 是 `o$i = { scrollLeft: null,
@@ -29,6 +32,74 @@ export interface FilesTabRenderProps extends AppShellTabRenderProps<FilesTabStat
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }
 
+/*
+ * 文件 tab 的右键菜单项 —— Codex `KXi`(app-initial:307031)的移植:
+ * [Open in <首选>] + [Open with ▸ 目标子菜单] + separator +
+ * [Save as…](宿主 saveCopy)+ Copy path + Copy file contents + Reveal in Finder。
+ * (Codex 另有的 View file/View in browser 项是聊天里文件引用用的,tab 自身不带。)
+ *
+ * Codex 侧是异步项(先 fetchQuery 取 open targets),WS 同样是 Promise。
+ */
+async function fileTabContextMenuItems(
+  projectId: string | undefined,
+  path: string,
+  rootAbsolutePath: string | null
+): Promise<AppContextMenuItem[]> {
+  if (projectId == null || path === '') return []
+  const targets: OpenTarget[] = await window.codexBridge.openIn.listTargets().catch(() => [])
+  const absPath = rootAbsolutePath != null ? `${rootAbsolutePath}/${path}` : null
+  const items: AppContextMenuItem[] = []
+  if (absPath != null) {
+    const primary = resolvePrimaryTarget(targets)
+    if (primary != null) {
+      items.push({
+        id: 'workspace-file-open-primary',
+        label: `Open in ${primary.label}`,
+        iconFile: primary.iconFile,
+        onSelect: () => openInTarget(primary, absPath, { persistPreferred: false })
+      })
+      items.push({
+        id: 'workspace-file-open-targets',
+        label: 'Open with',
+        submenu: targets.map((t) => ({
+          id: `workspace-file-open-target-${t.target}`,
+          label: t.label,
+          iconFile: t.iconFile,
+          onSelect: () => openInTarget(t, absPath, { persistPreferred: false })
+        }))
+      })
+      items.push({ id: 'workspace-file-open-target-separator', type: 'separator' })
+    }
+    items.push({
+      id: 'workspace-file-save-as',
+      label: 'Save as…',
+      onSelect: () => void window.codexBridge.openIn.saveCopy(absPath, baseName(path))
+    })
+  }
+  items.push({
+    id: 'workspace-file-copy-path',
+    label: 'Copy path',
+    onSelect: () => void navigator.clipboard.writeText(path)
+  })
+  items.push({
+    id: 'workspace-file-copy-contents',
+    label: 'Copy file contents',
+    onSelect: () => {
+      void fileService
+        .readFile(projectId, path)
+        .then((content) => navigator.clipboard.writeText(content))
+    }
+  })
+  if (absPath != null) {
+    items.push({
+      id: 'workspace-file-reveal-path',
+      label: 'Reveal in Finder',
+      onSelect: () => openInTarget({ target: 'fileManager' }, absPath)
+    })
+  }
+  return items
+}
+
 /**
  * Files tab 描述符工厂 —— 对齐 Codex `HY`(app-initial:427097):
  *
@@ -38,7 +109,9 @@ export interface FilesTabRenderProps extends AppShellTabRenderProps<FilesTabStat
  * - title:无 path → "Open file"(`review.fileSource.browser.tabTitle`);
  *   有 path → 文件名(Codex `Zp(t)`)。
  * - tooltip:有 path 时是显示路径(Codex `t$i`);无 path 时是 "Open file"。
- * - icon:按文件名取 glyph(Codex `MV(path)`,className `icon-xs shrink-0`)。
+ * - icon:按文件名取 Codex `MV` 图标(className `icon-xs shrink-0`)。
+ * - contextMenuItems:有 path 时是 KXi 组(异步);无 path 时无(Codex:
+ *   `t == null ? void 0 : (e) => YXi(...)`)。
  * - isPreview 由调用方给:launcher/「+」打开的不是预览;会话文件引用(InlineAnchor)
  *   打开的是预览(Codex HY 的 isPreview 入参语义)。
  *
@@ -48,16 +121,23 @@ export interface FilesTabRenderProps extends AppShellTabRenderProps<FilesTabStat
 export function createFilesTabDescriptor(
   controller: AppShellTabPanelController,
   path = '',
-  projectId?: string
+  projectId?: string,
+  rootAbsolutePath?: string
 ): AppShellTabDescriptorInput<FilesTabState> {
   const title = path === '' ? 'Open file' : baseName(path)
+  const Icon = fileTypeIcon(path === '' ? undefined : path)
   return {
     tabId: fileTabId(path),
     kind: 'workspaceFile:local',
     title,
     tooltip: path === '' ? 'Open file' : path,
-    icon: <FileGlyph name={title} />,
+    // Codex:`icon: s ?? createElement(MV(t), { className: 'icon-xs shrink-0' })`
+    icon: <Icon className="icon-xs shrink-0" />,
     defaultState: () => ({ scrollLeft: null, scrollTop: null }),
+    contextMenuItems:
+      path === ''
+        ? undefined
+        : () => fileTabContextMenuItems(projectId, path, rootAbsolutePath ?? null),
     renderPanel: (props) => (
       <FileTab
         {...props}
@@ -65,7 +145,7 @@ export function createFilesTabDescriptor(
         projectId={projectId}
         onSelectFile={(nextPath, opts) => {
           controller.openTab({
-            ...createFilesTabDescriptor(controller, nextPath, projectId),
+            ...createFilesTabDescriptor(controller, nextPath, projectId, rootAbsolutePath),
             // Codex:`isPreview: t != null && r?.isPreview` —— 当前 tab 有路径时按树的
             // 意图(单击 = 预览);空 tab 里选的文件直接转正
             isPreview: path !== '' && opts?.isPreview === true

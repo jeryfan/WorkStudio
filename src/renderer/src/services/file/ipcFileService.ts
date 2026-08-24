@@ -9,4 +9,8 @@ export class IpcFileService implements FileService {
   readFile(projectId: string, relPath: string): Promise<string> {
     return window.fileApi.readFile(projectId, relPath)
   }
+
+  searchFiles(projectId: string, query: string): Promise<string[]> {
+    return window.fileApi.searchFiles(projectId, query)
+  }
 }

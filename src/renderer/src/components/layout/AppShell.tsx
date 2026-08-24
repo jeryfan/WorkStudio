@@ -29,6 +29,8 @@ import { OpenSidePanelTabMenu } from '../panel/OpenSidePanelTabMenu'
 import { OverlayLayer } from '../overlay/OverlayLayer'
 import { TooltipProvider } from '../tooltip/Tooltip'
 import { AppPortals } from '../overlay/AppPortals'
+import { AppCommands } from '../command/AppCommands'
+import { SideChatCloseDialogHost } from '../panel/sideChat/SideChatCloseDialog'
 import { HomeView } from '../../views/HomeView'
 import { ChatView } from '../../chat/ChatView'
 
@@ -114,6 +116,8 @@ function Shell(): React.JSX.Element {
         } as React.CSSProperties
       }
     >
+      {/* 命令注册表的处理器接线(渲染 null;Codex 的 TM/_m 注册点) */}
+      <AppCommands />
       {/*
        * thread chrome 的槽位注册(Codex `Ar`/`Dr`,thread-app-shell-chrome):
        * 这些组件渲染 null,把内容写进 AppShell 的 slot store(KP);
@@ -165,6 +169,8 @@ function Shell(): React.JSX.Element {
         </MainContentLayout>
       </div>
       <OverlayLayer />
+      {/* side chat 关闭确认弹窗(Codex `De`,closeGuard 驱动) */}
+      <SideChatCloseDialogHost />
       {/* body 级 portal 层 —— 必须在 #root 外(这一层有 zoom,会给 fixed 建包含块) */}
       <AppPortals />
     </div>

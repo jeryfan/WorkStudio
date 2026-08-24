@@ -15,4 +15,6 @@ export interface FileService {
   listDir(projectId: string, relPath?: string): Promise<DirEntry[]>
   /** 读取文本文件内容（>2MB 拒绝预览） */
   readFile(projectId: string, relPath: string): Promise<string>
+  /** 全项目模糊搜索文件(Codex 过滤框的后端;仅返回文件路径) */
+  searchFiles(projectId: string, query: string): Promise<string[]>
 }

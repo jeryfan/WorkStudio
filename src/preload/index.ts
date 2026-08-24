@@ -11,6 +11,31 @@ export interface DirEntryPayload {
   kind: 'file' | 'dir'
 }
 
+interface NativeContextMenuItemPayload {
+  id: string
+  label: string
+  enabled?: boolean
+  type?: 'normal' | 'separator'
+  iconFile?: string
+  submenu?: NativeContextMenuItemPayload[]
+}
+
+interface OpenTargetPayload {
+  target: string
+  label: string
+  appPath: string
+  iconFile: string
+  kind: 'editor'
+}
+
+interface OpenRequestPayload {
+  path: string
+  target: string
+  appPath?: string
+  line?: number
+  column?: number
+}
+
 /**
  * RPC 桥：只搬运报文，不理解协议语义。
  *
@@ -47,7 +72,9 @@ const fileApi = {
   listDir: (projectId: string, relPath: string): Promise<DirEntryPayload[]> =>
     ipcRenderer.invoke('file:listDir', projectId, relPath),
   readFile: (projectId: string, relPath: string): Promise<string> =>
-    ipcRenderer.invoke('file:readFile', projectId, relPath)
+    ipcRenderer.invoke('file:readFile', projectId, relPath),
+  searchFiles: (projectId: string, query: string): Promise<string[]> =>
+    ipcRenderer.invoke('file:searchFiles', projectId, query)
 }
 
 // Custom APIs for renderer
@@ -77,6 +104,30 @@ const codexBridge = {
     return () => {
       ipcRenderer.removeListener('theme:systemVariantChanged', listener)
     }
+  },
+  showContextMenu: (items: NativeContextMenuItemPayload[]): Promise<string | null> =>
+    ipcRenderer.invoke('context-menu:show', items),
+  syncCommandKeybindings: (
+    list: { id: string; key: string; allowsKeyRepeat: boolean }[]
+  ): Promise<void> => ipcRenderer.invoke('commands:sync-keybindings', list),
+  subscribeCommand: (handler: (commandId: string) => void): (() => void) => {
+    const listener = (_e: unknown, commandId: string): void => handler(commandId)
+    ipcRenderer.on('codex-command', listener)
+    return () => {
+      ipcRenderer.removeListener('codex-command', listener)
+    }
+  },
+  openIn: {
+    listTargets: (): Promise<OpenTargetPayload[]> => ipcRenderer.invoke('open-in:list-targets'),
+    open: (req: OpenRequestPayload): Promise<void> => ipcRenderer.invoke('open-in:open', req),
+    saveCopy: (absolutePath: string, suggestedName?: string): Promise<boolean> =>
+      ipcRenderer.invoke('open-in:save-copy', absolutePath, suggestedName)
+  },
+  browser: {
+    saveDataUrl: (dataUrl: string, suggestedName: string): Promise<boolean> =>
+      ipcRenderer.invoke('browser:save-data-url', dataUrl, suggestedName),
+    clearData: (kind: 'cookies' | 'cache'): Promise<boolean> =>
+      ipcRenderer.invoke('browser:clear-data', kind)
   }
 }
 

@@ -47,10 +47,16 @@ export function InlineAnchor({ path, label }: { path: string; label?: string }):
   const open = (): void => {
     const resolved = resolveInProjects(filePath, projects, currentProject?.id)
     if (!resolved) return
+    const rootAbsolutePath = projects.find((p) => p.id === resolved.projectId)?.rootPaths[0] ?? null
     // 会话里的文件引用 → 预览 tab(Codex HY:外部打开带 isPreview;
     // launcher/「+」打开的空 Files tab 才不是预览)
     rightPanelController.openTab({
-      ...createFilesTabDescriptor(rightPanelController, resolved.relPath, resolved.projectId),
+      ...createFilesTabDescriptor(
+        rightPanelController,
+        resolved.relPath,
+        resolved.projectId,
+        rootAbsolutePath ?? undefined
+      ),
       isPreview: true
     })
   }

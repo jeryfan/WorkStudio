@@ -45,8 +45,72 @@ mainContentWidth 整宽、宽度 ratio 持久化(`app-shell:right-panel-width:v3
 headerLeftWidth 占位(全宽且侧栏隐藏)、launcher 动画(xr/Sr/Cr + ease [0.19,1,0.22,1] +
 reduced-motion 全禁)、「+」菜单(title 属性 + defer-on-close + 右面板 0 tab 不渲染)、
 DndContext 上移到 MainContentSurface(右/底共用)。
-Browser tab 工具栏/地址栏/空态/进度条按实测重写;Files tab 换了 Codex 的面包屑 nav
-(`s0a`)+ 空态 + 树列边界(树本体还是 react-arborist,下轮)。
+
+**2026-08-24 第三轮(Files 域 + 菜单/快捷键 + side chat 落地)**:
+- **文件树 = @pierre/trees@1.0.0-beta.6**(Codex bundle 里的 `file-tree-container` 就是这个包,
+  逐字节对上;react-arborist 已删)。`panel/file/FileTreeView.tsx` 复刻 Codex `N1a`
+  (配置逐项:stickyFolders/hide-non-matches/28px/unsafeCSS token 覆盖块);
+  数据流 = `directoryEntries.ts`(Codex `a0a`:root + 各展开目录聚合,目录带 `/` 后缀,
+  结果内容级缓存对齐 structural sharing)+ `treeState.ts`(Codex `cpo` 族:per-root
+  {expandedPaths, scrollTop, searchQuery, selectedPath})。
+- **树列全局化**(Codex `hyo`):开合 = 全局持久化 `app-shell-file-tree-open`(默认关),
+  宽度全局内存值 250,min 200 / 折叠 100 / max 60%;UPr 同款弹簧。
+- **面包屑下拉**(`c0a`/`l0a`):每段(含末段文件名)都是 Popover 触发,
+  384×320(w-96 h-80),内含同一 FileTreeView(surface='dropdown');项目名段列根目录。
+- **nav 控制组**(`MSo`):File viewer options(Copy path / Copy file contents / word wrap
+  全局 `wrapCodeDiff.2`)+ Open in 分割按钮(`Sia`,主进程探测已安装编辑器,28 个 Codex
+  原版图标已提取到 assets/apps/;Save as… = saveCopy;Open in folder;首选持久化
+  `file-source:preferred-open-target`)。
+- **文件图标**:Codex `MV`/`EQi` 全量复刻(27 种,`icons/fileTypes/`,提取脚本
+  `scripts/extract-file-type-icons.mjs`);tab 图标按扩展名取;树图标走包内 complete 集。
+- **tab 右键菜单**(Codex `ZSr` + `gv`):描述符自带项 + Close/Close other tabs/
+  Close tabs to the right;Electron 走原生菜单(新增 `codexBridge.showContextMenu`,
+  主进程 Menu.popup);文件 tab 自带 KXi 组(Open in/Open with/Save as/Copy path/
+  Copy file contents/Reveal in Finder)。controller 补 closeOtherTabs/closeTabsToRight/
+  onBeforeClose/onClose。
+- **Browser options 菜单**(实测 13 项全渲染):Find in page(自绘 find bar,
+  Codex 的查找条在宿主叠加层,DOM 不可取证,标注推断)/ Zoom 组(Chromium 档位,
+  per-tab zoomPercent)/ Take a screenshot(capturePage + 保存对话框)/
+  Clear browsing data ▸(cookies/cache,persist:browser 分区)/ device toolbar·
+  import·passwords·downloads·settings 渲染但 disabled(Codex 受控浏览器/设置页能力,
+  WS 无对应物,不做假实现)。
+- **命令注册表**(`state/commands.ts` + `components/command/AppCommands.tsx` +
+  主进程 `commandIpc.ts`):命令定义子集(⌘T/⌘P/⌘⌥B/⌘⇧E/⌘J/⌘⌥S/⌘W/⌃Tab 等),
+  键位表同步给主进程,before-input-event 命中 → `codex-command` IPC → runCommand
+  (对齐 Codex 宿主 accelerator → 宿主消息 → `_m` 的链路;`TM`/`xM` =
+  useCommandHandler/runCommand;`Po(yM)` = commandKeybindingLabel,launcher/菜单的
+  kbd 不再写字面量)。注意:**CDP 合成按键不过 before-input-event**,验证要用
+  osascript System Events 发真实按键。
+- **side chat**(Codex `local-conversation-side-chat` chunk 逐项):launcher/⌘⌥S/「+」
+  进入;`thread/fork` + SIDE_CHAT_INSTRUCTIONS 逐字注入 + ephemeral;loading tab
+  `sidechat-loading:`(isClosable=false)→ 真 tab `sidechat:<id>`;标题 "Side chat" /
+  "Side chat {n}";fork 响应自带历史 turns 直接 seed(ephemeral 不落盘,resume 会报
+  no rollout found;StrictMode 下 seed 进 ref 防重放丢失);面板当前开着才 activate;
+  关 tab 丢弃(thread/delete);有过轮次关闭弹确认框(DOM 逐层对齐实测:420px
+  codex-dialog + Radix checkbox + Cancel/Close side chat)"Don't ask again" 持久化
+  `skip-side-chat-close-confirmation`。ChatRuntimeContext 重构出 `useChatRuntimeCore`
+  + `SideChatRuntimeProvider`(审批经 `approvalBus` 按 threadId 路由,主/侧并存)。
+
+**踩坑新条目:**
+- **@pierre/trees 的模型回调捕获首渲染闭包** —— model 只建一次,onSelectionChange 等
+  必须套 latest-ref(Codex 的 `jh` = useEffectEvent 同义),否则 tab 内容因
+  activeTabReactKey 复用而不重挂载时,回调闭包里的 path 是上一个 tab 的。
+- **openTab 必须幂等**(已有且已 active → 返回 prev)且**聚合 paths 引用要内容级稳定**
+  —— 否则 树选中回调 → openTab → setDocks 新对象 → 重渲染 → 模型重发 selection →
+  再 openTab 的嵌套更新风暴(Maximum update depth)。Codex 靠 signals 的结构共享免疫。
+- **SidebarModeSwitcher 既有 bug**(本轮修复):内联 ref 回调里 setState —— ref 身份
+  每次渲染都变,React detach/attach 循环触发 setState 死循环。已改 useCallback 稳定化。
+- **Radix 菜单不吃合成 click**:DropdownMenu/Popover 的 trigger 要
+  pointerdown+pointerup+click 序列;CDP 合成按键不过主进程 before-input-event,
+  验证快捷键用 osascript System Events 发真实按键。
+
+**Codex 侧未接(下轮):**
+- Review tab(整缺,需要 git diff 数据源)、Terminal tab(需要 PTY)
+- 文件 tab 富编辑器(Codex `Myo`:pierre code viewer、markdown 富预览、git blame)
+- Browser:Annotate、device toolbar、cookies 导入、密码、下载管理、Browser settings
+- side chat:生成中 tab 图标切 sparkle(Codex `je`)、composer 的 lockedCollaborationMode
+- toast 系统(Codex 的 `yv`;side chat 打开失败现在只 console.error)
+- tab 的 Review/Timeline 等其余描述符
 
 **踩坑新条目:**
 - **Electron 窗口隐藏时 framer-motion 停摆**(`document.hidden` → 帧循环挂起,

@@ -24,7 +24,8 @@ import {
   type RuntimeTurn
 } from './turnStore'
 import { M } from '@shared/protocol/methods'
-import { APPROVAL_METHODS, toApprovalResponse, toPendingApproval } from '../chat/adapter/approval'
+import { registerApprovalOwner } from './approvalBus'
+import { toApprovalResponse, toPendingApproval } from '../chat/adapter/approval'
 import type { ApprovalDecision, PendingApproval } from '../chat/model/approval'
 import type { Todo, TodoStatus } from '../chat/model/plan'
 import type {
@@ -78,7 +79,18 @@ function isOverloaded(info: unknown): boolean {
   return disconnected?.httpStatusCode === 429
 }
 
-const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
+/*
+ * fork 回来的会话(side chat):历史随 fork 响应带回来,ephemeral 会话不落盘,
+ * resume 会报 "no rollout found"。调用方在 fork 成功后先登记到这里,
+ * 运行时绑定时直接 seed,不走 resume。
+ * (模块级:登记发生在 fork 完成的事件里,不在渲染期 —— lint 友好。)
+ */
+const pendingThreadSeeds = new Map<string, Chat>()
+
+/** fork 成功后的登记入口(sideChat 打开流程调用) */
+export function seedForkedThread(thread: Chat): void {
+  pendingThreadSeeds.set(thread.id, thread)
+}
 
 /** 协议的步骤状态 → 上游 todo 的三态。名字不同，语义一一对应 */
 const PLAN_STATUS: Record<string, TodoStatus> = {
@@ -127,8 +139,30 @@ function applyDelta(entry: Entry, buf: PendingDelta): Entry {
   return entry
 }
 
-export function ChatRuntimeProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+/**
+ * 会话运行时核心 —— 主会话(ChatRuntimeProvider)与 side chat
+ * (SideChatRuntimeProvider)共用。只关心"绑定某个会话 id"的全部运行时:
+ * 事件订阅(按 threadId 过滤)、delta 缓冲、审批、resume/退订、发消息。
+ *
+ * 多实例并存的关键约束:
+ * - 审批经 approvalBus 按 threadId 路由(rpc.onServerRequest 单方法单处理器,
+ *   各自注册会互相覆盖)。
+ * - 通知类(rpc.on)天然多播,两个实例各取自己的 threadId,互不干扰。
+ */
+function useChatRuntimeCore(chatId: string | null): {
+  turns: RuntimeTurn[]
+  approvals: ReadonlyMap<string, PendingApproval>
+  phase: TurnPhase
+  loading: boolean
+  readOnly: boolean
+  readOnlyReason: string | null
+  error: string | null
+  sendMessage(text: string): Promise<void>
+  interrupt(): Promise<void>
+  respondToApproval(requestKey: string, decision: ApprovalDecision): void
+  /** startChat 新建的会话没有历史,resume 会清掉乐观追加的 pending turn —— 跳过 */
+  markFresh(threadId: string): void
+} {
   const [turns, setTurns] = useState<RuntimeTurn[]>([])
   const [approvals, setApprovals] = useState<ReadonlyMap<string, PendingApproval>>(new Map())
   const [phase, setPhase] = useState<TurnPhase>('idle')
@@ -137,19 +171,28 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // 当前会话 id 的即时副本：通知回调在闭包里读它，避免因 state 未刷新而误判
-  // 事件归属。切换会话的入口都会同步写这个 ref，不在 render 期间赋值。
-  const activeRef = useRef<string | null>(null)
+  // 绑定会话 id 的即时副本:通知回调在闭包里读它,避免因 state 未刷新而误判
+  // 事件归属。切换会话的入口都会同步写这个 ref,不在 render 期间赋值。
+  const activeRef = useRef<string | null>(chatId)
+  // 上一次绑定的会话(卸载/切换时退订)
+  const previousRef = useRef<string | null>(null)
+  // startChat 新建的会话:跳过 resume(见 markFresh)
+  const freshRef = useRef<Set<string>>(new Set())
+  /*
+   * fork seed 的 StrictMode 安全容器:首次 effect 从模块表取出后存 ref
+   * (重放的第二次 setup 还能拿到),不随 replay 丢失。
+   */
+  const seededChatRef = useRef<Chat | null>(null)
 
   /*
    * 未应答的反向请求。
    *
-   * 与上面那份 state 是同一批审批的两个副本，各有各的用处：state 供渲染，
-   * 这个 ref 存 resolve 回调。回调不能进 state——它不是数据，放进去会让每次
+   * 与上面那份 state 是同一批审批的两个副本,各有各的用处:state 供渲染,
+   * 这个 ref 存 resolve 回调。回调不能进 state——它不是数据,放进去会让每次
    * setState 都产生新引用而白白重渲染整棵树。
    *
-   * 用 ref 还有第二个理由：撤销审批的几个入口（切换会话、轮次收尾、卸载）
-   * 都在闭包里被调用，读 state 会拿到注册时的旧快照。
+   * 用 ref 还有第二个理由:撤销审批的几个入口(切换会话、轮次收尾、卸载)
+   * 都在闭包里被调用,读 state 会拿到注册时的旧快照。
    */
   const approvalReplies = useRef(
     new Map<string, { pending: PendingApproval; reply: (d: ApprovalDecision) => void }>()
@@ -203,11 +246,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
   /**
    * 回答一条审批。
    *
-   * 先撤 UI 再应答：按钮点下去到 agent 真正动起来之间有一段网络往返，这期间
-   * 按钮还在那里会让人以为没点上，连点两下就成了两次应答。
+   * 先撤 UI 再应答:按钮点下去到 agent 真正动起来之间有一段网络往返,这期间
+   * 按钮还在那里会让人以为没点上,连点两下就成了两次应答。
    *
-   * 幂等：requestKey 已经不在表里就什么都不做，所以重复调用（连点、以及轮次
-   * 收尾时的批量 cancel）是安全的。
+   * 幂等:requestKey 已经不在表里就什么都不做,所以重复调用(连点、以及轮次
+   * 收尾时的批量 cancel)是安全的。
    */
   const respondToApproval = useCallback((requestKey: string, decision: ApprovalDecision): void => {
     const entry = approvalReplies.current.get(requestKey)
@@ -221,7 +264,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
     entry.reply(decision)
   }, [])
 
-  /** 批量放弃：切换会话、轮次收尾时用。`turnId` 为 null 表示全部 */
+  /** 批量放弃:切换会话、轮次收尾时用。`turnId` 为 null 表示全部 */
   const cancelApprovals = useCallback(
     (turnId: string | null): void => {
       for (const { pending } of [...approvalReplies.current.values()]) {
@@ -234,25 +277,19 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
   )
 
   /*
-   * 服务端反向请求：审批。
+   * 服务端反向请求:审批。经 approvalBus 注册 owner(总线按 threadId 路由到本运行时);
+   * 无人认领的由总线 cancel(维持"后台会话审批立刻回掉"的原行为)。
    *
-   * 与通知不同，这里**必须应答**——不答 agent 就停在那一步，既不报错也不推进，
-   * 对用户表现为"卡住了"。所以：
-   *   - 不属于当前会话的，立刻按 cancel 回掉，而不是压着不管
-   *   - 组件卸载时把还挂着的全部 cancel 掉
+   * 与通知不同,这里**必须应答**——不答 agent 就停在那一步,既不报错也不推进,
+   * 对用户表现为"卡住了"。组件卸载时把还挂着的全部 cancel 掉。
    */
   useEffect(() => {
-    // 取到本地变量再用：这个 Map 从建好起就不会被换掉，但 lint 无从判断，
-    // 而它的规则本身是对的——ref.current 在 cleanup 跑到时未必还是当初那个
     const replies = approvalReplies.current
-    const offs = APPROVAL_METHODS.map((method) =>
-      rpc.onServerRequest(method, (params) => {
+    const offBus = registerApprovalOwner({
+      getThreadId: () => activeRef.current,
+      handle: (method, params) => {
         const pending = toPendingApproval(method, params)
-        if (!pending) return toApprovalResponse('cancel')
-        if ((params as { threadId?: string }).threadId !== activeRef.current) {
-          // 后台会话的审批：本视图没有它的上下文，无法让用户做判断
-          return toApprovalResponse('cancel')
-        }
+        if (!pending) return Promise.resolve(toApprovalResponse('cancel'))
         return new Promise((resolve) => {
           replies.set(pending.requestKey, {
             pending,
@@ -260,10 +297,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
           })
           setApprovals((prev) => new Map(prev).set(pending.itemId, pending))
         })
-      })
-    )
+      }
+    })
     return () => {
-      offs.forEach((off) => off())
+      offBus()
       for (const { reply } of replies.values()) {
         reply('cancel')
       }
@@ -271,7 +308,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
     }
   }, [])
 
-  // 订阅会话事件流。只处理当前打开会话的通知——其他会话可能在后台跑，
+  // 订阅会话事件流。只处理绑定会话的通知——其他会话可能在后台跑,
   // 它们的事件与本视图无关。
   useEffect(() => {
     const mine = (p: unknown): boolean =>
@@ -333,13 +370,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
         /*
          * 轮次结束了还挂着的审批一律撤掉。
          *
-         * 正常流程里 agent 会在轮次收尾前自己解掉这些请求，但轮次被中断或失败
-         * 时不一定。协议有 `serverRequest/resolved` 通知专治这个，可惜它按
-         * agent 的 requestId 索引，而主进程的 RpcRouter 转发时用的是自己生成的
-         * id——渲染层拿不到那个 requestId，对不上。按轮次清是能对得上的那个粒度。
+         * 正常流程里 agent 会在轮次收尾前自己解掉这些请求,但轮次被中断或失败
+         * 时不一定。协议有 `serverRequest/resolved` 通知专治这个,可惜它按
+         * agent 的 requestId 索引,而主进程的 RpcRouter 转发时用的是自己生成的
+         * id——渲染层拿不到那个 requestId,对不上。按轮次清是能对得上的那个粒度。
          */
         cancelApprovals(turn.id)
-        // 轮次自己带上了失败原因就撤掉全局横幅，否则同一条错误会显示两遍
+        // 轮次自己带上了失败原因就撤掉全局横幅,否则同一条错误会显示两遍
         if (turn.error?.message) setError(null)
         setPhase('idle')
       }),
@@ -367,8 +404,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
         }
         if (!mine(p)) return
 
-        // 还会重试就不是终态：把它渲染成轮次内的重连进度，而不是一条报错。
-        // 断流大多能自己恢复，先弹红字会让用户以为白跑了一轮。
+        // 还会重试就不是终态:把它渲染成轮次内的重连进度,而不是一条报错。
+        // 断流大多能自己恢复,先弹红字会让用户以为白跑了一轮。
         if (willRetry && turnId) {
           setTurns((prev) =>
             markReconnecting(
@@ -386,8 +423,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
     return () => offs.forEach((off) => off())
   }, [cancelApprovals, queueDelta, queueIndexedDelta])
 
-  // 切换会话前把上一个会话未答的审批全部撤掉：那些工具调用马上就要从界面上
-  // 消失，留着未应答的请求等于让 agent 无限期停在那里
+  // 切换会话前把上一个会话未答的审批全部撤掉:那些工具调用马上就要从界面上
+  // 消失,留着未应答的请求等于让 agent 无限期停在那里
   const resetView = useCallback((): void => {
     cancelApprovals(null)
     setApprovals(new Map())
@@ -397,78 +434,108 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
     setReadOnlyReason(null)
   }, [cancelApprovals])
 
-  const openChat = useCallback(
-    (chatId: string): void => {
-      setActiveChatId(chatId)
-      activeRef.current = chatId
-      resetView()
-      setLoading(true)
+  const markFresh = useCallback((threadId: string): void => {
+    freshRef.current.add(threadId)
+  }, [])
 
-      const apply = (thread: Chat): void => {
-        setTurns(thread.turns.map(toRuntimeTurn))
-        setPhase(thread.status.type === 'active' ? 'running' : 'idle')
-      }
-
-      // resume 一次完成三件事：加载历史、订阅事件、若会话正在跑则重新加入。
-      // 拆成 read + resume 会丢掉两次调用之间的事件。
-      rpc
-        .request<{ thread: Chat }>(M.chatResume, { threadId: chatId })
-        .then((res) => {
-          if (activeRef.current !== chatId) return
-          apply(res.thread)
-        })
-        .catch(async (err: unknown) => {
-          if (activeRef.current !== chatId) return
-          const message = err instanceof Error ? err.message : String(err)
-
-          // resume 会加载会话的完整运行配置，有两类常见失败与"会话本身"无关：
-          //   1. 被其他客户端（命令行、另一个窗口）持有写锁
-          //   2. 会话记录的模型供应商在当前配置里不存在（由别的客户端创建）
-          // 这两种都能用 thread/read 只读取回历史——它不加载运行配置也不抢锁。
-          // 直接抛错会让这些会话彻底打不开，看起来像数据损坏。
-          const recoverable = /active writer|model provider .* not found/i.test(message)
-          if (!recoverable) {
-            setError(message)
-            return
-          }
-          try {
-            const res = await rpc.request<{ thread: Chat }>(M.chatRead, {
-              threadId: chatId,
-              includeTurns: true
-            })
-            if (activeRef.current !== chatId) return
-            apply(res.thread)
-            setReadOnly(true)
-            setReadOnlyReason(
-              /active writer/i.test(message)
-                ? 'This chat is open in another client — showing history in read-only mode.'
-                : 'This chat was created with a model provider that is not configured — showing history in read-only mode.'
-            )
-          } catch (readErr: unknown) {
-            if (activeRef.current !== chatId) return
-            setError(readErr instanceof Error ? readErr.message : String(readErr))
-          }
-        })
-        .finally(() => {
-          if (activeRef.current === chatId) setLoading(false)
-        })
-    },
-    [resetView]
-  )
-
-  const closeChat = useCallback((): void => {
-    const previous = activeRef.current
-    setActiveChatId(null)
-    activeRef.current = null
-    resetView()
-    setPhase('idle')
-    if (previous) {
-      // 取消订阅，避免后台会话继续往这条连接推事件
+  /*
+   * chatId 变化 = 绑定切换:重置视图 → 退订上一个 → resume 新的
+   * (加载历史 + 订阅事件 + 若正在跑则重新加入;拆 read + resume 会丢
+   * 两次调用之间的事件)。
+   */
+  useEffect(() => {
+    const previous = previousRef.current
+    previousRef.current = chatId
+    if (previous && previous !== chatId) {
       rpc.request(M.chatUnsubscribe, { threadId: previous }).catch(() => {})
     }
-  }, [resetView])
+    activeRef.current = chatId
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换/解绑时同步重置(外部系统驱动)
+    resetView()
+    if (chatId == null) {
+      setPhase('idle')
+      return
+    }
+    // startChat 新建的会话:没有历史,resume 会把乐观追加的 pending turn 清掉
+    if (freshRef.current.has(chatId)) {
+      freshRef.current.delete(chatId)
+      return
+    }
+    // fork 回来的会话(side chat):seed 历史,不 resume(ephemeral 不落盘,resume 会报
+    // "no rollout found")。seed 从模块表取一次进 ref,StrictMode 重放不丢。
+    if (seededChatRef.current == null) {
+      const seed = pendingThreadSeeds.get(chatId)
+      if (seed != null) {
+        pendingThreadSeeds.delete(chatId)
+        seededChatRef.current = seed
+      }
+    }
+    const seed = seededChatRef.current
+    if (seed != null && seed.id === chatId) {
+      pendingThreadSeeds.delete(chatId)
 
-  const startTurn = useCallback(async (chatId: string, text: string): Promise<void> => {
+      setTurns(seed.turns.map(toRuntimeTurn))
+
+      setPhase(seed.status.type === 'active' ? 'running' : 'idle')
+      return
+    }
+    setLoading(true)
+    const apply = (thread: Chat): void => {
+      setTurns(thread.turns.map(toRuntimeTurn))
+      setPhase(thread.status.type === 'active' ? 'running' : 'idle')
+    }
+    rpc
+      .request<{ thread: Chat }>(M.chatResume, { threadId: chatId })
+      .then((res) => {
+        if (activeRef.current !== chatId) return
+        apply(res.thread)
+      })
+      .catch(async (err: unknown) => {
+        if (activeRef.current !== chatId) return
+        const message = err instanceof Error ? err.message : String(err)
+
+        // resume 会加载会话的完整运行配置,有两类常见失败与"会话本身"无关:
+        //   1. 被其他客户端(命令行、另一个窗口)持有写锁
+        //   2. 会话记录的模型供应商在当前配置里不存在(由别的客户端创建)
+        // 这两种都能用 thread/read 只读取回历史——它不加载运行配置也不抢锁。
+        // 直接抛错会让这些会话彻底打不开,看起来像数据损坏。
+        const recoverable = /active writer|model provider .* not found/i.test(message)
+        if (!recoverable) {
+          setError(message)
+          return
+        }
+        try {
+          const res = await rpc.request<{ thread: Chat }>(M.chatRead, {
+            threadId: chatId,
+            includeTurns: true
+          })
+          if (activeRef.current !== chatId) return
+          apply(res.thread)
+          setReadOnly(true)
+          setReadOnlyReason(
+            /active writer/i.test(message)
+              ? 'This chat is open in another client — showing history in read-only mode.'
+              : 'This chat was created with a model provider that is not configured — showing history in read-only mode.'
+          )
+        } catch (readErr: unknown) {
+          if (activeRef.current !== chatId) return
+          setError(readErr instanceof Error ? readErr.message : String(readErr))
+        }
+      })
+      .finally(() => {
+        if (activeRef.current === chatId) setLoading(false)
+      })
+  }, [chatId, resetView])
+
+  // 卸载时退订当前会话(side chat 关 tab 的场景)
+  useEffect(() => {
+    return () => {
+      const current = previousRef.current
+      if (current) rpc.request(M.chatUnsubscribe, { threadId: current }).catch(() => {})
+    }
+  }, [])
+
+  const startTurn = useCallback(async (threadId: string, text: string): Promise<void> => {
     const input: UserInput[] = [{ type: 'text', text, text_elements: [] }]
     const clientId = crypto.randomUUID()
     const pending = createPendingTurn(clientId, {
@@ -481,7 +548,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
     setPhase('running')
     try {
       await rpc.request(M.turnStart, {
-        threadId: chatId,
+        threadId,
         input,
         clientUserMessageId: clientId
       })
@@ -494,12 +561,50 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
 
   const sendMessage = useCallback(
     async (text: string): Promise<void> => {
-      const chatId = activeRef.current
-      if (!chatId) throw new Error('No active chat')
-      await startTurn(chatId, text)
+      const id = activeRef.current
+      if (!id) throw new Error('No active chat')
+      await startTurn(id, text)
     },
     [startTurn]
   )
+
+  const interrupt = useCallback(async (): Promise<void> => {
+    const id = activeRef.current
+    if (!id) return
+    await rpc.request(M.turnInterrupt, { threadId: id })
+    setPhase('idle')
+  }, [])
+
+  return {
+    turns,
+    approvals,
+    phase,
+    loading,
+    readOnly,
+    readOnlyReason,
+    error,
+    sendMessage,
+    interrupt,
+    respondToApproval,
+    markFresh
+  }
+}
+
+/* ==================== 主会话(全局唯一,activeChatId 驱动) ==================== */
+
+const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
+
+export function ChatRuntimeProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const core = useChatRuntimeCore(activeChatId)
+
+  const openChat = useCallback((chatId: string): void => {
+    setActiveChatId(chatId)
+  }, [])
+
+  const closeChat = useCallback((): void => {
+    setActiveChatId(null)
+  }, [])
 
   const startChat = useCallback(
     async ({ text, cwd, approvalPolicy, sandbox }: StartChatParams): Promise<string> => {
@@ -508,54 +613,102 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
         approvalPolicy,
         sandbox
       })
+      // 新建会话没有历史:标记跳过 resume,直接开始第一轮
+      core.markFresh(thread.id)
       setActiveChatId(thread.id)
-      activeRef.current = thread.id
-      resetView()
-      await startTurn(thread.id, text)
+      await core.sendMessage(text)
       return thread.id
     },
-    [resetView, startTurn]
+    [core]
   )
-
-  const interrupt = useCallback(async (): Promise<void> => {
-    const chatId = activeRef.current
-    if (!chatId) return
-    await rpc.request(M.turnInterrupt, { threadId: chatId })
-    setPhase('idle')
-  }, [])
 
   const value = useMemo<ChatRuntimeValue>(
     () => ({
       activeChatId,
-      turns,
-      approvals,
-      phase,
-      loading,
-      readOnly,
-      readOnlyReason,
-      error,
+      turns: core.turns,
+      approvals: core.approvals,
+      phase: core.phase,
+      loading: core.loading,
+      readOnly: core.readOnly,
+      readOnlyReason: core.readOnlyReason,
+      error: core.error,
       openChat,
       closeChat,
-      sendMessage,
+      sendMessage: core.sendMessage,
       startChat,
-      interrupt,
-      respondToApproval
+      interrupt: core.interrupt,
+      respondToApproval: core.respondToApproval
     }),
     [
       activeChatId,
-      turns,
-      approvals,
-      phase,
-      loading,
-      readOnly,
-      readOnlyReason,
-      error,
+      core.turns,
+      core.approvals,
+      core.phase,
+      core.loading,
+      core.readOnly,
+      core.readOnlyReason,
+      core.error,
       openChat,
       closeChat,
-      sendMessage,
+      core.sendMessage,
       startChat,
-      interrupt,
-      respondToApproval
+      core.interrupt,
+      core.respondToApproval
+    ]
+  )
+
+  return <ChatRuntimeContext.Provider value={value}>{children}</ChatRuntimeContext.Provider>
+}
+
+/* ==================== Side chat(固定会话,面板 tab 内嵌) ==================== */
+
+/**
+ * Codex 的 local-conversation-thread:side chat tab 里是一个完整的
+ * 本地会话线程(自己的 composer + 消息流),与主会话并存。
+ * WS 用同一个 ChatRuntimeContext 承载:Provider 钉住 fork 出来的会话 id,
+ * 内部 Composer/ThreadTurn 等组件不需要任何改动。
+ *
+ * openChat/closeChat/startChat 在这个上下文里没有意义(会话由 tab 生命周期
+ * 管理),留空调实现,调用即报错属于用法错误。
+ */
+export function SideChatRuntimeProvider({
+  conversationId,
+  children
+}: {
+  conversationId: string
+  children: ReactNode
+}): React.JSX.Element {
+  const core = useChatRuntimeCore(conversationId)
+
+  const value = useMemo<ChatRuntimeValue>(
+    () => ({
+      activeChatId: conversationId,
+      turns: core.turns,
+      approvals: core.approvals,
+      phase: core.phase,
+      loading: core.loading,
+      readOnly: core.readOnly,
+      readOnlyReason: core.readOnlyReason,
+      error: core.error,
+      openChat: () => {},
+      closeChat: () => {},
+      sendMessage: core.sendMessage,
+      startChat: () => Promise.reject(new Error('side chat 不支持 startChat')),
+      interrupt: core.interrupt,
+      respondToApproval: core.respondToApproval
+    }),
+    [
+      conversationId,
+      core.turns,
+      core.approvals,
+      core.phase,
+      core.loading,
+      core.readOnly,
+      core.readOnlyReason,
+      core.error,
+      core.sendMessage,
+      core.interrupt,
+      core.respondToApproval
     ]
   )
 

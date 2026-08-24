@@ -178,18 +178,32 @@ DOM:`div.flex.h-full.min-h-0.flex-col.overflow-x-hidden.overflow-y-auto.p-2.sele
 
 ## 八、与 WS 现状的差距(逐条)
 
-> **2026-08-23 第二轮更新:1–11 已全部落地**(AppShellProvider 接管、DockedTabPanel/PanelContext 已删)。
-> 本轮新逆向补进 spec 的要点见下方「十、第二轮实测修正」。
+> **2026-08-24 第三轮:12–18 全部落地**。Files 树 = @pierre/trees(N1a 逐项移植);
+> 面包屑下拉/文件图标/打开态控制组/options 菜单/tab 右键菜单(原生)/命令注册表/
+> side chat(fork + 关闭确认)均已实现并经运行时对照验证。明细见
+> `codex-alignment-progress.md` 的第三轮记录。
+>
+> 本轮新取证的关键点(已并入上文各节):树宽 250/200/100/60%(hyo 的 byo/WHn/yyo)、
+> 树开合全局持久化 `app-shell-file-tree-open`(默认 false)、文件图标 `MV`/`EQi`
+> 映射表(27 种)、面包屑段 `c0a` 按钮(含末段)+ `l0a` 下拉树(surface=dropdown)、
+> `MSo`/`NSo`(options 菜单项 + 条件)、`Sia`(Open in 分割按钮实测类名)、
+> `ZSr`(tab 右键菜单组)+ `gv`(Electron 原生 showContextMenu)、文件 tab 的
+> `KXi` 菜单组、命令定义表与键位(⌘T/⌘P/⌃⇧G/⌘⌥B/⌘⇧B/⌘⇧E/⌘J/⌘⌥S/⌘W/⌃Tab 系)、
+> side chat chunk 全文(fork 指令文本、loading tab、标题编号、关闭确认 De、
+> activate 条件、关 tab 丢弃)。
+> side chat 关闭确认弹窗 DOM 实测(2026-08-24):w-[420px] codex-dialog、
+> form flex flex-col gap-0 px-5 py-5、heading-dialog 标题、Radix checkbox、
+> Cancel(secondary)+ Close side chat(danger token-charts-red)。
 
-**剩余差距:**
+**历史差距记录(已消化,勿再按此实施):**
 
-12. Files tab:外壳/面包屑/空态/树列边界已对齐;**树本体仍是 react-arborist 原型** —— Codex 是过滤框(`input#workspace-directory-tree-search`,placeholder "Filter files…" + sr-only label "Filter files")+ `<file-tree-container data-file-tree-virtualized="true" style="--trees-item-height:28px">` 自绘虚拟树(带 `data-tab-preview-pin-exempt`,点树不 pin 预览 tab)。面包屑中间段在 Codex 里是可点进目录的链接(c0a),WS 暂为纯文本。文件打开态的 nav 右侧控制组(MSo:options menu/git blame/word wrap 等)未取证。
-13. Browser tab:工具栏/地址栏/空态/进度条已对齐。Annotate 按钮按实测空闲态渲染(disabled、容器 opacity-0),标注能力未实现;Browser options 菜单未实现(8 项全是宿主功能);切换 browser tab 会重载 webview(Codex 由独立受控 browser 进程保活,WS 无对应物)。
+12. ~~Files tab:树本体是 react-arborist~~ → 已换 @pierre/trees
+13. ~~Browser options 菜单未实现~~ → 已实现(部分项 disabled,见 progress 文档)
 14. Review tab:整缺。需要 git diff 数据源(WS 有 main 进程,可加 git 服务)。
 15. Terminal tab:整缺。需要 PTY(node-pty 或等价物)+ 终端渲染(xterm.js)。
-16. Side chat:整缺(需要第二条会话管线)。
-17. tab 右键菜单未取证(controller 有 closeOtherTabs/closeTabsToRight,触发点未找到)。
-18. 命令注册表(⌘T/⌘P/⌃⇧G/⌘⌥B 等快捷键 + xM/TM 命令分发)未实现 —— header 按钮直接调 toggle。
+16. ~~Side chat:整缺~~ → 已实现(fork + ephemeral + 确认弹窗)
+17. ~~tab 右键菜单未取证~~ → 已取证并实现(ZSr/gv;原生菜单)
+18. ~~命令注册表~~ → 已实现(渲染层注册表 + 主进程 before-input-event 转发)
 
 
 ## 九、建议实施顺序

@@ -1,10 +1,13 @@
 import { useMemo } from 'react'
 import type { AppShellTabPanelController } from '../../state/AppShellContext'
+import { useAppShell } from '../../state/AppShellContext'
 import { useWorkspace } from '../../state/WorkspaceContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
-import { BrowserGlobeIcon, FilesFolderIcon } from '../icons'
+import { commandKeybindingLabel } from '../../state/commands'
+import { BrowserGlobeIcon, FilesFolderIcon, SideChatIcon } from '../icons'
 import { createBrowserTabDescriptor } from './browserTabDescriptor'
 import { createFilesTabDescriptor } from './filesTabDescriptor'
+import { openSideChat } from './sideChat/openSideChat'
 
 /**
  * 右面板新 tab 动作 —— launcher 空态(`pr`/`hr`)与 strip 尾部「+」菜单(`Or`)共用
@@ -14,7 +17,7 @@ import { createFilesTabDescriptor } from './filesTabDescriptor'
  *
  *   de = [
  *     ...(hasWorkspaceRoot ? [open-file] : []),   // A:非 projectless 且有 workspaceRoot
- *     ...(sideChatEnabled ? [side-chat] : []),    // j:需要第二条会话管线 —— 未实现
+ *     ...(sideChatEnabled ? [side-chat] : []),    // j:有当前会话且非 side chat
  *     ...(browserSidebarEnabled ? [browser] : []),// M:WS 恒 true
  *     ...(isGit && !hasDiffTab ? [review] : []),  // N:需要 git diff 数据源 —— 未实现
  *     ...(timelineEnabled ? [timeline] : []),     // P:未实现
@@ -28,14 +31,13 @@ import { createFilesTabDescriptor } from './filesTabDescriptor'
  * deferSelectionUntilDropdownClose? }。open-file 与 browser 带 defer 标记
  * (菜单先关再执行,onCloseAutoFocus 时才跑 onSelect —— Codex 要开文件选择器,菜单不能挡)。
  *
- * 命令 id 证据(i18n):thread.sidePanel.openReviewTab / openBrowserTab / openFile /
- * openSideChat;快捷键实测:Review ⌃⇧G / Browser ⌘T / Files ⌘P / Side chat ⌥⌘S。
+ * 快捷键文本从命令注册表取(Codex `Po(yM, id)` 的等价物 commandKeybindingLabel)。
  */
 export interface SidePanelTabAction {
   id: string
   title: string
   Icon: (props: { className?: string }) => React.JSX.Element
-  /** 展示用快捷键文本(Codex 从 command registry 取;WS 还没有 command registry,先写字面量) */
+  /** 展示用快捷键文本(命令注册表首个键位的格式化串) */
   keyboardShortcut?: string
   /** Codex `deferSelectionUntilDropdownClose`:菜单关完再执行 */
   deferSelectionUntilDropdownClose?: boolean
@@ -53,14 +55,22 @@ const GIT_SORT_ORDER: Record<string, number> = {
 export function useSidePanelTabActions(
   controller: AppShellTabPanelController
 ): SidePanelTabAction[] {
-  const { chats, currentProject } = useWorkspace()
+  const { chats, currentProject, projects } = useWorkspace()
   const { activeChatId } = useChatRuntime()
+  const { rightPanelOpen, bottomPanelOpen } = useAppShell()
   // Codex `A`:当前会话(路由)的 workspace 非 projectless 且有 workspaceRoot。
   // WS:会话归属的项目即其 workspace;首页无会话时退回侧栏选中的项目。
   const activeChatProjectId =
     activeChatId != null ? (chats.find((c) => c.id === activeChatId)?.projectId ?? null) : null
   const workspaceProjectId = activeChatProjectId ?? currentProject?.id ?? null
   const hasWorkspaceRoot = workspaceProjectId != null
+  const workspaceRootPath =
+    projects.find((p) => p.id === workspaceProjectId)?.rootPaths[0] ?? undefined
+  // Codex side-chat 条件 `j = _ != null && !vt()`:有当前会话且当前不在 side chat
+  // (WS 的 side chat 开在 tab 里,主路由恒为普通会话 —— vt() 恒 false)
+  const canOpenSideChat = activeChatId != null
+  const panelOpen = controller.panelId === 'right' ? rightPanelOpen : bottomPanelOpen
+
   return useMemo(() => {
     const de: SidePanelTabAction[] = [
       ...(hasWorkspaceRoot
@@ -69,30 +79,66 @@ export function useSidePanelTabActions(
               id: 'open-file',
               title: 'Files',
               Icon: FilesFolderIcon,
-              keyboardShortcut: '⌘P',
+              keyboardShortcut: commandKeybindingLabel('searchFiles'),
               deferSelectionUntilDropdownClose: true,
               onSelect: () =>
                 controller.openTab(
-                  createFilesTabDescriptor(controller, '', workspaceProjectId ?? undefined)
+                  createFilesTabDescriptor(
+                    controller,
+                    '',
+                    workspaceProjectId ?? undefined,
+                    workspaceRootPath
+                  )
                 )
             } satisfies SidePanelTabAction
           ]
         : []),
-      // side-chat:未实现(条件不成立,不出现 —— 与 Codex 的条件组装语义一致)
+      ...(canOpenSideChat
+        ? [
+            {
+              id: 'side-chat',
+              title: 'Side chat',
+              Icon: SideChatIcon,
+              keyboardShortcut: commandKeybindingLabel('openSideChat'),
+              onSelect: () => {
+                const cwd =
+                  workspaceRootPath ?? chats.find((c) => c.id === activeChatId)?.cwd ?? null
+                void openSideChat({
+                  controller,
+                  sourceChatId: activeChatId,
+                  cwd,
+                  panelOpen
+                }).catch((error: unknown) => {
+                  // Codex:toast 'Failed to open side chat';WS 暂无 toast 系统(差异标记)
+                  console.error('Failed to open side chat', error)
+                })
+              }
+            } satisfies SidePanelTabAction
+          ]
+        : []),
       {
         id: 'browser',
         title: 'Browser',
         Icon: BrowserGlobeIcon,
-        keyboardShortcut: '⌘T',
+        keyboardShortcut: commandKeybindingLabel('openBrowserTab'),
         deferSelectionUntilDropdownClose: true,
         onSelect: () => controller.openTab(createBrowserTabDescriptor())
       }
-      // review / timeline / terminal / MCP 工具:未实现(同上)
+      // review / timeline / terminal / MCP 工具:未实现(条件不成立,不出现 —— 与 Codex 的条件组装语义一致)
     ]
     // Codex:git workspace 下按 Rn 排序。WS 的项目都是本地 git 仓库场景,恒按 Rn 排
     // (非 git 时 Codex 保持组装顺序 open-file 在前 —— 差异点,暂无 git 检测,先恒排)。
     return [...de].sort(
       (a, b) => (GIT_SORT_ORDER[a.id] ?? de.length) - (GIT_SORT_ORDER[b.id] ?? de.length)
     )
-  }, [controller, hasWorkspaceRoot, workspaceProjectId])
+  }, [
+    controller,
+    hasWorkspaceRoot,
+    workspaceProjectId,
+    workspaceRootPath,
+    canOpenSideChat,
+    activeChatId,
+    chats,
+    panelOpen
+  ])
 }
