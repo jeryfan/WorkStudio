@@ -8,11 +8,15 @@ import {
 } from 'electron'
 import { join } from 'node:path'
 import { HOST_CHANNEL } from '@shared/host/channels'
+import { M } from '@shared/protocol/methods'
+import { SETTINGS_QUERY_KEY } from '@shared/settings/definitions'
 import type { SystemThemeVariant, ViewMessage } from '@shared/host/messages'
 import type { AppViewMain } from '@shared/host/appHost'
 import type { BootstrapPayload } from '@shared/workspace/types'
 import type { ProjectRegistry } from '../workspace/ProjectRegistry'
 import type { AgentRuntime } from '../agent/AgentRuntime'
+import { SettingsStore } from '../settings/SettingsStore'
+import { APPEARANCE_SETTINGS, type AppearanceTheme } from '@shared/settings/definitions'
 import { ApplicationMenuManager } from '../menu/ApplicationMenuManager'
 import { registerContextMenuIpc } from '../menu/contextMenu'
 import { BrowserSidebarManager } from '../browser/BrowserSidebarManager'
@@ -59,6 +63,11 @@ export class WindowContext {
    * 本项目没有那些资产。
    */
   readonly gitWorker = new WorkerHost('git', { entryFileName: 'git.worker.js' })
+  /**
+   * 设置的真值持有者，全应用一份。
+   * 落盘在 app-server config 的 `[desktop]` 表 —— 见 SettingsStore 的取证说明。
+   */
+  readonly settingsStore = new SettingsStore()
   private readonly messageHandler: ElectronMessageHandler
   private readonly appHosts = new Map<number, AppHost>()
   private readonly appViews = new Map<number, AppViewMain>()
@@ -127,6 +136,38 @@ export class WindowContext {
     }
     nativeTheme.on('updated', onThemeUpdated)
     this.disposers.push(() => nativeTheme.removeListener('updated', onThemeUpdated))
+
+    /*
+     * appearanceTheme 的生效路径（Codex `applySettingSideEffects` 里的
+     * `e === 'appearanceTheme' && r.Q(t)`，`r.Q` 就是下面这行）：
+     *
+     *   设置值 → nativeTheme.themeSource → Electron 算出 shouldUseDarkColors
+     *          → 上面那个 'updated' 监听广播 system-theme-variant-updated
+     *          → 渲染层 ThemeProvider 切 <html> 上的 electron-light/dark
+     *
+     * 这条链决定了 `system` 档为什么"真的跟随系统"：themeSource='system' 时
+     * nativeTheme 自己会在系统外观变化（含日出日落自动切换）时发 'updated'，
+     * 不需要任何轮询，也不需要渲染层再自持一份明暗判断。
+     */
+    this.disposers.push(
+      this.settingsStore.onDidChange(APPEARANCE_SETTINGS.theme.key, () => {
+        this.applyAppearanceTheme()
+        // 设置变了 → 让所有渲染层重取 get-settings（Codex `broadcastQueryCacheInvalidation`）
+        this.broadcastQueryCacheInvalidation(SETTINGS_QUERY_KEY)
+      })
+    )
+
+    /*
+     * 设置真值在 app-server 的 config 里，所以要等连接 ready 才能读。
+     * agent 重启后会再收到一次 ready —— initialize 的语义是"以 config 为准
+     * 重新对齐"，重复调用是安全的（Codex 同样把它挂在连接就绪之后）。
+     */
+    this.disposers.push(
+      this.agent.connection.onConnectionStateChanged((state) => {
+        if (state.state !== 'ready') return
+        void this.initializeSettings()
+      })
+    )
 
     // 新窗口：接进 app-server 连接 + 挂 webview attach 钩子
     this.disposers.push(
@@ -240,6 +281,7 @@ export class WindowContext {
       browserManager: this.browserManager,
       terminalManager: this.terminalManager,
       appUpdatesManager: this.appUpdatesManager,
+      settingsStore: this.settingsStore,
       pickDirectories: () => this.pickDirectories()
     })
     this.appHosts.set(webContents.id, host)
@@ -260,6 +302,40 @@ export class WindowContext {
       .catch((error: unknown) => {
         console.warn('[host] failed to register AppView services', error)
       })
+  }
+
+  /**
+   * 读一遍 config 并把设置 store 接上写通道。
+   *
+   * 取证：Codex 的装配点是
+   *   `getUserSavedConfiguration().then(config => settingsStore.initialize({
+   *      config, batchWriteConfigValues: e => sendAppServerRequest('config/batchWrite', e) }))`
+   * 而 `getUserSavedConfiguration()` 就是 `config/read`
+   *   `{ includeLayers: false, cwd: null }` 取返回值的 `.config`。
+   */
+  private async initializeSettings(): Promise<void> {
+    try {
+      const response = await this.agent.client.request<{ config: unknown }>(M.configRead, {
+        includeLayers: false,
+        cwd: null
+      })
+      await this.settingsStore.initialize({
+        config: response.config,
+        client: {
+          batchWriteConfigValues: (params) => this.agent.client.request(M.configBatchWrite, params)
+        }
+      })
+      this.applyAppearanceTheme()
+      this.broadcastQueryCacheInvalidation(SETTINGS_QUERY_KEY)
+    } catch (error) {
+      console.warn('[settings] failed to initialize desktop settings', error)
+    }
+  }
+
+  /** Codex `r.Q(value)`：把 appearanceTheme 落到 Electron 的 nativeTheme 上 */
+  private applyAppearanceTheme(): void {
+    const theme = this.settingsStore.getEffective(APPEARANCE_SETTINGS.theme.key) as AppearanceTheme
+    nativeTheme.themeSource = theme === 'light' || theme === 'dark' ? theme : 'system'
   }
 
   /** 让渲染层的查询缓存失效（Codex `broadcastQueryCacheInvalidation`） */

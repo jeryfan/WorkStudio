@@ -90,6 +90,15 @@ export function Popover({
           top: pos?.top ?? anchor.top,
           width,
           height,
+          /*
+           * Codex 的菜单内容带
+           *   max-width:  min(available-width,  calc(100vw - 16px))
+           *   max-height: min(available-height, calc(100vh - 16px))
+           * （Radix 的 --radix-*-available-* 变量）。不设 width 的菜单（权限档）
+           * 靠它把最长那行描述夹在视口内，否则内容一长就顶出屏幕。
+           */
+          maxWidth: 'calc(100vw - 16px)',
+          maxHeight: 'calc(100vh - 16px)',
           // 布局测量完成前隐藏，避免在 (0,0) 闪一帧
           visibility: pos ? 'visible' : 'hidden'
         }}

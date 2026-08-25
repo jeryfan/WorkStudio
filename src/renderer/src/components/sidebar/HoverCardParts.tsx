@@ -103,14 +103,27 @@ export function HoverCardTitle({
   className,
   onRename,
   title,
-  titleValue
+  titleValue,
+  editing: editingProp,
+  onEditingChange
 }: {
   className?: string
   onRename?(next: string): void
   title: ReactNode
   titleValue?: string
+  /**
+   * 受控编辑态（可选）。给 header 用：三点菜单里的 "Rename chat" 要能从外面
+   * 把这个标题切进编辑态。不传就退回内部自管（侧栏 hover card 的用法）。
+   */
+  editing?: boolean
+  onEditingChange?(editing: boolean): void
 }): React.JSX.Element {
-  const [editing, setEditing] = useState(false)
+  const [editingState, setEditingState] = useState(false)
+  const editing = editingProp ?? editingState
+  const setEditing = (next: boolean): void => {
+    setEditingState(next)
+    onEditingChange?.(next)
+  }
   const [value, setValue] = useState(titleValue ?? '')
 
   if (onRename == null || titleValue == null) {

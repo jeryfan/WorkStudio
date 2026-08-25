@@ -4,8 +4,7 @@
  * 权限策略枚举供 Composer 的权限 pill 使用，选择结果随 turn/start 的每轮
  * 覆盖项下发。Entry 等会话运行时模型在 M4 接入时加入本文件。
  */
-import type { AskForApproval } from '@shared/protocol/generated/v2/AskForApproval'
-import type { SandboxMode } from '@shared/protocol/generated/v2/SandboxMode'
+import type { AgentMode } from '../../state/permissionSelection'
 import type { ChatStatus } from '@shared/protocol/entities'
 import type { WorkspaceSnapshot } from '@shared/workspace/types'
 
@@ -58,44 +57,50 @@ export interface ChatService {
   remove(chatId: string): Promise<WorkspaceSnapshot>
 }
 
-/** 权限 pill 的一个可选策略 */
-export interface AccessPolicy {
-  id: 'ask' | 'auto' | 'full'
+/** 权限菜单的一行（Codex 的 permissions dropdown item，标签取自实测 DOM） */
+export interface AgentModeRow {
+  /** 档位。第一行是动态的 —— 有项目 `auto`、无项目 `granular`（Codex `Oti`） */
+  mode: AgentMode
   label: string
   description: string
-  /** 协议审批策略（AskForApproval） */
-  approval: AskForApproval
-  /** 协议沙箱模式（SandboxMode） */
-  sandbox: SandboxMode
-  /** true = 危险档，UI 用警示色（chat.html 的 warn 样式） */
+  /** true = 危险档，UI 用警示色（Codex `OUs` 那组 warning class） */
   warn: boolean
 }
 
-/** 可选策略列表，顺序即权限弹层里的行顺序（chat.html popAccess） */
-export const ACCESS_POLICIES: AccessPolicy[] = [
-  {
-    id: 'ask',
+/**
+ * 菜单的三行（实测 DOM `dom-permissions-picker.html` 只有这三行：
+ * read-only 与 custom 要 requirements/config 才会出现，本项目不构造）。
+ *
+ * 第一行的档位由调用方按"有没有项目"决定，所以这里只给标签，不写死 mode。
+ */
+export const ACCESS_ROW_LABELS = {
+  default: {
     label: 'Ask for approval',
-    description: 'Always ask to edit external files and use the internet',
-    approval: 'on-request',
-    sandbox: 'workspace-write',
-    warn: false
+    description: 'Always ask to edit external files and use the internet'
   },
-  {
-    /* Codex 权限菜单的中间档("agent 模式"):工作区内自动,危险/越界动作才问 */
-    id: 'auto',
+  guardian: {
     label: 'Approve for me',
-    description: 'Only ask for actions detected as potentially unsafe',
-    approval: 'never',
-    sandbox: 'workspace-write',
-    warn: false
+    description: 'Only ask for actions detected as potentially unsafe'
   },
-  {
-    id: 'full',
+  full: {
     label: 'Full access',
-    description: 'Unrestricted access to the internet and any file on your computer',
-    approval: 'never',
-    sandbox: 'danger-full-access',
-    warn: true
+    description: 'Unrestricted access to the internet and any file on your computer'
   }
-]
+} as const
+
+/**
+ * pill 上的短标签（Codex 的 trigger 分支 `Ie` / `full-access` / `guardian-approvals` / 其他）：
+ * auto / granular / read-only 都显示 "Ask for approval"。
+ */
+export function agentModeLabel(mode: AgentMode): string {
+  switch (mode) {
+    case 'full-access':
+      return ACCESS_ROW_LABELS.full.label
+    case 'guardian-approvals':
+      return ACCESS_ROW_LABELS.guardian.label
+    case 'custom':
+      return 'Custom'
+    default:
+      return ACCESS_ROW_LABELS.default.label
+  }
+}

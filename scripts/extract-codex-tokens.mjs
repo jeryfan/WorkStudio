@@ -508,7 +508,9 @@ let util = banner('Codex 命名语义类 + 平台 variant', '壳层用到的非 
 util += `/* 平台 variant —— 选择器形态与 Codex 编译产物一致 */\n`
 util += `@custom-variant electron (&:where(:is([data-codex-window-type='browser'],[data-codex-window-type='chrome-extension'],[data-codex-window-type='electron']) &));\n`
 util += `@custom-variant browser (&:where([data-codex-window-type='browser'] &));\n`
-util += `@custom-variant extension (&:where([data-codex-window-type='extension'] &));\n\n`
+util += `@custom-variant extension (&:where([data-codex-window-type='extension'] &));\n`
+// windows: 的编译产物是 `.windows\:x:where(:root[data-codex-os=win32] .windows\:x)`
+util += `@custom-variant windows (&:where(:root[data-codex-os='win32'] &));\n\n`
 for (const [, rules] of grouped) {
   const seen = new Set()
   const inner = rules
@@ -536,6 +538,17 @@ if (variantRules.length) {
 }
 
 util += `/* ${'-'.repeat(70)}\n   自定义 @utility —— 挂在非标准命名空间上,Tailwind 不会自动生成\n   ${'-'.repeat(70)} */\n\n`
+/*
+ * 两个**自动发现抓不到**的 utility,来源已在 Codex 产物里逐条核对:
+ *   .scrollbar-stable{scrollbar-gutter:stable}                   ← 声明不引用自定义命名空间
+ *   .electron\:elevation-prominent…{box-shadow:var(--elevation-prominent)}
+ *                                                               ← 只以 variant 形态出现,
+ *                                                                 裸类名在产物里根本不存在
+ * 自动发现是按"引用了自定义命名空间的单一类选择器"扫的,这两条都不满足,
+ * 所以显式补上,否则设置页壳层的滚动条留白与主表面投影会整体丢失。
+ */
+util += `@utility scrollbar-stable {\n  scrollbar-gutter: stable\n}\n\n`
+util += `@utility elevation-prominent {\n  box-shadow: var(--elevation-prominent)\n}\n\n`
 for (const [name, body] of [...utilities].sort(([a], [b]) => a.localeCompare(b))) {
   const decls = body
     .split(';')

@@ -352,6 +352,11 @@ function writeStoredBottomHeight(height: number): void {
  * AppShellTabs 渲染时读出。slot key 以 Codex 的组件名命名(atom 名 hUn/dUn/… 是压缩名)。
  */
 export type AppShellSlotKey =
+  /**
+   * header 中段的内容(Codex `$P.Header` → atom `CUn`)。
+   * 单节点、后写覆盖:同时只有一个路由在渲染 header 内容。
+   */
+  | 'header'
   | 'rightPanelTabsEmptyState'
   | 'rightPanelOutlet'
   | 'rightPanelTabListBefore'
@@ -361,6 +366,27 @@ export type AppShellSlotKey =
   | 'bottomPanelOutlet'
   | 'bottomPanelTabListAfter'
   | 'bottomPanelTabListAfterSticky'
+
+/* ==================== header 动作注册表(Codex `$P.HeaderAction`) ==================== */
+
+/**
+ * 一条 header 动作(Codex `QYr` 写进 `LUn[slotPosition]` 的那个 map)。
+ *
+ * Codex 有三份注册表(`LUn = {center: kUn, left: AUn, right: jUn}`):
+ * center 是 header 中段(围着 Header 内容排),left/right 是两侧的固定槽。
+ * 本项目只接 center —— 两侧槽的按钮(侧栏开关/前进后退/面板开关)现在还是
+ * AppShellHeader 里写死的,改成注册制是独立一步。
+ *
+ * `align` 决定落在中段的哪一组(Codex 的 `h`/`g`/`_` 三组:
+ * start 贴着 Header 内容右侧、center 是横跨整宽居中的一层、end 靠右)。
+ */
+export interface HeaderActionEntry {
+  actionId: string
+  align: 'start' | 'center' | 'end'
+  /** 同组内升序(Codex `sort((a,b) => a.order - b.order)`) */
+  order: number
+  node: ReactNode
+}
 
 /* ==================== Context ==================== */
 
@@ -411,6 +437,10 @@ interface AppShellContextValue {
   slots: Partial<Record<AppShellSlotKey, ReactNode>>
   registerSlot(key: AppShellSlotKey, node: ReactNode): void
   unregisterSlot(key: AppShellSlotKey): void
+  /** header 中段的动作,已按 order 升序 */
+  headerActions: HeaderActionEntry[]
+  registerHeaderAction(entry: HeaderActionEntry): void
+  unregisterHeaderAction(actionId: string): void
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null)
@@ -504,6 +534,27 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
     // Codex 的 KP 卸载时写回 null(不是删 key)
     setSlots((prev) => ({ ...prev, [key]: null }))
   }, [])
+
+  /*
+   * header 动作注册表(Codex `kUn` 的 ids$ + byId 两个 atom 合成一份数组)。
+   * 注册顺序不决定渲染顺序 —— 渲染前按 order 升序排。
+   */
+  const [headerActionMap, setHeaderActionMap] = useState<Record<string, HeaderActionEntry>>({})
+  const registerHeaderAction = useCallback((entry: HeaderActionEntry): void => {
+    setHeaderActionMap((prev) => ({ ...prev, [entry.actionId]: entry }))
+  }, [])
+  const unregisterHeaderAction = useCallback((actionId: string): void => {
+    setHeaderActionMap((prev) => {
+      if (prev[actionId] == null) return prev
+      const next = { ...prev }
+      delete next[actionId]
+      return next
+    })
+  }, [])
+  const headerActions = useMemo(
+    () => Object.values(headerActionMap).sort((a, b) => a.order - b.order),
+    [headerActionMap]
+  )
 
   /*
    * 窗口尺寸跟踪 + 断点联动(app-initial:228173-228189):窗口 ≤720(HYr)自动收右面板
@@ -940,7 +991,10 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setFileTreeWidth,
       slots,
       registerSlot,
-      unregisterSlot
+      unregisterSlot,
+      headerActions,
+      registerHeaderAction,
+      unregisterHeaderAction
     }),
     [
       sidebarOpen,
@@ -971,7 +1025,10 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       setFileTreeWidth,
       slots,
       registerSlot,
-      unregisterSlot
+      unregisterSlot,
+      headerActions,
+      registerHeaderAction,
+      unregisterHeaderAction
     ]
   )
 

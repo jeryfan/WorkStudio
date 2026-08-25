@@ -8,6 +8,7 @@
 @custom-variant electron (&:where(:is([data-codex-window-type='browser'],[data-codex-window-type='chrome-extension'],[data-codex-window-type='electron']) &));
 @custom-variant browser (&:where([data-codex-window-type='browser'] &));
 @custom-variant extension (&:where([data-codex-window-type='extension'] &));
+@custom-variant windows (&:where(:root[data-codex-os='win32'] &));
 
 @layer components {
   @supports (animation-timeline:--scroll-fade) {
@@ -854,6 +855,14 @@
 /* ----------------------------------------------------------------------
    自定义 @utility —— 挂在非标准命名空间上,Tailwind 不会自动生成
    ---------------------------------------------------------------------- */
+
+@utility scrollbar-stable {
+  scrollbar-gutter: stable
+}
+
+@utility elevation-prominent {
+  box-shadow: var(--elevation-prominent)
+}
 
 @utility duration-basic {
   --tw-duration:var(--transition-duration-basic);

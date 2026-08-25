@@ -25,17 +25,20 @@ import {
 } from './turnStore'
 import { M } from '@shared/protocol/methods'
 import { registerApprovalOwner } from './approvalBus'
+import { dispatchHostMessage } from '../host/hostMessages'
+import { commitTurnSelection, resolveSelection } from './modelSelection'
+import {
+  commitTurnPermissions,
+  resolvePermissions,
+  resolvePolicy,
+  seedThreadPermissions,
+  threadPermissionFields,
+  turnPermissionFields
+} from './permissionSelection'
 import { toApprovalResponse, toPendingApproval } from '../chat/adapter/approval'
 import type { ApprovalDecision, PendingApproval } from '../chat/model/approval'
 import type { Todo, TodoStatus } from '../chat/model/plan'
-import type {
-  AskForApproval,
-  Chat,
-  Entry,
-  SandboxMode,
-  Turn,
-  UserInput
-} from '@shared/protocol/entities'
+import type { Chat, Entry, Turn, UserInput } from '@shared/protocol/entities'
 
 /** 一次轮次的运行状态，驱动发送按钮在"发送/停止"之间切换 */
 export type TurnPhase = 'idle' | 'running'
@@ -109,8 +112,11 @@ export interface StartChatParams {
   /** 首条消息的协议输入(文本段 + skill/mention 变体) */
   input: UserInput[]
   cwd: string
-  approvalPolicy: AskForApproval
-  sandbox: SandboxMode
+  /**
+   * 运行时工作区根(Codex `workspaceRoots`):有项目就是项目根,无项目为空。
+   * 随权限档一起展开进 thread/start 与之后每一轮的 turn/start。
+   */
+  roots: string[]
 }
 
 /** 纯字符串 → 单文本段输入(队列等纯文本路径用) */
@@ -222,8 +228,20 @@ function useChatRuntimeCore(chatId: string | null): {
   /** 编辑一条已发送的用户消息(回滚该轮起 + 重发) */
   editUserMessage(turnId: string, text: string): Promise<void>
   respondToApproval(requestKey: string, decision: ApprovalDecision): void
-  /** startChat 新建的会话没有历史,resume 会清掉乐观追加的 pending turn —— 跳过 */
-  markFresh(threadId: string): void
+  /**
+   * 指定线程发起一轮(不依赖已绑定的 activeChatId)。
+   * 新建会话的第一轮必须走这条:此刻 chatId state 还没刷新。
+   */
+  startTurn(threadId: string, input: UserInput[] | string): Promise<void>
+  /**
+   * 认领一个刚新建的会话:**同步**绑定事件归属(activeRef)并标记为无历史。
+   *
+   * 两件事都是必需的:
+   * - 同步绑定:turn/start 之后的 item/* 通知按 `threadId === activeRef.current`
+   *   过滤,等 chatId effect 跑完再绑就会丢掉开头的事件。
+   * - 标记无历史:resume 会清掉乐观追加的 pending turn,新会话也没有历史可读。
+   */
+  adoptNewChat(threadId: string): void
 } {
   const [turns, setTurns] = useState<RuntimeTurn[]>([])
   const [approvals, setApprovals] = useState<ReadonlyMap<string, PendingApproval>>(new Map())
@@ -256,7 +274,7 @@ function useChatRuntimeCore(chatId: string | null): {
   const activeRef = useRef<string | null>(chatId)
   // 上一次绑定的会话(卸载/切换时退订)
   const previousRef = useRef<string | null>(null)
-  // startChat 新建的会话:跳过 resume(见 markFresh)
+  // 新建会话(adoptNewChat):跳过 resume
   const freshRef = useRef<Set<string>>(new Set())
   /*
    * fork seed 的 StrictMode 安全容器:首次 effect 从模块表取出后存 ref
@@ -516,8 +534,10 @@ function useChatRuntimeCore(chatId: string | null): {
     setReadOnlyReason(null)
   }, [cancelApprovals])
 
-  const markFresh = useCallback((threadId: string): void => {
+  const adoptNewChat = useCallback((threadId: string): void => {
     freshRef.current.add(threadId)
+    // 同步绑定:第一轮的通知在 chatId effect 之前就可能到
+    activeRef.current = threadId
   }, [])
 
   /*
@@ -532,15 +552,19 @@ function useChatRuntimeCore(chatId: string | null): {
       rpc.request(M.chatUnsubscribe, { threadId: previous }).catch(() => {})
     }
     activeRef.current = chatId
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换/解绑时同步重置(外部系统驱动)
-    resetView()
-    if (chatId == null) {
-      setPhase('idle')
+    /*
+     * 新建会话(adoptNewChat)已经同步绑定并乐观追加了第一轮 ——
+     * 这里既不能 resetView(会把那一轮清掉,表现为"发出去的消息消失了"),
+     * 也没有历史可 resume。
+     */
+    if (chatId != null && freshRef.current.has(chatId)) {
+      freshRef.current.delete(chatId)
       return
     }
-    // startChat 新建的会话:没有历史,resume 会把乐观追加的 pending turn 清掉
-    if (freshRef.current.has(chatId)) {
-      freshRef.current.delete(chatId)
+    resetView()
+    if (chatId == null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 同上：解绑时同步复位
+      setPhase('idle')
       return
     }
     // fork 回来的会话(side chat):seed 历史,不 resume(ephemeral 不落盘,resume 会报
@@ -629,12 +653,46 @@ function useChatRuntimeCore(chatId: string | null): {
       })
       setTurns((prev) => [...prev, pending])
       setPhase('running')
+      /*
+       * model / effort 必须随每一轮下发 —— Codex 的 turn/start 载荷里
+       * `model: F, effort: I` 是常驻字段，解析链是
+       *   本次覆盖 ?? 线程 pending ?? 线程 latest（新线程为 null，服务端落回 config）
+       * 漏掉它们的后果不是"用默认模型"这么轻：picker 变成纯装饰，用户选了别的
+       * 模型也照旧用 config 里那个，而界面显示的是他选的那个。
+       */
+      const selection = resolveSelection(threadId)
+      /*
+       * 权限档同理，而且比 model 更要紧：选了 "Ask for approval" 却不下发
+       * approvalPolicy，agent 根本不会来问 —— 菜单就是个装饰。
+       *
+       * 展开顺序逐字对齐 Codex 的 composer 首轮路径（产物 `JWs`，
+       * shouldSendPermissionOverrides 为真时）：
+       *   O = tu(agentMode, roots, config)
+       *   { approvalPolicy: O.approvalPolicy, approvalsReviewer: O.approvalsReviewer,
+       *     ...Fme(O),                                   // 有档案 → permissions: <id>
+       *     ...(O.activePermissionProfile == null ? {} : { runtimeWorkspaceRoots: Ime(O) }) }
+       * 注意**有权限档案时不发 sandboxPolicy**（`Fme` 是二选一，大载荷构造器里
+       * 也是 `sandboxPolicy: me == null && he ? le : null`）。两个都发会互相打架。
+       */
+      const permissions = resolvePermissions(threadId)
       try {
         await rpc.request(M.turnStart, {
           threadId,
           input: inputs,
-          clientUserMessageId: clientId
+          clientUserMessageId: clientId,
+          model: selection.model,
+          effort: selection.effort,
+          ...turnPermissionFields(resolvePolicy(permissions.mode, permissions.roots)),
+          /*
+           * Codex 里这两个是常驻字段：`multiAgentMode: SRt` 是常量
+           * `explicitRequestOnly`（产物 108542），`outputSchema` 无结构化输出时为 null。
+           */
+          multiAgentMode: 'explicitRequestOnly',
+          outputSchema: null
         })
+        // Codex `e.latestModel = F ?? e.latestModel`：发出去之后这一轮的值成为线程的 latest
+        commitTurnSelection(threadId, selection)
+        commitTurnPermissions(threadId, permissions)
       } catch (err) {
         setTurns((prev) => prev.filter((t) => t.id !== pending.id))
         setPhase('idle')
@@ -825,7 +883,8 @@ function useChatRuntimeCore(chatId: string | null): {
     resumeInterruptedQueue,
     editUserMessage,
     respondToApproval,
-    markFresh
+    startTurn,
+    adoptNewChat
   }
 }
 
@@ -837,28 +896,64 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }): Reac
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const core = useChatRuntimeCore(activeChatId)
 
-  const openChat = useCallback((chatId: string): void => {
-    setActiveChatId(chatId)
+  /*
+   * 打开/关闭会话都是一次**导航**，所以要顺手离开设置路由 —— 否则进了
+   * /settings 之后点侧栏任何一条会话，路由还停在设置页，界面看起来卡住了。
+   *
+   * Codex 里这件事是路由自带的：点会话是 `navigate('/c/<id>')`，离开 /settings
+   * 是导航的副产品。本项目还没有会话路由（主区靠 activeChatId 切视图），
+   * 所以这里显式把路由退回非设置路径，用的还是 `navigate-to-route` 这条消息
+   *（本地自投递，与 tray / hotkey 窗口发起的导航同一个处理器）。
+   */
+  const leaveSettingsRoute = useCallback((): void => {
+    dispatchHostMessage({ type: 'navigate-to-route', path: '/' })
   }, [])
+
+  const openChat = useCallback(
+    (chatId: string): void => {
+      leaveSettingsRoute()
+      setActiveChatId(chatId)
+    },
+    [leaveSettingsRoute]
+  )
 
   const closeChat = useCallback((): void => {
+    leaveSettingsRoute()
     setActiveChatId(null)
-  }, [])
+  }, [leaveSettingsRoute])
 
   const startChat = useCallback(
-    async ({ input, cwd, approvalPolicy, sandbox }: StartChatParams): Promise<string> => {
+    async ({ input, cwd, roots }: StartChatParams): Promise<string> => {
+      /*
+       * thread/start 的权限字段与 turn/start **不同形状**（Codex `owe()` 用 `Pme`，
+       * turn/start 用 `Fme`）：没有权限档案时 thread 发 `sandbox: <SandboxMode 串>`，
+       * turn 发 `sandboxPolicy: <对象>`。混用会被服务端拒。
+       */
+      /*
+       * 解析要带上"有没有项目" —— 无项目会话的默认档是 granular 而不是 auto
+       *（Codex `Oti`）。之后每一轮从线程状态读，就不必再传这个标志。
+       */
+      const selection = resolvePermissions(null, roots.length === 0)
+      const policy = resolvePolicy(selection.mode, roots)
       const { thread } = await rpc.request<{ thread: Chat }>(M.chatStart, {
         cwd,
-        approvalPolicy,
-        sandbox
+        ...threadPermissionFields(policy)
       })
-      // 新建会话没有历史:标记跳过 resume,直接开始第一轮
-      core.markFresh(thread.id)
+      // 这一档已经应用到线程上了：记进线程状态，之后每一轮从这里解析
+      seedThreadPermissions(thread.id, { mode: selection.mode, roots })
+      /*
+       * 顺序是有讲究的:先认领(同步绑定事件归属 + 标记无历史),再切 state,
+       * 最后**带着显式 threadId**发第一轮 —— setActiveChatId 是异步的,
+       * 这一刻 sendMessage 读到的绑定还是空的(会抛 "No active chat")。
+       * Codex 的 turn/start 载荷里 threadId 也一直是显式的(`threadId: t`)。
+       */
+      core.adoptNewChat(thread.id)
+      leaveSettingsRoute()
       setActiveChatId(thread.id)
-      await core.sendMessage(input)
+      await core.startTurn(thread.id, input)
       return thread.id
     },
-    [core]
+    [core, leaveSettingsRoute]
   )
 
   const value = useMemo<ChatRuntimeValue>(

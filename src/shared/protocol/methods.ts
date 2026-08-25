@@ -69,6 +69,7 @@ export const M = {
   // 配置
   configRead: 'config/read',
   configWrite: 'config/value/write',
+  configBatchWrite: 'config/batchWrite',
 
   // Git
   gitDiffToRemote: 'gitDiffToRemote'

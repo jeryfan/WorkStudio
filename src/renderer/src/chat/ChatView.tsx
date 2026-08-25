@@ -9,6 +9,7 @@ import { ThreadTurnBody } from './ThreadTurnBody'
 import { MarkdownPart } from './parts/MarkdownPart'
 import { TodoListPart } from './parts/TodoListPart'
 import { UserMessageActions, UserMessageEditForm } from './parts/UserMessageActions'
+import { ThreadHeaderRegistration } from '../components/layout/ThreadHeaderSlot'
 
 /**
  * 会话视图 —— 骨架逐层对齐 Codex(见 ThreadScrollContainer / ThreadTurn 里的层级注释)。
@@ -86,6 +87,11 @@ export function ChatView(): React.JSX.Element {
 
   return (
     <ChatActionsProvider respondToApproval={respondToApproval}>
+      {/*
+       * 标题 + 三点菜单挂在 app shell 的 header 中段 —— Codex 里
+       * thread 路由就是用 `$P.Header` 把它注册进 shell 的(见 ThreadHeaderSlot)。
+       */}
+      <ThreadHeaderRegistration />
       <ThreadScrollContainer
         footer={
           <>

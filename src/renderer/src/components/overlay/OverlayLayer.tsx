@@ -4,6 +4,7 @@ import { CreateProjectDialog } from '../dialog/CreateProjectDialog'
 import { DropdownMenu } from '../menu/DropdownMenu'
 import { menuDefs, projectActionEntries } from '../menu/menuDefs'
 import { useWorkspace } from '../../state/WorkspaceContext'
+import { runCommand } from '../../state/commands'
 
 /**
  * 浮层统一出口：下拉菜单 / ⌘K 命令面板 / 新建项目对话框。
@@ -32,6 +33,8 @@ export function OverlayLayer(): React.JSX.Element {
           width={menuDefs[menu.id].width}
           onClose={closeMenu}
           onSelect={(id) => {
+            // profile 菜单里的 Settings 与 ⌘, 是同一个命令（Codex 也是同一个 id）
+            if (menu.id === 'settings' && id === 'settings') runCommand('settings')
             if (menu.id === 'project-actions' && id === 'pin-project' && menu.projectId) {
               const isPinned = pinnedProjects.some((p) => p.id === menu.projectId)
               void setProjectPinned(menu.projectId, !isPinned)

@@ -9,6 +9,7 @@ import { createBrowserTabDescriptor } from './browserTabDescriptor'
 import { openFilesTab } from './filesTabDescriptor'
 import { openTerminalTab } from './terminalTabDescriptor'
 import { openSideChat } from './sideChat/openSideChat'
+import { dangerToast } from '../../state/toastStore'
 
 /**
  * 右面板新 tab 动作 —— launcher 空态(`pr`/`hr`)与 strip 尾部「+」菜单(`Or`)共用
@@ -111,8 +112,14 @@ export function useSidePanelTabActions(
                   cwd,
                   panelOpen
                 }).catch((error: unknown) => {
-                  // Codex:toast 'Failed to open side chat';WS 暂无 toast 系统(差异标记)
+                  /*
+                   * Codex 失败时弹 toast(`threadHeader.openSideChatError`),不是静默。
+                   * 静默的后果实测过:fork 失败 → 关掉 loading tab → 那是面板唯一的 tab
+                   * → 连面板一起收起(Codex 的 closeTab 规则),用户看到的就是
+                   * "点一下 side chat 面板自己关了"。
+                   */
                   console.error('Failed to open side chat', error)
+                  dangerToast('Failed to open side chat')
                 })
               }
             } satisfies SidePanelTabAction

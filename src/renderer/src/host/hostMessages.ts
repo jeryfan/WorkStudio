@@ -63,6 +63,20 @@ function ensureStarted(): void {
   window.addEventListener('message', onWindowMessage)
 }
 
+/**
+ * 本地自投递（Codex `vm.dispatchHostMessage`：`this.deliverMessage(e.type, e)`）。
+ *
+ * 用途是让**应用内**的导航与宿主发起的导航走同一个处理器。Codex 的
+ * "Settings…" 命令实测就是
+ *     dispatchHostMessage({ type: 'navigate-to-route', path: '/settings' })
+ * —— 消息根本不出渲染进程，只是投进同一条总线。所以不需要为应用内导航另开
+ * 一套 API，也不需要绕一趟主进程。
+ */
+export function dispatchHostMessage(message: HostMessage): void {
+  ensureStarted()
+  dispatch(message)
+}
+
 /** 渲染层 → 宿主（Codex 的 `postMessage` 出口） */
 export function postMessageFromView(message: ViewMessage): void {
   const bridge = window.electronBridge

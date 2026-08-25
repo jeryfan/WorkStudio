@@ -8,8 +8,16 @@ import { isMacOS } from '../../utils/platform'
  * 主题 —— 对齐 Codex。
  *
  * Codex 的做法:订阅宿主上报的系统外观(electronBridge.subscribeToSystemThemeVariant),
- * 在 <html> 上切 electron-light / electron-dark。没有应用内主题选择器,
- * 也不读 localStorage —— 外观完全由系统决定。这里复刻同一套。
+ * 在 <html> 上切 electron-light / electron-dark。这里复刻同一套。
+ *
+ * **注意这条链的上游有用户选择。** Codex 有应用内主题选择器(设置项
+ * `appearanceTheme`,三档 system/light/dark,落盘在 app-server config 的
+ * `[desktop]` 表),但它作用在**主进程**:主进程把该值写进
+ * `nativeTheme.themeSource`,Electron 据此算出 shouldUseDarkColors,再经
+ * `system-theme-variant-updated` 广播下来。所以这一层拿到的始终只是
+ * 明/暗两态,既不需要读设置,也不该在这里再判一次 —— 渲染层若自持一份
+ * 「当前选的是哪档」,就会和 config 里的真值形成两份状态。
+ * 也不读 localStorage:真值在 config 里,agent 也能读写它。
  *
  * 语义 token 的落地方式有一处**有意的差异**:Codex 是用 JS 把 60 多个已解析的
  * --color-* 内联注入 <html>(它的颜色引擎在运行时从四个种子推导)。WorkStudio

@@ -38,7 +38,9 @@ import type { ApplicationMenuManager } from '../../menu/ApplicationMenuManager'
 import type { BrowserSidebarManager } from '../../browser/BrowserSidebarManager'
 import type { TerminalManager } from '../../terminal/TerminalManager'
 import type { AppUpdatesManager } from '../../updates/AppUpdatesManager'
+import type { SettingsStore } from '../../settings/SettingsStore'
 import { OpenInService } from './OpenInService'
+import { SettingsService } from './SettingsService'
 import { TerminalService } from './TerminalService'
 import { WorkspaceFilesService } from './WorkspaceFilesService'
 
@@ -381,6 +383,8 @@ export interface AppHostDependencies {
   terminalManager: TerminalManager
   /** 更新状态全应用一份 —— 见 AppUpdatesService 的说明 */
   appUpdatesManager: AppUpdatesManager
+  /** 设置的真值持有者，全应用一份（落盘在 app-server config 的 `[desktop]` 表） */
+  settingsStore: SettingsStore
   pickDirectories(): Promise<string[]>
 }
 
@@ -445,6 +449,7 @@ export class AppHost extends RpcTarget implements AppHostMain {
       clipboard: new ClipboardService(),
       openIn: new OpenInService(),
       workspaceFiles: this.workspaceFiles,
+      settings: new SettingsService(deps.settingsStore),
       localProjects: new LocalProjectsService(deps.registry, deps.pickDirectories),
       threadProjectAssignments: new ThreadProjectAssignmentsService(deps.registry),
       browserSidebar: new BrowserSidebarService(deps.browserManager),

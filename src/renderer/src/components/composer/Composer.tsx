@@ -4,13 +4,14 @@ import { useSession } from '../../state/SessionContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { useAppShell } from '../../state/AppShellContext'
 import { openSideChat } from '../panel/sideChat/openSideChat'
-import { effortProtocolValue } from '../../services/model/types'
+import { formatEffort } from '../../services/model/types'
 import { listSkills } from '../../services/chat/skillService'
 import { searchFiles } from '../../services/file/fileSearchService'
 import { rpc } from '../../rpc/client'
 import { M } from '@shared/protocol/methods'
 import { cx } from '../../utils/cx'
-import type { AskForApproval, SandboxMode, UserInput } from '@shared/protocol/entities'
+import type { UserInput } from '@shared/protocol/entities'
+import { agentModeLabel } from '../../services/chat/types'
 import type { SkillMetadata } from '@shared/protocol/generated/v2/SkillMetadata'
 import {
   BranchIcon,
@@ -115,17 +116,6 @@ const UTILITY_BAR_SETTLED_STYLE = { opacity: 1, transform: 'translateY(0px)' } a
  * 输入区是 ProseMirror(见 RichTextInput.tsx),与 Codex 同构:
  * (`codex-RichTextInput` > `div.ProseMirror[contenteditable]` > `p.placeholder`)。
  */
-/** 无项目会话的权限档：逐项授权 */
-const PROJECTLESS_APPROVAL: AskForApproval = {
-  granular: {
-    sandbox_approval: true,
-    rules: true,
-    skill_approval: true,
-    request_permissions: true,
-    mcp_elicitations: true
-  }
-}
-
 /**
  * Codex 的技能显示名推导("chrome:control-chrome" → "Chrome: Control Chrome",
  * "code-to-spec" → "Code to Spec"):按 `:` 分段、按 `-` 分词、首词恒大写,
@@ -176,7 +166,7 @@ export function Composer({
   placement = 'home'
 }: { placement?: 'home' | 'thread' } = {}): React.JSX.Element {
   const { currentProject, selectProject } = useWorkspace()
-  const { access, model, effort, followUpQueueMode, setFollowUpQueueMode } = useSession()
+  const { agentMode, model, effort, followUpQueueMode, setFollowUpQueueMode } = useSession()
   const {
     activeChatId,
     phase,
@@ -271,18 +261,15 @@ export function Composer({
   const submitDisabled = readOnly || submitting
 
   /**
-   * 无项目会话回落到用户主目录，并把权限档收紧到逐项授权——没有项目边界时
-   * agent 名义上能碰整个主目录，沿用项目内的宽松档风险过大。
+   * 新会话跑在哪 —— 有项目用项目根，无项目（Codex 的 projectless）回落到主目录。
+   *
+   * 权限档不在这里决定：档位由 permissionSelection 按"有没有项目"解析
+   *（无项目默认 granular，逐项授权），thread/start 前才展开成协议字段。
    */
-  const resolveRunLocation = (): {
-    cwd: string
-    approvalPolicy: AskForApproval
-    sandbox: SandboxMode
-  } => {
+  const resolveRunLocation = (): { cwd: string; roots: string[] } => {
     const root = currentProject?.rootPaths[0]
-    if (root) return { cwd: root, approvalPolicy: access.approval, sandbox: access.sandbox }
-    // granular 会对沙箱、规则、技能、权限提升逐项征求同意
-    return { cwd: '~', approvalPolicy: PROJECTLESS_APPROVAL, sandbox: 'workspace-write' }
+    if (root) return { cwd: root, roots: currentProject?.rootPaths ?? [root] }
+    return { cwd: '~', roots: [] }
   }
 
   const submit = async (): Promise<void> => {
@@ -928,18 +915,20 @@ export function Composer({
                         className={`${COMPOSER_BUTTON_BASE} h-token-button-composer-sm px-1.5 py-0 text-sm leading-[18px] outline-hidden cursor-interaction min-w-0`}
                       >
                         <ComposerDropdownLabel
-                          foreground={access.warn ? 'warning' : 'primary'}
+                          foreground={agentMode === 'full-access' ? 'warning' : 'primary'}
                           collapse="xs"
                           valueClassName="max-w-40"
                           icon={
                             <ShieldIcon
                               className={`icon-xs shrink-0 ${
-                                access.warn ? 'text-token-editor-warning-foreground' : ''
+                                agentMode === 'full-access'
+                                  ? 'text-token-editor-warning-foreground'
+                                  : ''
                               }`}
                             />
                           }
                         >
-                          {access.label}
+                          {agentModeLabel(agentMode)}
                         </ComposerDropdownLabel>
                       </button>
                     </div>
@@ -989,9 +978,8 @@ export function Composer({
                                 data-state={popover?.id === 'model' ? 'open' : 'closed'}
                                 data-codex-intelligence-trigger="true"
                                 data-composer-navigation-target="reasoning"
-                                data-selected-reasoning-effort={
-                                  effort ? effortProtocolValue(effort) : undefined
-                                }
+                                // Codex 这里挂的就是协议值，状态里存的也是协议值
+                                data-selected-reasoning-effort={effort ?? undefined}
                                 onClick={(e) =>
                                   togglePopover('model', e.currentTarget.getBoundingClientRect())
                                 }
@@ -1013,7 +1001,7 @@ export function Composer({
                                         className="codex-ComposerFooterLabel shrink-0"
                                         data-composer-footer-collapse="sm"
                                       >
-                                        {effort}
+                                        {formatEffort(effort)}
                                       </span>
                                     )}
                                   </span>
@@ -1085,7 +1073,8 @@ export function Composer({
         <Popover
           anchor={popover.anchor}
           role="menu"
-          width={Math.min(480, window.innerWidth - 16)}
+          // 不设固定宽度：Codex 的 popper wrapper 是 min-width:max-content，
+          // 宽度由最长那行描述决定，再由 Popover 的 max-width 夹在视口内
           onClose={closePopover}
           ariaLabel="Approval policy"
         >

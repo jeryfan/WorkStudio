@@ -1,16 +1,13 @@
 import { useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useSession } from '../../../state/SessionContext'
 import { CheckIcon, ChevronIcon } from '../../icons'
 import { cx } from '../../../utils/cx'
+import { formatEffort } from '../../../services/model/types'
+import { Submenu } from './Submenu'
 
 /** Codex 菜单项基类(与运行时逐项一致) */
 const MENU_ITEM_CLASS =
   'no-drag outline-hidden rounded-lg px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm text-token-foreground group hover:bg-token-list-hover-background focus:bg-token-list-hover-background cursor-interaction flex flex-col'
-
-/** Codex 子菜单容器类(role=menu,与根菜单同一套菜单原语) */
-const SUBMENU_CLASS =
-  'z-50 flex min-w-[180px] select-none flex-col overflow-y-auto m-px px-1 py-1 bg-token-dropdown-background/90 text-token-foreground ring-token-border rounded-xl ring-[0.5px] shadow-xl-spread backdrop-blur-sm'
 
 /**
  * 模型/effort 选择 —— Codex 的双子菜单(运行时实测):
@@ -33,7 +30,7 @@ const SUBMENU_CLASS =
 export function ModelPicker({ onClose }: { onClose(): void }): React.JSX.Element {
   const { models, model, effort, selectModel, selectEffort } = useSession()
   const [submenu, setSubmenu] = useState<'model' | 'effort' | null>(null)
-  const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number } | null>(null)
+  const [submenuAnchor, setSubmenuAnchor] = useState<DOMRect | null>(null)
   const closeTimer = useRef<number | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -42,10 +39,12 @@ export function ModelPicker({ onClose }: { onClose(): void }): React.JSX.Element
       window.clearTimeout(closeTimer.current)
       closeTimer.current = null
     }
-    // 与 Codex 一致:子菜单顶边与父菜单顶边对齐(side=right align=start)
+    // 与 Codex 一致:子菜单贴父菜单右缘、顶边对齐(side=right align=start)。
+    // 放不下时的翻边与夹紧由 Submenu 自己做 —— 位置必须在**量过子菜单尺寸之后**
+    // 才能算，所以这里只把父菜单的矩形交出去。
     const dialog = row.closest('[role=dialog], [role=menu]') ?? rootRef.current
     const rect = dialog?.getBoundingClientRect()
-    if (rect) setSubmenuPos({ left: rect.right, top: rect.top })
+    if (rect) setSubmenuAnchor(rect)
     setSubmenu(kind)
   }
 
@@ -102,75 +101,68 @@ export function ModelPicker({ onClose }: { onClose(): void }): React.JSX.Element
         <div className="flex w-full min-w-0 items-center gap-3">
           <span>Effort</span>
           <span className="flex min-w-0 flex-1 justify-end text-token-text-tertiary">
-            <span className="min-w-0 truncate">{effort ?? '…'}</span>
+            <span className="min-w-0 truncate">{effort != null ? formatEffort(effort) : '…'}</span>
           </span>
           <ChevronIcon className="icon-xs shrink-0 -rotate-90" />
         </div>
       </div>
 
-      {submenu != null &&
-        submenuPos != null &&
-        createPortal(
-          <div
-            role="menu"
-            aria-orientation="vertical"
-            data-state="open"
-            tabIndex={-1}
-            className={cx(SUBMENU_CLASS, 'fixed', submenu === 'model' && 'w-[280px]')}
-            style={{ left: submenuPos.left, top: submenuPos.top }}
-            onPointerEnter={cancelClose}
-            onPointerLeave={scheduleClose}
-          >
-            <div dir="ltr">
-              <div className="text-token-description-foreground flex min-h-6 items-center truncate px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm leading-4">
-                {submenu === 'model' ? 'Model' : 'Effort'}
-              </div>
-              {submenu === 'model' ? (
-                <div className="vertical-scroll-fade-mask flex max-h-[250px] flex-col overflow-y-auto">
-                  {models.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      role="menuitem"
-                      tabIndex={-1}
-                      onClick={() => {
-                        selectModel(m.id)
-                        onClose()
-                      }}
-                      className={MENU_ITEM_CLASS}
-                    >
-                      <div className="flex w-full items-center gap-1.5">
-                        <span className="flex-1 min-w-0 truncate">{m.displayName}</span>
-                        {m.id === model?.id && <CheckIcon className="size-4 shrink-0" />}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                (model?.efforts ?? []).map((level) => (
+      {submenu != null && submenuAnchor != null && (
+        <Submenu
+          anchor={submenuAnchor}
+          className={submenu === 'model' ? 'w-[280px]' : undefined}
+          onPointerEnter={cancelClose}
+          onPointerLeave={scheduleClose}
+        >
+          <div dir="ltr">
+            <div className="text-token-description-foreground flex min-h-6 items-center truncate px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm leading-4">
+              {submenu === 'model' ? 'Model' : 'Effort'}
+            </div>
+            {submenu === 'model' ? (
+              <div className="vertical-scroll-fade-mask flex max-h-[250px] flex-col overflow-y-auto">
+                {models.map((m) => (
                   <button
-                    key={level}
+                    key={m.id}
                     type="button"
                     role="menuitem"
                     tabIndex={-1}
-                    data-reasoning-selected={level === effort ? 'true' : undefined}
                     onClick={() => {
-                      selectEffort(level)
+                      selectModel(m.id)
                       onClose()
                     }}
                     className={MENU_ITEM_CLASS}
                   >
                     <div className="flex w-full items-center gap-1.5">
-                      <span className="flex-1 min-w-0 truncate">{level}</span>
-                      {level === effort && <CheckIcon className="size-4 shrink-0" />}
+                      <span className="flex-1 min-w-0 truncate">{m.displayName}</span>
+                      {m.id === model?.id && <CheckIcon className="size-4 shrink-0" />}
                     </div>
                   </button>
-                ))
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+                ))}
+              </div>
+            ) : (
+              (model?.efforts ?? []).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  data-reasoning-selected={level === effort ? 'true' : undefined}
+                  onClick={() => {
+                    selectEffort(level)
+                    onClose()
+                  }}
+                  className={MENU_ITEM_CLASS}
+                >
+                  <div className="flex w-full items-center gap-1.5">
+                    <span className="flex-1 min-w-0 truncate">{level}</span>
+                    {level === effort && <CheckIcon className="size-4 shrink-0" />}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </Submenu>
+      )}
     </div>
   )
 }

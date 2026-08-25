@@ -1,4 +1,5 @@
 import type { SystemThemeVariant, BrowserTabState, BrowsingDataKind } from './messages'
+import type { SettingsSnapshot } from '../settings/definitions'
 import type { WorkspaceSnapshot, CreateProjectInput, ProjectSelection } from '../workspace/types'
 
 /**
@@ -215,6 +216,18 @@ export interface FileDragsService {
 // ── theme：Codex 没有单独服务（走 sendSync + 推送），这里也保持一致 ────
 
 /** 主进程暴露给渲染层的完整服务树 */
+/**
+ * 桌面端设置的读写（Codex 的 `get-settings` / `set-setting` handler）。
+ *
+ * 真值在主进程的 settings store 里，落盘在 app-server 的 config
+ *（`[desktop]` 表）。渲染层拿到的两张表就是 Codex 的响应形状：
+ * `values` 是生效值（配置值 ?? default），`configuredValues` 只有显式配过的键。
+ */
+export interface SettingsService {
+  getSettings(): SettingsSnapshot
+  setSetting(key: string, value: unknown): { success: true }
+}
+
 export interface AppHostServices {
   appInfo: AppInfoService
   appUpdates: AppUpdatesService
@@ -223,6 +236,7 @@ export interface AppHostServices {
   clipboard: ClipboardService
   openIn: OpenInService
   workspaceFiles: WorkspaceFilesService
+  settings: SettingsService
   localProjects: LocalProjectsService
   threadProjectAssignments: ThreadProjectAssignmentsService
   browserSidebar: BrowserSidebarService

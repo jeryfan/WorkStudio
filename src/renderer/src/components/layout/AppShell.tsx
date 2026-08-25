@@ -31,10 +31,15 @@ import { OverlayLayer } from '../overlay/OverlayLayer'
 import { BrowserSurfaceLayer } from '../panel/BrowserSurfaceLayer'
 import { TooltipProvider } from '../tooltip/Tooltip'
 import { AppPortals } from '../overlay/AppPortals'
+import { ToastHost } from '../overlay/ToastHost'
 import { AppCommands } from '../command/AppCommands'
 import { SideChatCloseDialogHost } from '../panel/sideChat/SideChatCloseDialog'
 import { HomeView } from '../../views/HomeView'
 import { ChatView } from '../../chat/ChatView'
+import { SettingsView } from '../settings/SettingsView'
+import { SettingsLeftPanel } from '../settings/nav/SettingsLeftPanel'
+import { useSettingsSection } from '../../state/route'
+import { dispatchHostMessage } from '../../host/hostMessages'
 
 /**
  * 应用骨架 —— 祖先链逐层对齐 Codex 实测值:
@@ -76,7 +81,14 @@ function Shell(): React.JSX.Element {
   const { toggleCommand, closeAll } = useOverlay()
   // 进了会话就是 thread 态 —— 路由容器类名、顶部渐隐、thread 边缘分隔线三处都要跟着切
   const { activeChatId } = useChatRuntime()
-  const isThread = activeChatId != null
+  /*
+   * 设置路由压过会话态：Codex 的 thread 态那三档来自 layout atom（`wUn`），
+   * 由 thread 路由上的 `<LayoutEffect layout=…>` 在挂载时写入、卸载时复位成
+   * `default`；设置路由不写它，所以取默认值 `default`，topFade 的推导
+   *（`N ? 'hidden' : A ? 'full-bleed' : g ? 'hidden' : 'visible'`）落到 `visible`。
+   */
+  const settingsSection = useSettingsSection()
+  const isThread = settingsSection == null && activeChatId != null
   const {
     sidebarWidth,
     setSidebarWidth,
@@ -129,8 +141,11 @@ function Shell(): React.JSX.Element {
        *
        * Codex 里 emptyState / afterSticky 还有 `ready === 'ready'` 条件(未 ready 不注册)——
        * WS 无 worktree provisioning,恒 ready。
-       * Codex 还注册了 HeaderAction(thread-side-panel-close / bottom-panel-toggle)——
-       * WS 的 header 动作是写死的,没有 HeaderAction registry,本轮不接。
+       * Codex 还注册了 HeaderAction(thread-side-panel-close / bottom-panel-toggle)。
+       * HeaderAction 注册表现在有了(`components/layout/appShellSlots.tsx` 的
+       * `AppShellSlots.HeaderAction`,写进 AppShellContext 的 headerActions),
+       * 但两侧槽里的按钮(侧栏开关/前进后退/两个面板开关)仍然是 AppShellHeader 里写死的 ——
+       * Codex 那两个槽也是注册制(left/right 两份注册表),改造是独立一步。
        */}
       <RightPanelOutlet>{RIGHT_PANEL_OUTLET_CONTENT}</RightPanelOutlet>
       <RightPanelTabsEmptyState>{RIGHT_PANEL_EMPTY_STATE}</RightPanelTabsEmptyState>
@@ -140,7 +155,30 @@ function Shell(): React.JSX.Element {
       <BottomPanelTabListAfter>{BOTTOM_PANEL_CLOSE}</BottomPanelTabListAfter>
 
       <div className="relative isolate flex max-h-full min-h-0 w-full flex-1">
-        <LeftPanel width={sidebarWidth} onResize={setSidebarWidth} />
+        {/*
+         * 左栏在设置路由下整块换成设置导航 —— Codex `_$c` 就是把设置 nav 塞进
+         * app shell 的 left panel 插槽（同一个外壳、同一个拖拽手柄），
+         * 聊天侧栏此时不渲染。
+         *
+         * 两个动作都走 `navigate-to-route` 的本地自投递：
+         *   选分区 → /settings/<slug>（Codex 用 `replace: true`，本项目没有
+         *            history 栈，等价于直接换 path）
+         *   Back to app → Codex `wn()` 的兜底分支 `navigate('/', {replace:true})`
+         *            （前两个分支要 history / 路由 state 里的 returnTo，本项目都还没有）
+         */}
+        {settingsSection != null ? (
+          <SettingsLeftPanel
+            width={sidebarWidth}
+            onResize={setSidebarWidth}
+            activeSection={settingsSection}
+            onSelect={(slug) =>
+              dispatchHostMessage({ type: 'navigate-to-route', path: `/settings/${slug}` })
+            }
+            onBack={() => dispatchHostMessage({ type: 'navigate-to-route', path: '/' })}
+          />
+        ) : (
+          <LeftPanel width={sidebarWidth} onResize={setSidebarWidth} />
+        )}
         <MainContentLayout
           routeLayout={isThread ? 'thread' : 'home'}
           topFade={isThread ? 'full-bleed' : 'visible'}
@@ -182,7 +220,7 @@ function Shell(): React.JSX.Element {
       {/* side chat 关闭确认弹窗(Codex `De`,closeGuard 驱动) */}
       <SideChatCloseDialogHost />
       {/* body 级 portal 层 —— 必须在 #root 外(这一层有 zoom,会给 fixed 建包含块) */}
-      <AppPortals />
+      <AppPortals toast={<ToastHost />} />
     </div>
   )
 }
@@ -216,17 +254,42 @@ function BottomPanelCloseButton(): React.JSX.Element {
   )
 }
 
-/** 主区域路由：没有打开的会话就是首页 */
+/**
+ * 主区域路由。
+ *
+ * 设置页渲染在 main 的路由槽里（**不是**替换 main）—— Codex 的 app shell 里
+ * `<main class={MainContentSurface} data-app-shell-main-surface="default">`
+ * 是无条件的，路由内容落在
+ * `MainContentViewport > MainContentFrame > … > div.h-full.min-h-0.min-w-0.flex-1`
+ * 里面。设置页壳层自己那套 `electron:bg-token-main-surface-primary` /
+ * `electron:elevation-prominent` 与 main 表面重复，是 Codex 的实测形态
+ *（同色叠同色看不出差别，投影被 main 的 overflow:hidden 裁掉），
+ * 不要为了"去重"删掉其中任何一层。
+ *
+ * 不确定：设置路由用的是 routeLayout 的哪一档。Codex 的首页/thread 两套
+ * 路由容器嵌套顺序不同，而设置路由用哪一套没能取证到。这里取 'home' 那一套 ——
+ * 依据是它给子元素提供了确定高度（`flex h-full flex-col > div.relative.min-h-0.flex-1
+ * > div.h-full.min-h-0`），而设置页壳层的根节点是 `h-full`，必须有确定高度的父级；
+ * thread 那一套的最外层是 `relative h-full min-h-0`（块级），也能给出高度，
+ * 两者对设置页的可见结果一致。
+ */
 function MainView(): React.JSX.Element {
+  const settingsSection = useSettingsSection()
   const { activeChatId } = useChatRuntime()
+  if (settingsSection != null) return <SettingsView section={settingsSection} />
   return activeChatId ? <ChatView /> : <HomeView />
 }
 
 export function AppShell(): React.JSX.Element {
   return (
     <WorkspaceProvider>
-      <SessionProvider>
-        <ChatRuntimeProvider>
+      {/*
+       * ChatRuntimeProvider 在 SessionProvider **外面**：模型/effort 的选择是
+       * 按线程解析的（线程 pending → 线程 latest → config 默认，见
+       * state/modelSelection.ts），SessionProvider 需要读 activeChatId。
+       */}
+      <ChatRuntimeProvider>
+        <SessionProvider>
           <OverlayProvider>
             <AppShellProvider>
               {/*
@@ -240,8 +303,8 @@ export function AppShell(): React.JSX.Element {
               </TooltipProvider>
             </AppShellProvider>
           </OverlayProvider>
-        </ChatRuntimeProvider>
-      </SessionProvider>
+        </SessionProvider>
+      </ChatRuntimeProvider>
     </WorkspaceProvider>
   )
 }

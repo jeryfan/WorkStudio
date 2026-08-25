@@ -32,6 +32,7 @@ export type { UserInput } from './generated/v2/UserInput'
 export type { AskForApproval } from './generated/v2/AskForApproval'
 export type { SandboxMode } from './generated/v2/SandboxMode'
 export type { SandboxPolicy } from './generated/v2/SandboxPolicy'
+export type { ApprovalsReviewer } from './generated/v2/ApprovalsReviewer'
 export type { ReasoningEffort } from './generated/ReasoningEffort'
 
 // ── 握手 ────────────────────────────────────────────────────────────

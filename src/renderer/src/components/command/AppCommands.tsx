@@ -1,13 +1,14 @@
 import { useCallback, useEffect } from 'react'
 import { useAppShell, type AppShellTabPanelController } from '../../state/AppShellContext'
 import { initCommandBridge, useCommandHandler } from '../../state/commands'
-import { useHostMessage } from '../../host/hostMessages'
+import { dispatchHostMessage, useHostMessage } from '../../host/hostMessages'
 import { useThreadWorkspace } from '../../state/threadWorkspace'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { createBrowserTabDescriptor } from '../panel/browserTabDescriptor'
 import { openFilesTab } from '../panel/filesTabDescriptor'
 import { openTerminalTab, terminalTabId } from '../panel/terminalTabDescriptor'
 import { openSideChat } from '../panel/sideChat/openSideChat'
+import { dangerToast } from '../../state/toastStore'
 import { setBrowserConversationId } from '../../host/browserScope'
 
 /**
@@ -230,6 +231,28 @@ export function AppCommands(): null {
     }, [focusedController, rightPanelOpen, bottomPanelOpen])
   )
 
+  /*
+   * Settings…（⌘,）。
+   *
+   * 取证：Codex 的这条命令 handler 逐字是
+   *     dispatchHostMessage({ type: 'navigate-to-route', path: '/settings' })
+   * —— 走的就是宿主导航那条消息，只是**本地自投递**，不出渲染进程
+   *（同一张 fallback handler 表里，Keyboard shortcuts / MCP / Personalization /
+   * codex-micro 各自 dispatch 到 `/settings/<section>`）。所以应用内导航和
+   * tray、hotkey 窗口发起的导航共用同一个处理器。
+   *
+   * 目标 path 的**本轮临时偏差**：Codex 用的是 `/settings`（索引由路由解析成
+   * `general-settings`）。本轮只落了 appearance 一页，直接跳 `/settings` 会
+   * 得到一张只有标题的空页。等 general-settings 页面落地后把下面这行改回
+   * `/settings`，路由层的索引解析已经按 Codex 实现好了（见 state/route.ts）。
+   */
+  useCommandHandler(
+    'settings',
+    useCallback(() => {
+      dispatchHostMessage({ type: 'navigate-to-route', path: '/settings/appearance' })
+    }, [])
+  )
+
   useCommandHandler(
     'openSideChat',
     useCallback(() => {
@@ -242,6 +265,7 @@ export function AppCommands(): null {
         panelOpen: rightPanelOpen
       }).catch((error: unknown) => {
         console.error('Failed to open side chat', error)
+        dangerToast('Failed to open side chat')
       })
     }, [activeChatId, rightPanelController, cwd, rightPanelOpen])
   )

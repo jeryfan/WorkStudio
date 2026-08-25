@@ -82,6 +82,7 @@ export class AppServerConnection {
   /** 渲染层已放弃的请求 id：结果回来后直接丢弃 */
   private readonly abandoned = new Set<string>()
   private connectionState: AgentConnectionState = { state: 'starting' }
+  private readonly connectionStateListeners = new Set<(state: AgentConnectionState) => void>()
   private disposers: Array<() => void> = []
   private serverRequestSeq = 0
 
@@ -150,6 +151,21 @@ export class AppServerConnection {
   setConnectionState(state: AgentConnectionState): void {
     this.connectionState = state
     this.broadcast({ type: 'codex-app-server-connection-state', hostId: this.hostId, ...state })
+    for (const listener of this.connectionStateListeners) listener(state)
+  }
+
+  /**
+   * 宿主内部订阅连接状态。
+   *
+   * 与广播给渲染层的那份是同一个信号源，方向不同：这条是给主进程自己用的
+   * （设置 store 要在连接 ready 之后才能读写 config）。agent 重启会再来一次
+   * `ready`，订阅者按"重新对齐"处理，不能假设只触发一次。
+   */
+  onConnectionStateChanged(listener: (state: AgentConnectionState) => void): () => void {
+    this.connectionStateListeners.add(listener)
+    return () => {
+      this.connectionStateListeners.delete(listener)
+    }
   }
 
   getConnectionState(): AgentConnectionState {

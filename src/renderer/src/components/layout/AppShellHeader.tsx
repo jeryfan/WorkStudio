@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { useAppShell } from '../../state/AppShellContext'
+import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
 import { useSidePanelTabActions } from '../panel/useSidePanelTabActions'
 import { ArrowIcon, BottomPanelIcon, SidebarHideIcon, SidePanelIcon } from '../icons'
 
@@ -184,26 +184,7 @@ export function AppShellHeader(): React.JSX.Element {
         </div>
       </HeaderSlot>
 
-      {/*
-       * 中间的 context surface —— thread 标题与右侧动作的挂载点。
-       * `[contain:layout_paint]` 把长标题的重排锁在这层内;
-       * `[&_a]:pointer-events-auto` 那一串是因为整个 header 是 pointer-events-none,
-       * 需要按标签逐个放开,而不是给容器开 auto(那样会把拖拽区一起吃掉)。
-       */}
-      <div
-        aria-hidden="false"
-        data-testid="app-shell-header-context-menu-surface"
-        className="pointer-events-none relative ms-2 flex h-full min-w-0 flex-1 isolate items-center gap-1.5 overflow-hidden [contain:layout_paint] pe-1.5"
-      >
-        <div className="pointer-events-none w-full min-w-0 flex-1 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_select]:pointer-events-auto [&_textarea]:pointer-events-auto">
-          <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 draggable electron:h-toolbar extension:py-row-y">
-            <div className="text-md flex min-w-0 items-center gap-0 truncate text-base focus-within:overflow-visible electron:font-medium">
-              <div className="flex min-w-0 items-center gap-1" />
-            </div>
-            <div className="flex items-center justify-end gap-1.5" />
-          </div>
-        </div>
-      </div>
+      <HeaderContextSurface />
 
       <HeaderSlot side="end">
         {/*
@@ -236,5 +217,66 @@ export function AppShellHeader(): React.JSX.Element {
         </div>
       </HeaderSlot>
     </header>
+  )
+}
+
+/**
+ * 中段 —— thread 标题与动作的挂载点(Codex `sJr` 里那一层
+ * `data-testid="app-shell-header-context-menu-surface"`)。
+ *
+ * 内容不是写死的:`$P.Header` 注册的节点落在 slot 'header'(Codex atom `CUn`),
+ * `$P.HeaderAction` 注册的动作按 align 分三组(Codex `h`/`g`/`_`):
+ * - start:紧贴 Header 内容右侧
+ * - end:`ms-auto` 推到最右
+ * - center:**另一层** `fixed inset-x-0` 的居中带(左右各留出面板宽度的占位),
+ *   本项目还没有 center 动作(Codex 的 home-composer-mode-toggle 是 Work/Chat 切换),
+ *   所以这一层暂不渲染 —— 有注册者时再补,不为空结构占位。
+ *
+ * `[contain:layout_paint]` 把长标题的重排锁在这层内;
+ * `[&_a]:pointer-events-auto` 那一串是因为整个 header 是 pointer-events-none,
+ * 需要按标签逐个放开,而不是给容器开 auto(那样会把拖拽区一起吃掉)。
+ */
+function HeaderContextSurface(): React.JSX.Element {
+  const headerNode = useAppShellSlot('header')
+  const { headerActions } = useAppShell()
+  const start = headerActions.filter((a) => a.align === 'start')
+  const end = headerActions.filter((a) => a.align === 'end')
+
+  return (
+    <div
+      aria-hidden="false"
+      data-testid="app-shell-header-context-menu-surface"
+      className="pointer-events-none relative ms-2 flex h-full min-w-0 flex-1 isolate items-center gap-1.5 overflow-hidden [contain:layout_paint] pe-1.5"
+    >
+      {headerNode != null && (
+        <div className="pointer-events-none w-full min-w-0 flex-1 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_select]:pointer-events-auto [&_textarea]:pointer-events-auto">
+          {headerNode}
+        </div>
+      )}
+      {start.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {start.map((action) => (
+            <div
+              key={action.actionId}
+              className="pointer-events-auto flex shrink-0 items-center no-drag"
+            >
+              {action.node}
+            </div>
+          ))}
+        </div>
+      )}
+      {end.length > 0 && (
+        <div className="ms-auto flex shrink-0 items-center gap-1.5">
+          {end.map((action) => (
+            <div
+              key={action.actionId}
+              className="pointer-events-auto flex shrink-0 items-center no-drag"
+            >
+              {action.node}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
