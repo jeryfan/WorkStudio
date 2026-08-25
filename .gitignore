@@ -15,6 +15,11 @@ resources/node-runtime/
 # 浏览器自动化（对话区视觉核对）留下的截图与日志
 .playwright-mcp/
 
+# 逆向取证工作区：Codex 反编译产物、DOM dump、CDP 日志。
+# 只服务开发，**不进版本库** —— 本仓库是公开的，把上游的反编译代码推上去
+# 既没有必要也不合适。需要时用 scripts/ 里的抽取脚本从本机 ChatGPT.app 重新生成。
+reverse/
+
 # tsc --incremental 的缓存。tsconfig.web.tsbuildinfo 之前被误提交过,
 # 每次 typecheck 都会让工作区变脏(而且它会让 git stash 在 pop 时冲突)。
 *.tsbuildinfo
