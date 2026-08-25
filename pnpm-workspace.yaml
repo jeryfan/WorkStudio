@@ -1,5 +1,9 @@
 allowBuilds:
   electron: true
   esbuild: true
+  # 终端要真的 pty，node-pty 是原生模块，必须允许它跑构建脚本。
+  # 注意它编出来的 .node 要匹配 **Electron 的 ABI**，不是本机 Node 的 ——
+  # 由 postinstall 的 `electron-builder install-app-deps` 负责重编。
+  node-pty: true
   # 仅 Windows 安装包构建时需要，日常开发不用跑它的脚本
   electron-winstaller: false

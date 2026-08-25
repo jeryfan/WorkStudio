@@ -97,8 +97,64 @@ export class BrowserUseApi {
       case 'disposeRoute':
         this.manager.deleteConversation(this.route.conversationId)
         return { ok: true }
+      case 'executeUnhandledCommand':
+        return this.executeUnhandledCommand(args)
       default:
         throw new Error(`browser_use method not implemented: ${method}`)
+    }
+  }
+
+  /**
+   * capability 命令的内层分发。
+   *
+   * **线上的形状（取证，与直觉不同）**：capability 不是新开一个 method，而是
+   * 复用 `executeUnhandledCommand` 这一个 method，命令类型放在 params 里：
+   *
+   *   外层（native pipe 帧）  `{jsonrpc:'2.0', id, method:'executeUnhandledCommand', params}`
+   *   内层（params）          `{type:'browser_visibility_set', browser_id, visible,
+   *                             session_id, turn_id, session_context}`
+   *
+   * 内层的键是 **`type`**，不是 `command`/`commandType`：
+   *   - 插件侧 `browser-service.mjs` 里 capability 调的是
+   *     `transport.send({command: Cmd.create(payload)})`，`command` 是**插件进程内**
+   *     的一层封装；
+   *   - 它随后被拆成 `let {type: I, ...A} = S`（`T.toJSON()` 输出
+   *     `{type, ...payload}`），本地没有 handler 的就走
+   *     `executeUnhandledCommand({type: I, ...A})`；
+   *   - 宿主侧对应 `main` 包的 `executeUnhandledCommand(e)` 直接读 `e.type`
+   *     并按 `{[commandType]: handler}` 表分发。
+   * 所以 `command` 这个键从来没有出现在 native pipe 上。
+   *
+   * `session_id`/`turn_id`/`session_context` 由 `sendSessionRequest` 无条件混入
+   * 每一个请求的 params，不是 capability 特有的。
+   */
+  private async executeUnhandledCommand(command: Record<string, unknown>): Promise<unknown> {
+    const type = typeof command.type === 'string' ? command.type : ''
+    switch (type) {
+      case 'browser_visibility_set': {
+        if (typeof command.visible !== 'boolean') {
+          throw new Error('browser_visibility_set requires a boolean `visible`')
+        }
+        this.manager.setBrowserVisibleForBrowserUse(this.route.conversationId, command.visible)
+        return {}
+      }
+      case 'browser_visibility_get':
+        return { visible: this.manager.isBrowserVisibleForBrowserUse(this.route.conversationId) }
+      case 'browser_viewport_set': {
+        const width = command.width
+        const height = command.height
+        if (!isPositiveInteger(width) || !isPositiveInteger(height)) {
+          // Codex 侧的 zod schema 是 number().int().positive()，不合法根本发不出来
+          throw new Error('browser_viewport_set requires positive integer width and height')
+        }
+        await this.manager.setViewportForBrowserUse(this.route.conversationId, { width, height })
+        return {}
+      }
+      case 'browser_viewport_reset':
+        await this.manager.setViewportForBrowserUse(this.route.conversationId, null)
+        return {}
+      default:
+        throw new Error(`browser_use command not implemented: ${type === '' ? '<missing>' : type}`)
     }
   }
 
@@ -211,4 +267,8 @@ export class BrowserUseApi {
       attached: page.guest != null && !page.guest.isDestroyed()
     }
   }
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
 }

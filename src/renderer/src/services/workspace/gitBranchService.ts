@@ -1,66 +1,40 @@
-import { rpc } from '../../rpc/client'
-import { M } from '@shared/protocol/methods'
-import type { CommandExecResponse } from '@shared/protocol/generated/v2/CommandExecResponse'
+import { requestWorker } from '../../host/workerBus'
 
 /**
  * Git 分支数据 —— composer utility bar 分支 pill / 分支下拉的数据源。
- * Codex 的分支信息由 agent 侧的 git 查询得来;WS 走协议 `command/exec`
- * (沙箱内执行 git,不建会话/轮次)。
+ *
+ * **取证结论（这里改过一次路线）**：Codex 的 git 不走 app-server 的
+ * `command/exec`，而是走主进程的 **git worker**（`requestGitWorker`）。
+ * 本项目原先走 `command/exec`，那条路有两个真问题：
+ *   1. `checkout` / `checkout -b` 在 `workspace-write` 沙箱下写不了 `.git`
+ *      （实测 "cannot lock ref: Operation not permitted"），只能升到
+ *      `dangerFullAccess` —— 为了切分支把整机写权限打开；
+ *   2. 沙箱写操作会触发审批，而首页没有会话承载审批，调用永远挂着。
+ * 换到 worker 之后两个问题都不存在：git 在主进程的 worker 线程里直接跑，
+ * 既没有沙箱也没有审批流。
  */
 
 export interface BranchInfo {
   name: string
   current: boolean
-  /** 仅当前分支有值:未提交文件数(Codex 的 "Uncommitted: N files") */
+  /** 仅当前分支有值：未提交文件数（Codex 的 "Uncommitted: N files"） */
   uncommittedFiles: number | null
 }
 
-async function git(root: string, args: string[], write = false): Promise<string> {
-  const res = await rpc.request<CommandExecResponse>(M.execStart, {
-    command: ['git', '-C', root, ...args],
-    /*
-     * 写操作(checkout/-b)必须显式给沙箱策略:默认策略下写操作会触发审批请求,
-     * 而首页没有会话可承载审批(调用永远挂着);workspace-write 又不允许写 .git
-     * (实测:git checkout -b 报 "cannot lock ref: Operation not permitted")。
-     * dangerFullAccess = 用户显式点击的分支切换,与 Codex 的 git 工具语义一致。
-     */
-    ...(write ? { sandboxPolicy: { type: 'dangerFullAccess' as const } } : {})
-  })
-  if (res.exitCode !== 0) {
-    throw new Error(res.stderr.trim() || `git ${args.join(' ')} exited ${res.exitCode}`)
-  }
-  return res.stdout
-}
-
-/** 当前分支名(detached HEAD 时为空串) */
-export async function currentBranch(root: string): Promise<string> {
-  return (await git(root, ['branch', '--show-current'])).trim()
+/** 当前分支名（detached HEAD 时为空串） */
+export function currentBranch(root: string): Promise<string> {
+  return requestWorker<string>('git', 'currentBranch', { root })
 }
 
 /** 分支列表 + 当前分支的未提交文件数 */
-export async function listBranches(root: string): Promise<BranchInfo[]> {
-  const [currentOut, listOut, statusOut] = await Promise.all([
-    git(root, ['branch', '--show-current']),
-    git(root, ['branch', '--list', '--format=%(refname:short)']),
-    git(root, ['status', '--porcelain'])
-  ])
-  const current = currentOut.trim()
-  const uncommitted = statusOut.trim().length === 0 ? 0 : statusOut.trim().split('\n').length
-  return listOut
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((name) => ({
-      name,
-      current: name === current,
-      uncommittedFiles: name === current ? uncommitted : null
-    }))
+export function listBranches(root: string): Promise<BranchInfo[]> {
+  return requestWorker<BranchInfo[]>('git', 'listBranches', { root })
 }
 
 export async function checkoutBranch(root: string, name: string): Promise<void> {
-  await git(root, ['checkout', name], true)
+  await requestWorker('git', 'checkout', { root, name })
 }
 
 export async function createAndCheckoutBranch(root: string, name: string): Promise<void> {
-  await git(root, ['checkout', '-b', name], true)
+  await requestWorker('git', 'createAndCheckout', { root, name })
 }

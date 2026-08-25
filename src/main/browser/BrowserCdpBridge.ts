@@ -57,6 +57,14 @@ export class BrowserCdpBridge {
   private readonly targetSessions = new Map<string, Map<string, string>>()
   private readonly attached = new Set<string>()
   private readonly listeners = new Set<(event: CdpEvent) => void>()
+  /**
+   * 常驻的视口覆盖（browser_use 的 `viewport.set`）。
+   *
+   * 必须单独记一份：截图会临时下一次 `setDeviceMetricsOverride` 再撤，
+   * 撤的时候如果无条件 `clearDeviceMetricsOverride`，agent 设的视口就被截图
+   * 顺手清掉了 —— 表现为"设了 390x844，截完图页面又变回默认宽度"。
+   */
+  private readonly stickyDeviceMetrics = new Map<string, { width: number; height: number }>()
 
   addEventListener(listener: (event: CdpEvent) => void): () => void {
     this.listeners.add(listener)
@@ -99,6 +107,7 @@ export class BrowserCdpBridge {
   detach(tabId: string, webContents: WebContents): void {
     this.attached.delete(tabId)
     this.targetSessions.delete(tabId)
+    this.stickyDeviceMetrics.delete(tabId)
     if (webContents.isDestroyed() || !webContents.debugger.isAttached()) return
     try {
       webContents.debugger.detach()
@@ -186,7 +195,7 @@ export class BrowserCdpBridge {
     webContents: WebContents,
     viewport?: { width: number; height: number; deviceScaleFactor?: number }
   ): Promise<string> {
-    const bounds = viewport ?? defaultViewport()
+    const bounds = viewport ?? this.stickyDeviceMetrics.get(tabId) ?? defaultViewport()
     let surfaceApplied = false
     try {
       await this.setDeviceMetrics(tabId, webContents, bounds)
@@ -218,8 +227,13 @@ export class BrowserCdpBridge {
         return this.captureViaScreencast(tabId, webContents, bounds)
       }
     } finally {
+      // 恢复到粘性覆盖（没有就真的清掉），而不是一律 clear
       if (surfaceApplied) {
-        await this.setDeviceMetrics(tabId, webContents, null).catch(() => undefined)
+        await this.setDeviceMetrics(
+          tabId,
+          webContents,
+          this.stickyDeviceMetrics.get(tabId) ?? null
+        ).catch(() => undefined)
       }
     }
   }
@@ -267,6 +281,21 @@ export class BrowserCdpBridge {
     } finally {
       await this.send(tabId, webContents, 'Page.stopScreencast').catch(() => undefined)
     }
+  }
+
+  /**
+   * 常驻视口覆盖：`browser_viewport_set` / `browser_viewport_reset` 的落点。
+   * 与 `setDeviceMetrics` 的区别只在于**记不记住** —— 记住的那份会在截图之后
+   * 被恢复回去。
+   */
+  async setStickyDeviceMetrics(
+    tabId: string,
+    webContents: WebContents,
+    metrics: { width: number; height: number } | null
+  ): Promise<void> {
+    if (metrics == null) this.stickyDeviceMetrics.delete(tabId)
+    else this.stickyDeviceMetrics.set(tabId, metrics)
+    await this.setDeviceMetrics(tabId, webContents, metrics)
   }
 
   /** 视口覆盖：browser_use 需要固定视口才能让坐标可复现 */

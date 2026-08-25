@@ -13,7 +13,11 @@ import { BrowserOptionsMenu } from './BrowserOptionsMenu'
 import { BrowserFindBar } from './BrowserFindBar'
 import { hostServices } from '../../host/appHost'
 import { postMessageFromView } from '../../host/hostMessages'
-import { ensureBrowserSurface, setBrowserSurfaceRect } from '../../host/browserSurfaces'
+import {
+  ensureBrowserSurface,
+  reportBrowserSurfacePresentation,
+  setBrowserSurfaceRect
+} from '../../host/browserSurfaces'
 import { browserConversationId } from '../../host/browserScope'
 import { useBrowserTabState } from '../../host/useBrowserSidebarState'
 import type { BrowserPageCommand } from '@shared/host/messages'
@@ -90,6 +94,8 @@ export function BrowserTab({
   const address = addressDraft ?? url
   const [findOpen, setFindOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement | null>(null)
+  /** tab 面板根节点：呈现态量的是它，与 webview 锚点无关（见下面的 effect） */
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const addressRef = useRef<HTMLInputElement | null>(null)
 
   /** 页面命令统一走宿主（Codex `browser-sidebar-command`） */
@@ -164,6 +170,34 @@ export function BrowserTab({
     }
   }, [conversationId, tabId, url])
 
+  /*
+   * 呈现态上报（Codex `browser-sidebar-sync`）。
+   *
+   * 量根节点而不是 webview 锚点：空白新 tab 不渲染 webview，但它就在用户面前。
+   * 只有这个组件挂载着才会上报 —— AppShellTabPanel 只渲染激活的那个 tab，
+   * 所以"挂载"本身就等价于"是当前 tab"；面板关掉或切走会走 cleanup 报 null。
+   */
+  useEffect(() => {
+    const root = rootRef.current
+    if (root == null) return
+    const report = (): void => {
+      const rect = root.getBoundingClientRect()
+      reportBrowserSurfacePresentation(conversationId, tabId, {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      })
+    }
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(root)
+    return () => {
+      observer.disconnect()
+      reportBrowserSurfacePresentation(conversationId, tabId, null)
+    }
+  }, [conversationId, tabId])
+
   // 新 tab 自动聚焦地址栏(data-browser-sidebar-primary-focus-target="address",实测)
   useEffect(() => {
     if (url === '') addressRef.current?.focus()
@@ -181,7 +215,7 @@ export function BrowserTab({
   }
 
   return (
-    <div className="relative h-full min-h-0">
+    <div ref={rootRef} className="relative h-full min-h-0">
       <div
         className="relative grid h-full min-h-0 w-full min-w-0 grid-rows-[auto_1fr]"
         data-browser-sidebar-chrome-expanded="true"

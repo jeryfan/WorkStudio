@@ -4,6 +4,7 @@ import type { SharedObjectRepository } from './SharedObjectRepository'
 import type { WindowManager } from './WindowManager'
 import type { AppServerConnection } from '../agent/AppServerConnection'
 import type { BrowserSidebarManager } from '../browser/BrowserSidebarManager'
+import type { TrayMenuManager } from '../menu/TrayMenuManager'
 
 /**
  * 宿主消息分发。
@@ -22,6 +23,7 @@ export class ElectronMessageHandler {
       sharedObjects: SharedObjectRepository
       windowManager: WindowManager
       browserManager: BrowserSidebarManager
+      trayMenuManager: TrayMenuManager
       appServer: AppServerConnection
       onReady(webContents: WebContents): void
     }
@@ -90,8 +92,14 @@ export class ElectronMessageHandler {
       case 'quit-app':
         app.quit()
         return
+      case 'tray-menu-threads-changed':
+        this.deps.trayMenuManager.setThreads(message.trayMenuThreads)
+        return
       case 'mac-menu-bar-enabled-changed':
-        // macOS 菜单栏常驻项未实现（Codex 的 tray/dock 控制器那一档）
+        /*
+         * Codex 用它开关"关掉所有窗口后仍留在菜单栏"。本项目的 tray 是常驻的
+         * （启动时就 `TrayMenuManager.start()`），没有可开关的状态。
+         */
         return
 
       // ── app-server ────────────────────────────────────────────────
@@ -112,11 +120,12 @@ export class ElectronMessageHandler {
 
       // ── 内置浏览器 ────────────────────────────────────────────────
       case 'browser-sidebar-sync':
-        this.deps.browserManager.registerWebviewHost({
+        // 呈现态同步；路由登记走 browserSidebar.registerWebviewHost 服务，不在这里
+        this.deps.browserManager.sync({
           conversationId: message.conversationId,
           browserTabId: message.browserTabId,
-          instanceId: message.instanceId,
-          url: message.url
+          visible: message.visible,
+          bounds: message.bounds
         })
         return
       case 'browser-sidebar-command':

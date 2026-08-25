@@ -2,6 +2,8 @@ import { newMessagePortRpcSession, RpcTarget, type RpcStub } from 'capnweb'
 import type {
   AppHostMain,
   AppInfoSnapshot,
+  AppUpdatesViewService,
+  AppUpdateViewState,
   AppViewServices,
   ClientCoordinationService,
   RemoteAppHostServices
@@ -48,13 +50,53 @@ class ClientCoordination extends RpcTarget implements ClientCoordinationService 
 
 const clientCoordination = new ClientCoordination()
 
+/**
+ * 更新状态的接收端（Codex `appUpdates.stateChanged`）。
+ *
+ * 状态是**推**过来的快照，渲染层只存最后一份。这里做成 store 而不是直接
+ * setState：注册时机（capnweb 握手完成）比任何组件挂载都早，先到的那份必须
+ * 存下来，否则 app header 要等到下一次状态变化才有东西可画。
+ */
+class AppUpdates extends RpcTarget implements AppUpdatesViewService {
+  private state: AppUpdateViewState | null = null
+  private readonly listeners = new Set<(state: AppUpdateViewState) => void>()
+
+  stateChanged(state: AppUpdateViewState): void {
+    this.state = state
+    for (const listener of Array.from(this.listeners)) listener(state)
+  }
+
+  getState(): AppUpdateViewState | null {
+    return this.state
+  }
+
+  subscribe(listener: (state: AppUpdateViewState) => void): () => void {
+    this.listeners.add(listener)
+    if (this.state != null) listener(this.state)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+}
+
+const appUpdates = new AppUpdates()
+
+/** 订阅更新状态（app header 用） */
+export function subscribeAppUpdates(listener: (state: AppUpdateViewState) => void): () => void {
+  return appUpdates.subscribe(listener)
+}
+
+export function getAppUpdateState(): AppUpdateViewState | null {
+  return appUpdates.getState()
+}
+
 class AppView extends RpcTarget {
   /*
    * getter 而不是实例属性：capnweb 只暴露类上的方法与 getter，
    * 实例属性会被拒（Codex 的 AppView 也是 `get services()`）。
    */
   get services(): AppViewServices {
-    return { clientCoordination }
+    return { clientCoordination, appUpdates }
   }
 }
 

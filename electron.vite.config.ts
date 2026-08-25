@@ -9,7 +9,23 @@ const sharedAlias = { '@shared': resolve('src/shared') }
 
 export default defineConfig({
   main: {
-    resolve: { alias: sharedAlias }
+    resolve: { alias: sharedAlias },
+    build: {
+      rollupOptions: {
+        /*
+         * 两个 main 产物：
+         *   index      —— 主进程
+         *   git.worker —— `worker_threads` 里跑的 git worker
+         *
+         * worker 必须是**同一次构建**产出的独立 chunk，与 index.js 同目录：
+         * `new Worker(path)` 要的是磁盘上的真实文件，打包后没有 ts 源码可指。
+         */
+        input: {
+          index: resolve('src/main/index.ts'),
+          'git.worker': resolve('src/main/workers/git.worker.ts')
+        }
+      }
+    }
   },
   preload: {
     resolve: { alias: sharedAlias },

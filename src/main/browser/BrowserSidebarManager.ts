@@ -37,6 +37,11 @@ export interface BrowserRoute {
   url: string | null
 }
 
+export interface ViewportSize {
+  width: number
+  height: number
+}
+
 interface BrowserPageState extends BrowserRoute {
   /** Electron 给 `<webview>` 的内部 instanceId（认领时绑定） */
   instanceId: number | null
@@ -48,7 +53,29 @@ interface BrowserPageState extends BrowserRoute {
   zoomPercent: number
   browserUseActive: boolean
   findQuery: string
+  /** 渲染层报的可见性（Codex 线程态的 `visible`） */
+  visible: boolean
+  /** 渲染层报的锚点矩形（Codex 线程态的 `bounds`） */
+  bounds: { x: number; y: number; width: number; height: number } | null
+  /** `visible && bounds != null`，Codex 的 `presented` */
+  presented: boolean
+  /** 已请求显示、渲染层还没报回可见（Codex `hasPendingBrowserUseVisibilityRequest`） */
+  hasPendingBrowserUseVisibilityRequest: boolean
+  /** browser_use 的视口覆盖，null 表示没有覆盖（Codex `emulatedViewportSize`） */
+  emulatedViewportSize: ViewportSize | null
 }
+
+/**
+ * capability 在还没有 browser_use tab 时落下的意图（Codex
+ * `setPendingCapabilityIntent` / `pendingVisibilityRouteKeys` /
+ * `pendingViewportSizesByRouteKey`）。
+ *
+ * 为什么需要：agent 完全可以先 `visibility.set(true)` 再 `tabs.new()` ——
+ * 文档就是这么教的（"When the browser should be visible, call set(true)"）。
+ * 此刻还没有任何 tab，命令若直接报错，agent 那边就是一次无谓的失败。
+ */
+type PendingCapabilityIntent =
+  { kind: 'visibility'; visible: boolean } | { kind: 'viewport'; viewportSize: ViewportSize | null }
 
 export class BrowserSidebarManager {
   readonly cdp = new BrowserCdpBridge()
@@ -64,6 +91,19 @@ export class BrowserSidebarManager {
   private readonly pendingRoutes: BrowserRoute[] = []
   /** will-attach 已认领、还没等到 guest 的（两个事件成对触发） */
   private readonly awaitingGuest: BrowserRoute[] = []
+  /**
+   * 当前被"呈现"的路由。
+   *
+   * 取证：Codex 把 `activeConversationId`/`activeBrowserTabId` 存在**窗口态**上，
+   * 每个窗口一份。本项目的这个 manager 自始就是窗口无关的（状态一律
+   * `sendMessageToAllWindows` 广播），所以这里只有一份全局的活动路由。
+   * 多窗口同时各开一个浏览器面板时，`browser_visibility_get` 只会认最后
+   * 报上来的那个 —— 这是与 Codex 的已知差异，不是遗漏。
+   */
+  private activeConversationId: string | null = null
+  private activeBrowserTabId: string | null = null
+  /** conversationId → 等 tab 出现后才能落地的 capability 意图 */
+  private readonly pendingCapabilityIntents = new Map<string, PendingCapabilityIntent[]>()
 
   constructor(private readonly windowManager: WindowManager) {}
 
@@ -84,7 +124,12 @@ export class BrowserSidebarManager {
         canGoForward: false,
         zoomPercent: 100,
         browserUseActive: false,
-        findQuery: ''
+        findQuery: '',
+        visible: false,
+        bounds: null,
+        presented: false,
+        hasPendingBrowserUseVisibilityRequest: false,
+        emulatedViewportSize: null
       })
     } else if (route.url != null) {
       existing.url = route.url
@@ -142,6 +187,7 @@ export class BrowserSidebarManager {
       browserTabId: state.browserTabId,
       phase: 'attached'
     })
+    this.applyPendingCapabilityIntents(state.conversationId, state.browserTabId)
     return route
   }
 
@@ -506,6 +552,193 @@ export class BrowserSidebarManager {
     this.broadcastState(conversationId)
   }
 
+  // -- 呈现态与 capability（visibility / viewport） ---------------------
+  /**
+   * 渲染层的呈现态同步（Codex `BrowserSidebarManager.sync`）。
+   *
+   * `presented` 的算法逐字照搬：`payload.visible && payload.bounds != null`。
+   * 只看 `visible` 不够 —— 面板"开着"但这个 tab 被别的 tab 盖住时，渲染层报的
+   * bounds 是 null，此时它并没有被呈现给用户。
+   */
+  sync(payload: {
+    conversationId: string
+    browserTabId: string
+    visible: boolean
+    bounds: { x: number; y: number; width: number; height: number } | null
+  }): void {
+    const state = this.pages.get(pageKey(payload.conversationId, payload.browserTabId))
+    if (state == null) return
+    const presented = payload.visible && payload.bounds != null
+    state.visible = payload.visible
+    state.bounds = payload.bounds
+    state.presented = presented
+    // 真的被呈现出来了，待决的显示请求就算兑现了
+    if (presented) state.hasPendingBrowserUseVisibilityRequest = false
+    if (presented || this.activeConversationId == null) {
+      this.activeConversationId = payload.conversationId
+      this.activeBrowserTabId = payload.browserTabId
+    }
+  }
+
+  /**
+   * Codex `Zpe`（`isBrowserVisibleForBrowserUseForRoute`）。
+   *
+   * 待决的显示请求也算"可见"：`set(true)` 之后 agent 紧接着 `get()`，渲染层
+   * 那一帧还没画完就报 false 的话，agent 会以为显示失败并重试。
+   */
+  isBrowserVisibleForBrowserUse(conversationId: string, browserTabId?: string): boolean {
+    const tabId = browserTabId ?? this.resolveBrowserUseTabId(conversationId)
+    if (tabId == null) return false
+    if (this.activeConversationId !== conversationId || this.activeBrowserTabId !== tabId) {
+      return false
+    }
+    const state = this.pages.get(pageKey(conversationId, tabId))
+    if (state == null) return false
+    return state.hasPendingBrowserUseVisibilityRequest || (state.visible && state.bounds != null)
+  }
+
+  /** Codex `Xpe`（`setBrowserVisibleForBrowserUseForRoute`） */
+  setBrowserVisibleForBrowserUse(
+    conversationId: string,
+    visible: boolean,
+    browserTabId?: string
+  ): void {
+    const tabId = browserTabId ?? this.resolveBrowserUseTabId(conversationId)
+    if (tabId == null) {
+      // 还没有 tab：显示意图存起来，隐藏意图直接丢（本来就是隐藏的）
+      if (visible) this.pushCapabilityIntent(conversationId, { kind: 'visibility', visible: true })
+      return
+    }
+    const state = this.pages.get(pageKey(conversationId, tabId))
+    if (state == null) return
+
+    if (visible) {
+      // Codex `Qpe`：显示同时进入接管态
+      this.setBrowserUseActive(conversationId, tabId, true)
+      if (state.presented) return
+      state.hasPendingBrowserUseVisibilityRequest = true
+      /*
+       * Codex 在这里分两条路：会话已是活动会话就发 `toggle-browser-panel
+       * {open:true}`，否则发 `browser-sidebar-open-panel-without-animation`。
+       * 分岔的原因是动画 —— 切会话本身有转场，叠上面板展开动画会抖。
+       *
+       * 本项目只发后者：渲染层这条路是"按 browserTabId 打开/激活一个浏览器
+       * tab"，本来就没有展开动画，两条路会落到同一个实现上。
+       */
+      this.windowManager.sendMessageToAllWindows({
+        type: 'browser-sidebar-open-panel-without-animation',
+        conversationId,
+        browserTabId: tabId,
+        source: 'browser_use',
+        initiator: 'browser_use'
+      })
+      return
+    }
+
+    state.hasPendingBrowserUseVisibilityRequest = false
+    state.presented = false
+    state.visible = false
+    state.bounds = null
+    /*
+     * Codex 在关面板前还会发一条 `browser-sidebar-clear-pending-panel-open`
+     * 让渲染层撤掉排队中的"开面板"意图。本项目没有这条消息：渲染层收到
+     * open-panel 就同步开 tab，不排队，没有可撤的意图。待决标志只存在宿主这边
+     * （上面那行 `hasPendingBrowserUseVisibilityRequest = false` 就是撤它）。
+     */
+    if (this.activeConversationId === conversationId && this.activeBrowserTabId === tabId) {
+      this.windowManager.sendMessageToAllWindows({
+        type: 'toggle-browser-panel',
+        open: false,
+        source: 'browser_use',
+        initiator: 'browser_use'
+      })
+    }
+  }
+
+  /** Codex `MZ`（`setViewportForBrowserUseForRoute`） */
+  async setViewportForBrowserUse(
+    conversationId: string,
+    viewportSize: ViewportSize | null,
+    browserTabId?: string
+  ): Promise<void> {
+    const clamped = viewportSize == null ? null : clampViewport(viewportSize)
+    const tabId = browserTabId ?? this.resolveBrowserUseTabId(conversationId)
+    if (tabId == null) {
+      /*
+       * Codex 在没有 tab 时对 `set` 直接抛 "A browser tab id is required"，
+       * 但同一个 `executeUnhandledCommand` 入口在抛之前先把意图存了下来
+       * （`setPendingCapabilityIntent` 并返回 `{}`）。这里走存意图那条：
+       * reset 也存，否则"先 reset 再开 tab"会让 tab 带上过期的覆盖。
+       */
+      this.pushCapabilityIntent(conversationId, { kind: 'viewport', viewportSize: clamped })
+      return
+    }
+    const state = this.pages.get(pageKey(conversationId, tabId))
+    if (state == null) return
+    const changed =
+      state.emulatedViewportSize?.width !== clamped?.width ||
+      state.emulatedViewportSize?.height !== clamped?.height
+    state.emulatedViewportSize = clamped
+    if (changed) await this.syncPageDeviceMetrics(state)
+    this.windowManager.sendMessageToAllWindows({
+      type: 'browser-sidebar-browser-use-viewport',
+      conversationId,
+      browserTabId: tabId,
+      viewportSize: clamped
+    })
+  }
+
+  /**
+   * 把视口覆盖下到页面上。
+   *
+   * 覆盖是**粘性**的：交给 CDP 通道记住，截图临时改视口后要恢复成它，
+   * 而不是无条件 clear —— 否则 agent 设完视口截一张图，覆盖就没了。
+   */
+  private async syncPageDeviceMetrics(state: BrowserPageState): Promise<void> {
+    const guest = state.guest
+    if (guest == null || guest.isDestroyed()) return
+    try {
+      await this.cdp.setStickyDeviceMetrics(state.browserTabId, guest, state.emulatedViewportSize)
+    } catch (error) {
+      console.warn('[browser] failed to apply browser_use viewport', error)
+    }
+  }
+
+  /**
+   * 没给 tab id 时用哪个 tab。
+   *
+   * Codex 用 `getActiveBrowserUseTab`：优先当前被 browser_use 接管的那个。
+   * capability 的 payload 里只有 `browser_id`（= 会话），没有 tab id，
+   * 所以这一步是必须的。
+   */
+  private resolveBrowserUseTabId(conversationId: string): string | null {
+    const pages = this.findPagesForConversation(conversationId)
+    if (pages.length === 0) return null
+    return (pages.find((page) => page.browserUseActive) ?? pages[pages.length - 1]).browserTabId
+  }
+
+  private pushCapabilityIntent(conversationId: string, intent: PendingCapabilityIntent): void {
+    const queue = this.pendingCapabilityIntents.get(conversationId) ?? []
+    // 同类意图只保留最后一次：agent 连着 set 两个尺寸，只有后一个有意义
+    const kept = queue.filter((existing) => existing.kind !== intent.kind)
+    kept.push(intent)
+    this.pendingCapabilityIntents.set(conversationId, kept)
+  }
+
+  /** tab 真的起来了：把攒下的 capability 意图补上（Codex 在 debugger 同步点做） */
+  private applyPendingCapabilityIntents(conversationId: string, browserTabId: string): void {
+    const queue = this.pendingCapabilityIntents.get(conversationId)
+    if (queue == null || queue.length === 0) return
+    this.pendingCapabilityIntents.delete(conversationId)
+    for (const intent of queue) {
+      if (intent.kind === 'visibility') {
+        this.setBrowserVisibleForBrowserUse(conversationId, intent.visible, browserTabId)
+      } else {
+        void this.setViewportForBrowserUse(conversationId, intent.viewportSize, browserTabId)
+      }
+    }
+  }
+
   isBrowserPageWebContents(webContents: WebContents): boolean {
     return this.findStateByGuest(webContents) != null
   }
@@ -531,6 +764,24 @@ const CAPTURE_SURFACE_SETTLE_MS = 400
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Codex `hV`：视口覆盖的取值范围，逐字照搬。
+ * 越界不报错而是夹紧 —— agent 给出 `width: 0` 时报错没有意义，页面渲染不出来
+ * 才是真问题。
+ */
+const VIEWPORT_BOUNDS = { minWidth: 240, maxWidth: 4096, minHeight: 160, maxHeight: 4096 }
+
+function clampViewport(size: ViewportSize): ViewportSize {
+  return {
+    width: Math.round(
+      Math.min(VIEWPORT_BOUNDS.maxWidth, Math.max(VIEWPORT_BOUNDS.minWidth, size.width))
+    ),
+    height: Math.round(
+      Math.min(VIEWPORT_BOUNDS.maxHeight, Math.max(VIEWPORT_BOUNDS.minHeight, size.height))
+    )
+  }
 }
 
 function clampZoom(percent: number): number {

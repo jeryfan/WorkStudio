@@ -109,6 +109,10 @@ export function useCommandHandler(
  * 本项目的面板已经按命令 id 注册了处理器，所以在这里把专用消息映射回命令 id，
  * 保持只有一套分发出口。映射表与主进程 `ApplicationMenuManager` 里的
  * `DEDICATED_MESSAGES` 是同一组对应关系，改一边要改另一边。
+ *
+ * `toggle-browser-panel` **不在**这张表里：它带 `open` 时是"设成这个值"而不是
+ * "翻转"（browser_use 的 `visibility.set` 走这条），payload 必须传到处理器，
+ * 而这张表的分发是丢掉 payload 的。它由 AppCommands 直接 `useHostMessage` 接。
  */
 const MESSAGE_TO_COMMAND: Partial<Record<HostMessageType, string>> = {
   'toggle-sidebar': 'toggleSidebar',
@@ -116,7 +120,6 @@ const MESSAGE_TO_COMMAND: Partial<Record<HostMessageType, string>> = {
   'toggle-file-tree-panel': 'toggleFileTreePanel',
   'toggle-terminal': 'toggleTerminal',
   'toggle-thread-pin': 'toggleThreadPin',
-  'toggle-browser-panel': 'toggleBrowserPanel',
   'navigate-back': 'navigateBack',
   'navigate-forward': 'navigateForward',
   'find-in-thread': 'findInThread',

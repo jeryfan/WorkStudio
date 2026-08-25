@@ -4,9 +4,10 @@ import { useAppShell } from '../../state/AppShellContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { useThreadWorkspace } from '../../state/threadWorkspace'
 import { commandKeybindingLabel } from '../../state/commands'
-import { BrowserGlobeIcon, FilesFolderIcon, SideChatIcon } from '../icons'
+import { BrowserGlobeIcon, FilesFolderIcon, SideChatIcon, TerminalIcon } from '../icons'
 import { createBrowserTabDescriptor } from './browserTabDescriptor'
 import { openFilesTab } from './filesTabDescriptor'
+import { openTerminalTab } from './terminalTabDescriptor'
 import { openSideChat } from './sideChat/openSideChat'
 
 /**
@@ -76,6 +77,7 @@ export function useSidePanelTabActions(
   // (WS 的 side chat 开在 tab 里,主路由恒为普通会话 —— vt() 恒 false)
   const canOpenSideChat = activeChatId != null
   const panelOpen = controller.panelId === 'right' ? rightPanelOpen : bottomPanelOpen
+  const terminalCapable = window.electronBridge != null
 
   return useMemo(() => {
     const de: SidePanelTabAction[] = [
@@ -123,8 +125,26 @@ export function useSidePanelTabActions(
         keyboardShortcut: commandKeybindingLabel('openBrowserTab'),
         deferSelectionUntilDropdownClose: true,
         onSelect: () => controller.openTab(createBrowserTabDescriptor())
-      }
-      // review / timeline / terminal / MCP 工具:未实现(条件不成立,不出现 —— 与 Codex 的条件组装语义一致)
+      },
+      /*
+       * Codex `F = terminalCapable`。本项目的判据是"宿主能起 PTY" ——
+       * 也就是跑在 Electron 里（预览页没有 electronBridge，也就没有 terminal 服务）。
+       * 终端按 conversationId 复用宿主会话，首页没有活动会话时退回 'app'，
+       * 与 host/browserScope.ts 的兜底一致。
+       */
+      ...(terminalCapable
+        ? [
+            {
+              id: 'terminal',
+              title: 'Terminal',
+              Icon: TerminalIcon,
+              keyboardShortcut: commandKeybindingLabel('toggleTerminal'),
+              onSelect: () =>
+                openTerminalTab(controller, { conversationId: activeChatId ?? 'app', cwd })
+            } satisfies SidePanelTabAction
+          ]
+        : [])
+      // review / timeline / MCP 工具:未实现(条件不成立,不出现 —— 与 Codex 的条件组装语义一致)
     ]
     // Codex `f.kind === 'git' ? [...de].sort(Rn) : de` —— 非 git 工作区保持组装顺序
     if (kind !== 'git') return de
@@ -140,6 +160,7 @@ export function useSidePanelTabActions(
     cwd,
     kind,
     panelOpen,
-    setFileTreeOpen
+    setFileTreeOpen,
+    terminalCapable
   ])
 }

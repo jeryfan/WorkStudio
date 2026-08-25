@@ -26,8 +26,16 @@ export interface BrowserTabRenderProps extends AppShellTabRenderProps<BrowserTab
  * Codex 的 browser tab `kind` 未能从 bundle 取证(host 侧创建),不设 ——
  * activeTabReactKey 退回 tabId(UUID),每个 browser tab 各自挂载。
  */
-export function createBrowserTabDescriptor(url = ''): AppShellTabDescriptorInput<BrowserTabState> {
-  const tabId = newBrowserTabId()
+/**
+ * `browserTabId` 只在 browser_use 侧开页时给：那个 id 是宿主生成的（`bu-…`），
+ * 宿主的页面注册表已经用它建好了路由，渲染层必须用同一个 id 才能认领到那条
+ * 路由 —— 自己再生成一个 UUID 会让宿主和渲染层各自持有一个半成品 tab。
+ */
+export function createBrowserTabDescriptor(
+  url = '',
+  browserTabId?: string
+): AppShellTabDescriptorInput<BrowserTabState> {
+  const tabId = browserTabId ?? newBrowserTabId()
   return {
     tabId,
     title: 'New tab',

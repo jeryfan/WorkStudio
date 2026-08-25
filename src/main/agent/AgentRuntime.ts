@@ -3,6 +3,7 @@ import { AgentServerHost } from './AgentServerHost'
 import { ProtocolClient } from './ProtocolClient'
 import { AppServerConnection } from './AppServerConnection'
 import { AgentBinaryError, verifyAgentBinary } from './binaryPath'
+import { resolveNodeRuntime } from './nodeRuntime'
 import type { WebviewWindow } from '../host/WebviewWindow'
 
 /**
@@ -46,6 +47,19 @@ export class AgentRuntime {
       console.error('[agent] runtime unavailable:', err)
       return
     }
+
+    /*
+     * 随包 Node 运行时的自述（Codex 的 `browser_use_runtime_paths_selected`
+     * 遥测事件同义）。打出来而不是静默：nodePath 少了、或者被环境变量顶掉了，
+     * 都会在插件真正要用时才炸，那时错误离根因很远。
+     */
+    const nodeRuntime = resolveNodeRuntime()
+    console.log(
+      `[agent] node runtime — node=${nodeRuntime.nodePathSource}` +
+        `(${nodeRuntime.nodePath ?? 'none'})` +
+        ` node_repl=${nodeRuntime.nodeReplPathSource}` +
+        ` moduleDirs=${nodeRuntime.nodeModuleDirs.length}`
+    )
 
     this.host.on('stderr', (line) => console.warn('[agent:stderr]', line))
     this.host.on('diagnostic', (msg, detail) => console.warn('[agent]', msg, detail ?? ''))

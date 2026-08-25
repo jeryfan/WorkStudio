@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import {
+  subscribeBrowserUseViewport,
   subscribeCaptureSurfaceRequests,
   useBrowserSurfaces,
   type BrowserSurface
@@ -38,8 +39,26 @@ function styleFor(surface: BrowserSurface): React.CSSProperties {
     top: rect.y,
     width: rect.width,
     height: rect.height,
-    zIndex: 0
+    zIndex: 0,
+    // 有视口覆盖时 webview 会比锚点大，超出部分裁掉而不是撑破面板
+    overflow: 'hidden'
   }
+}
+
+/**
+ * webview 元素自身的尺寸。
+ *
+ * 没有视口覆盖 → 撑满锚点（就是原来的 `h-full w-full`）。
+ * 有视口覆盖   → 用覆盖的尺寸，多出来的部分由外层裁掉。
+ *
+ * **不确定**：Codex 在面板比覆盖视口小时是裁切还是等比缩放，没有取证到。
+ * 这里选裁切，因为缩放会让 `Input.dispatchMouseEvent` 的页面坐标与用户看到的
+ * 位置错开 —— 那是会静默产生错误点击的一类偏差，裁切只是看不全。
+ */
+function webviewStyleFor(surface: BrowserSurface): React.CSSProperties | undefined {
+  const size = surface.viewportSize
+  if (size == null) return undefined
+  return { width: size.width, height: size.height }
 }
 
 export function BrowserSurfaceLayer(): React.JSX.Element {
@@ -47,6 +66,8 @@ export function BrowserSurfaceLayer(): React.JSX.Element {
 
   // 宿主要求捕获表面时把停靠位保住（这里只需要订阅，摆放逻辑在 styleFor）
   useEffect(() => subscribeCaptureSurfaceRequests(), [])
+  // browser_use 的视口覆盖（元素侧的那一半，见 browserSurfaces.ts）
+  useEffect(() => subscribeBrowserUseViewport(), [])
 
   return (
     <>
@@ -71,7 +92,8 @@ export function BrowserSurfaceLayer(): React.JSX.Element {
           */}
             <webview
               src="about:blank"
-              className="h-full w-full"
+              className={surface.viewportSize == null ? 'h-full w-full' : undefined}
+              style={webviewStyleFor(surface)}
               {...{ [TAB_PREVIEW_PIN_EXEMPT]: 'true' }}
             />
           </div>

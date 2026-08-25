@@ -17,6 +17,10 @@ import { ApplicationMenuManager } from '../menu/ApplicationMenuManager'
 import { registerContextMenuIpc } from '../menu/contextMenu'
 import { BrowserSidebarManager } from '../browser/BrowserSidebarManager'
 import { BrowserSessionRegistry } from '../browser/BrowserSessionRegistry'
+import { TerminalManager } from '../terminal/TerminalManager'
+import { TrayMenuManager } from '../menu/TrayMenuManager'
+import { AppUpdatesManager } from '../updates/AppUpdatesManager'
+import { WorkerHost } from '../workers/WorkerHost'
 import { attachBrowserWebviewHooks } from '../browser/webviewAttach'
 import { SharedObjectRepository } from './SharedObjectRepository'
 import { WindowManager } from './WindowManager'
@@ -43,6 +47,18 @@ export class WindowContext {
   readonly menuManager: ApplicationMenuManager
   readonly browserManager: BrowserSidebarManager
   readonly browserSessions: BrowserSessionRegistry
+  /** 终端会话：全应用一份，会话可以活过持有它的窗口 */
+  readonly terminalManager = new TerminalManager()
+  readonly trayMenuManager: TrayMenuManager
+  /** 更新状态：全应用一份，经 AppView 反向服务推给每个窗口 */
+  readonly appUpdatesManager = new AppUpdatesManager()
+  /**
+   * git worker（Codex 的三个 worker 之一）。
+   * open-in 与 computer-use 两个未实现 —— 前者本项目已在主进程里做（OpenInService），
+   * 搬进 worker 只是挪位置；后者依赖 Codex 随包分发的原生能力（sky.node / cua_node），
+   * 本项目没有那些资产。
+   */
+  readonly gitWorker = new WorkerHost('git', { entryFileName: 'git.worker.js' })
   private readonly messageHandler: ElectronMessageHandler
   private readonly appHosts = new Map<number, AppHost>()
   private readonly appViews = new Map<number, AppViewMain>()
@@ -56,10 +72,41 @@ export class WindowContext {
     this.menuManager = new ApplicationMenuManager(this.windowManager)
     this.browserManager = new BrowserSidebarManager(this.windowManager)
     this.browserSessions = new BrowserSessionRegistry(this.browserManager)
+    this.trayMenuManager = new TrayMenuManager({
+      openThread: (path) => {
+        void this.windowManager.showPrimaryWindow().then((window) => {
+          if (window == null) return
+          this.windowManager.sendMessageToWindow(window, { type: 'navigate-to-route', path })
+        })
+      },
+      openNewThread: () => {
+        void this.windowManager.showPrimaryWindow().then((window) => {
+          if (window == null) return
+          // 专用消息，渲染层映射到 newProjectlessTask 命令
+          this.windowManager.sendMessageToWindow(window, { type: 'new-projectless-task' })
+        })
+      },
+      openMainWindow: () => {
+        void this.windowManager.showPrimaryWindow()
+      }
+    })
+    /** Codex `broadcastAppUpdateState` */
+    this.disposers.push(
+      this.appUpdatesManager.addListener((state) => {
+        for (const view of this.appViews.values()) {
+          void Promise.resolve(view.services)
+            .then((services) => services.appUpdates.stateChanged(state))
+            .catch((error: unknown) => {
+              console.warn('[host] failed to publish app update state', error)
+            })
+        }
+      })
+    )
     this.messageHandler = new ElectronMessageHandler({
       sharedObjects: this.sharedObjects,
       windowManager: this.windowManager,
       browserManager: this.browserManager,
+      trayMenuManager: this.trayMenuManager,
       appServer: this.agent.connection,
       onReady: (webContents) => this.readyWebContentsIds.add(webContents.id)
     })
@@ -124,6 +171,15 @@ export class WindowContext {
 
   /** 注册宿主 IPC —— 全应用只有这一处 ipcMain 注册点 */
   registerIpc(): void {
+    /*
+     * tray 在这里建而不是在构造函数里：`new Tray()` 要求 app 已经 ready，
+     * 而 WindowContext 的构造发生在 ready 回调里，registerIpc 紧随其后 ——
+     * 放这里能保证顺序，也保证第一次 `tray-menu-threads-changed` 到达时
+     * tray 已经存在。
+     */
+    this.trayMenuManager.start()
+    this.disposers.push(this.gitWorker.registerIpc((sender) => this.isTrusted(sender)))
+
     ipcMain.handle(HOST_CHANNEL.messageFromView, async (event, message: ViewMessage) => {
       if (!this.isTrusted(event.sender)) return
       await this.messageHandler.handleMessage(event.sender, message)
@@ -182,15 +238,24 @@ export class WindowContext {
       windowManager: this.windowManager,
       menuManager: this.menuManager,
       browserManager: this.browserManager,
+      terminalManager: this.terminalManager,
+      appUpdatesManager: this.appUpdatesManager,
       pickDirectories: () => this.pickDirectories()
     })
     this.appHosts.set(webContents.id, host)
     // 双向：把 host 暴露出去，同时拿到渲染层导出的服务树
     const view = newMessagePortMainRpcSession<AppViewMain>(port, host)
     void Promise.resolve(view.services)
-      .then(() => {
+      .then(async (services) => {
         this.appViews.set(webContents.id, view)
         console.log(`[host] app host connected — webContents ${webContents.id}`)
+        /*
+         * 注册即推一份更新状态快照（Codex `registerAppView` 里的
+         * `await appUpdates.stateChanged(getAppUpdateViewState())`）。
+         * 不推的话新窗口要等到下一次状态变化才知道有没有可用更新 ——
+         * 而"没有更新"这个状态可能一整天都不变。
+         */
+        await services.appUpdates.stateChanged(this.appUpdatesManager.getState())
       })
       .catch((error: unknown) => {
         console.warn('[host] failed to register AppView services', error)
@@ -247,6 +312,10 @@ export class WindowContext {
     for (const host of this.appHosts.values()) await host.dispose()
     this.appHosts.clear()
     this.appViews.clear()
+    this.trayMenuManager.destroy()
+    this.gitWorker.dispose()
+    // pty 是真的子进程，不收会留下孤儿 shell
+    await this.terminalManager.dispose()
     await this.browserSessions.disposeAll()
   }
 }

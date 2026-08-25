@@ -12,16 +12,40 @@ files:
   # agent 二进制按平台经 extraResources 单独投放，不能进 asar，
   # 否则每个安装包都会塞进全部平台的副本。
   - '!resources/agent'
+  # 自带 Node 运行时同理：按平台经 extraResources 投放（见 scripts/sync-node-runtime.mjs）
+  - '!resources/node-runtime'
+  # 逆向取证与设计资料：只服务开发，绝不能进分发包。
+  # 实测过一次没排除的后果：app.asar 467MB，其中 ~300MB 是 reverse/ 里
+  # Codex 的反编译产物与 CDP console 日志 —— 既白占体积，又把上游代码
+  # 随我们的安装包一起分发出去。
+  - '!reverse'
+  - '!docs'
+  - '!prototype'
+  - '!dist'
+  - '!scripts'
+  - '!vite.preview.config.ts'
+  - '!*.tsbuildinfo'
   # 原生右键菜单的图标由主进程按路径读盘（Codex 的
   # nativeContextMenuIconSearchRoots 同理），因此 assets/apps 要以**文件**形式
   # 投到 resources/apps；渲染层打包出来的是带 hash 的资源名，主进程用不上。
 asarUnpack:
   - resources/**
+  # node-pty 是原生模块：`.node` 与 `spawn-helper` 必须以**真实文件**存在，
+  # 留在 asar 里 `require` 加载不了（dlopen 不认 asar 的虚拟路径），
+  # spawn-helper 还需要可执行位。
+  - node_modules/node-pty/**
+  # `new Worker(path)` 读的是磁盘上的真实文件：worker 线程的引导过程不走
+  # Electron 给主进程打的 asar 补丁，留在 asar 里加载不到入口。
+  # 共享 chunk 一起解包 —— 只解包入口的话它 require 不到 ./chunks/*。
+  - out/main/*.worker.js
+  - out/main/chunks/**
 win:
   executableName: work-studio
   extraResources:
     - from: resources/agent/win32-${arch}
       to: agent
+    - from: resources/node-runtime/win32-${arch}
+      to: node-runtime
     - from: src/renderer/src/assets/apps
       to: apps
 nsis:
@@ -40,6 +64,8 @@ mac:
   extraResources:
     - from: resources/agent/darwin-${arch}
       to: agent
+    - from: resources/node-runtime/darwin-${arch}
+      to: node-runtime
     - from: src/renderer/src/assets/apps
       to: apps
 dmg:
@@ -54,11 +80,15 @@ linux:
   extraResources:
     - from: resources/agent/linux-${arch}
       to: agent
+    - from: resources/node-runtime/linux-${arch}
+      to: node-runtime
     - from: src/renderer/src/assets/apps
       to: apps
 appImage:
   artifactName: ${name}-${version}.${ext}
-npmRebuild: false
+# 原生模块（node-pty）必须按 Electron 的 ABI 重编，不能用 npm 装下来的
+# Node 版本。日常开发由 package.json 的 postinstall 走同一条路径。
+npmRebuild: true
 publish:
   provider: generic
   url: https://example.com/auto-updates

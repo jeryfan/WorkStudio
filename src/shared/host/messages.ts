@@ -80,6 +80,16 @@ export type ViewMessage =
   | { type: 'open-in-new-window'; path: string }
   | { type: 'show-settings'; section: string; state?: unknown }
   | { type: 'quit-app' }
+  /**
+   * tray / dock 菜单的会话清单（Codex `tray-menu-threads-changed`）。
+   *
+   * 为什么由渲染层推而不是主进程自己查：这五组的口径全在渲染层 —— 未读是
+   * 渲染层的已读游标算的，pinned 来自侧栏的置顶顺序，recent 是侧栏的排序结果，
+   * usageLimits 是配额条的文案。主进程重算一遍必然和界面显示的不一致。
+   *
+   * 注意 payload 嵌在 `trayMenuThreads` 里而不是拍平（实测形状）。
+   */
+  | { type: 'tray-menu-threads-changed'; trayMenuThreads: TrayMenuThreads }
   | { type: 'mac-menu-bar-enabled-changed'; enabled: boolean }
 
   // ── app-server（协议报文骑在宿主信封上，与 Codex 同构） ──
@@ -96,14 +106,27 @@ export type ViewMessage =
   | { type: 'mcp-request-abandon'; hostId: HostId; id: RpcId }
 
   // ── 内置浏览器 ──
-  /** webview 已挂载并完成认领，把渲染层侧的路由信息同步给宿主 */
+  /**
+   * 呈现态同步：渲染层把"这个 tab 现在有没有被显示出来、显示在哪"告诉宿主。
+   *
+   * 取证：Codex `BrowserSidebarManager.sync(webContents, payload)`。宿主拿它
+   * 推导两件事：
+   *   `presented = payload.presented ?? (payload.visible && payload.bounds != null)`
+   *   `presented` 为真时把 `activeConversationId/activeBrowserTabId` 挪到这条路由
+   * 这是 `browser_visibility_get` 的唯一数据来源 —— 面板开没开只有渲染层知道，
+   * 但**判断**必须在宿主，因为提问的是 native pipe 上的 agent。
+   *
+   * 注意这里不再带 instanceId/url：路由登记走 `browserSidebar.registerWebviewHost`
+   * 服务，两条路都能登记就会出现两份互相打架的路由表。
+   */
   | {
       type: 'browser-sidebar-sync'
       conversationId: string
       browserTabId: string
-      instanceId: number
-      url: string | null
+      /** 这个 tab 是否处在"可见"的 UI 位置（面板开着且它是当前 tab） */
       visible: boolean
+      /** 锚点矩形；null 表示当前没有可见位置（停在捕获表面上） */
+      bounds: { x: number; y: number; width: number; height: number } | null
     }
   | {
       type: 'browser-sidebar-command'
@@ -121,9 +144,21 @@ export type HostMessage =
   // ── 面板开关（Codex 为高频面板保留了专用消息，不走 run-command） ──
   | { type: 'toggle-sidebar' }
   | { type: 'toggle-bottom-panel' }
+  /**
+   * `open` 缺省是"翻转"，给出时是"设成这个值"。
+   *
+   * 取证：Codex 的 browser_use 路径发的是 `{open:true|false, browserTabId,
+   * conversationId, source:'browser_use', initiator:'browser_use'}` —— agent 要的是
+   * "显示/隐藏"而不是"翻转"，翻转会在面板已开时把它关掉。
+   *
+   * 与 Codex 的差异：不带 `conversationId`/`browserTabId`。Codex 是多窗口 + 每个
+   * 窗口一份活动路由，必须指名道姓；本项目的浏览器面板是右面板里的一个 tab，
+   * 关面板就是关当前的浏览器 tab，渲染层自己知道是哪个。
+   */
   | {
       type: 'toggle-browser-panel'
-      source?: 'manual'
+      open?: boolean
+      source?: 'manual' | 'browser_use'
       initiator?: 'app_menu' | 'command' | 'browser_use'
     }
   | { type: 'toggle-file-tree-panel' }
@@ -224,7 +259,26 @@ export type HostMessage =
       active: boolean
     }
   /** browser_use 要求打开浏览器面板（agent 主动开页时） */
-  | { type: 'browser-sidebar-open-panel-without-animation'; conversationId: string }
+  | {
+      type: 'browser-sidebar-open-panel-without-animation'
+      conversationId: string
+      browserTabId?: string
+      source?: 'browser_use'
+      initiator?: 'browser_use'
+    }
+  /**
+   * browser_use 的视口覆盖（Codex `browser-sidebar-browser-use-viewport`）。
+   *
+   * 宿主已经把 `Emulation.setDeviceMetricsOverride` 下给页面了；这条是给渲染层
+   * 的，让 webview 元素的物理尺寸跟着改 —— 只改 emulation 不改元素尺寸，页面
+   * 会被缩放拉伸，截图与坐标都不对。
+   */
+  | {
+      type: 'browser-sidebar-browser-use-viewport'
+      conversationId: string
+      browserTabId: string
+      viewportSize: { width: number; height: number } | null
+    }
   /**
    * 要求/释放捕获表面。
    *
@@ -238,6 +292,25 @@ export type HostMessage =
       browserTabId: string
       required: boolean
     }
+
+/** tray / dock 菜单里的一条会话（Codex `Gu` 读的就是这四个字段） */
+export interface TrayMenuThread {
+  title: string
+  /** 点击后要导航到的路由（`navigate-to-route` 的 path） */
+  path: string
+  /** 未归属任何项目：菜单里显示成 “Chats” 而不是项目名 */
+  isProjectless: boolean
+  projectLabel: string
+}
+
+export interface TrayMenuThreads {
+  runningThreads: TrayMenuThread[]
+  unreadThreads: TrayMenuThread[]
+  pinnedThreads: TrayMenuThread[]
+  recentThreads: TrayMenuThread[]
+  /** 只在 macOS 的 tray 菜单里显示，且是不可点的说明行 */
+  usageLimits: Array<{ label: string }>
+}
 
 /** 浏览器 tab 的宿主权威状态（渲染层只读，不再自持一份） */
 export interface BrowserTabState {

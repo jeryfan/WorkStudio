@@ -16,6 +16,7 @@ import type {
   AppHostServices,
   AppInfoSnapshot,
   ApplicationMenuItemSnapshot,
+  AppUpdatesService as AppUpdatesContract,
   BrowserSidebarService as BrowserSidebarContract,
   ChromiumBrowserService as ChromiumBrowserContract,
   LocalProjectsService as LocalProjectsContract,
@@ -35,7 +36,10 @@ import type { ProjectRegistry } from '../../workspace/ProjectRegistry'
 import type { WindowManager } from '../WindowManager'
 import type { ApplicationMenuManager } from '../../menu/ApplicationMenuManager'
 import type { BrowserSidebarManager } from '../../browser/BrowserSidebarManager'
+import type { TerminalManager } from '../../terminal/TerminalManager'
+import type { AppUpdatesManager } from '../../updates/AppUpdatesManager'
 import { OpenInService } from './OpenInService'
+import { TerminalService } from './TerminalService'
 import { WorkspaceFilesService } from './WorkspaceFilesService'
 
 /**
@@ -370,7 +374,42 @@ export interface AppHostDependencies {
   windowManager: WindowManager
   menuManager: ApplicationMenuManager
   browserManager: BrowserSidebarManager
+  /**
+   * 全应用一个实例。终端会话必须活得比窗口长（`preserveOnOwnerDestroy`），
+   * 每个 AppHost 各建一个的话，关一次窗口所有会话就没了。
+   */
+  terminalManager: TerminalManager
+  /** 更新状态全应用一份 —— 见 AppUpdatesService 的说明 */
+  appUpdatesManager: AppUpdatesManager
   pickDirectories(): Promise<string[]>
+}
+
+/**
+ * appUpdates —— Codex `Tce`。
+ *
+ * 三个方法都只是转给 manager：更新状态是全应用一份的，不能每个窗口各持一份
+ * （两个窗口会各自看到不同的下载进度）。
+ */
+class AppUpdatesService extends RpcTarget implements AppUpdatesContract {
+  constructor(
+    private readonly manager: AppUpdatesManager,
+    private readonly origin: WebContents
+  ) {
+    super()
+  }
+
+  checkForUpdates(): void {
+    this.manager.checkForUpdates()
+  }
+
+  installUpdate(): Promise<void> {
+    // origin 传下去是为了把确认框挂到发起的那个窗口上
+    return this.manager.installUpdate(this.origin)
+  }
+
+  setSparkleQueryParams(params: Record<string, string>): void {
+    this.manager.setSparkleQueryParams(params)
+  }
 }
 
 /**
@@ -387,6 +426,7 @@ export class AppHost extends RpcTarget implements AppHostMain {
   private readonly serviceTree: AppHostServices
   readonly fileDrags: FileDragsService
   readonly workspaceFiles: WorkspaceFilesService
+  readonly terminal: TerminalService
 
   get services(): AppHostServices {
     return this.serviceTree
@@ -396,8 +436,11 @@ export class AppHost extends RpcTarget implements AppHostMain {
     super()
     this.fileDrags = new FileDragsService(deps.webContents)
     this.workspaceFiles = new WorkspaceFilesService()
+    this.terminal = new TerminalService(deps.terminalManager, deps.webContents)
     this.serviceTree = {
       appInfo: new AppInfoService(),
+      appUpdates: new AppUpdatesService(deps.appUpdatesManager, deps.webContents),
+      terminal: this.terminal,
       applicationMenu: new ApplicationMenuService(deps.menuManager),
       clipboard: new ClipboardService(),
       openIn: new OpenInService(),
@@ -417,6 +460,7 @@ export class AppHost extends RpcTarget implements AppHostMain {
   }
 
   async dispose(): Promise<void> {
+    this.terminal.dispose()
     await this.workspaceFiles.dispose()
   }
 }

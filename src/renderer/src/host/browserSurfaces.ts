@@ -26,6 +26,15 @@ export interface BrowserSurface {
   /** browser_use 是否要求保持捕获表面 */
   captureSurfaceRequired: boolean
   /**
+   * browser_use 的视口覆盖（宿主已经把 `Emulation.setDeviceMetricsOverride`
+   * 下给页面了，这里是元素侧的那一半）。
+   *
+   * 两边都要改：只改 emulation，元素尺寸还是锚点尺寸，Chromium 会把 390 宽的
+   * 布局缩放到元素宽度上，截图和点击坐标全都偏；只改元素尺寸，页面拿到的
+   * `window.innerWidth` 又不是 agent 要的值。
+   */
+  viewportSize: { width: number; height: number } | null
+  /**
    * 宿主是否已经登记好这条路由。
    *
    * 必须等它变 true 才能渲染 `<webview>`：登记是异步的 RPC，而 attach 是
@@ -69,6 +78,7 @@ export function ensureBrowserSurface(conversationId: string, browserTabId: strin
     browserTabId,
     rect: null,
     captureSurfaceRequired: false,
+    viewportSize: null,
     registered: false
   })
   void whenHostServicesReady()
@@ -124,6 +134,36 @@ export function setBrowserSurfaceRect(
   emit()
 }
 
+/**
+ * 把呈现态报给宿主（Codex `browser-sidebar-sync`）。
+ *
+ * 这是 `browser_visibility_get` 的唯一数据来源：面板开没开只有渲染层知道，
+ * 但回答问题的是 native pipe 上的 agent，所以判断必须在宿主。
+ *
+ * **量的是 tab 面板本身，不是 webview 的锚点。** 这两件事必须分开：
+ * 空白新 tab（还没有 URL）根本不渲染 webview，也就没有锚点 —— 但那个 tab
+ * 明明就在用户面前。用锚点当依据的话 `browser_visibility_get` 会对一个开着的
+ * 浏览器面板回 false。Codex 的 `bounds` 是浏览器视图的 frame，与页面加载
+ * 无关，语义就是"这个 tab 占了屏幕上这块地方"。
+ *
+ * 宿主那边的推导（`presented = visible && bounds != null`）不变，所以这里
+ * 传的 `visible` 仍然只是"有没有量到一块非零的地方"。
+ */
+export function reportBrowserSurfacePresentation(
+  conversationId: string,
+  browserTabId: string,
+  bounds: BrowserSurface['rect']
+): void {
+  const presented = bounds != null && bounds.width > 0 && bounds.height > 0
+  postMessageFromView({
+    type: 'browser-sidebar-sync',
+    conversationId,
+    browserTabId,
+    visible: presented,
+    bounds: presented ? bounds : null
+  })
+}
+
 function subscribe(listener: Listener): () => void {
   listeners.add(listener)
   return () => {
@@ -141,6 +181,23 @@ export function subscribeCaptureSurfaceRequests(): () => void {
     const surface = surfaces.get(key(message.conversationId, message.browserTabId))
     if (surface == null || surface.captureSurfaceRequired === message.required) return
     surface.captureSurfaceRequired = message.required
+    emit()
+  })
+}
+
+/** browser_use 的视口覆盖（Codex `browser-sidebar-browser-use-viewport`） */
+export function subscribeBrowserUseViewport(): () => void {
+  return subscribeHostMessage('browser-sidebar-browser-use-viewport', (message) => {
+    const surface = surfaces.get(key(message.conversationId, message.browserTabId))
+    if (surface == null) return
+    const next = message.viewportSize
+    if (
+      surface.viewportSize?.width === next?.width &&
+      surface.viewportSize?.height === next?.height
+    ) {
+      return
+    }
+    surface.viewportSize = next
     emit()
   })
 }

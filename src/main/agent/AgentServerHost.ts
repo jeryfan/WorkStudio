@@ -1,24 +1,105 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { dirname, delimiter } from 'node:path'
+import { delimiter } from 'node:path'
 import { LineDecoder, decodeLine, encodeLine } from '@shared/rpc/jsonl'
 import type { RpcMessage } from '@shared/rpc/messages'
 import type { RpcTransport } from '@shared/rpc/peer'
-import { resolveAgentBinary } from './binaryPath'
+import { resolveAgentRuntime } from './binaryPath'
 
 /**
  * agent 进程以 app-server 子命令运行，stdio 上跑 JSONL 报文。
  *
- * code_mode_host 特性依赖同目录的宿主可执行文件；这里显式开启以获得与
+ * 取证：Codex 的本地 app-server 由 `YB`（StdioConnection）spawn，参数由 `sV()`
+ * 拼出，环境由 `QB()` 拼出。两处都逐项照搬，理由见下。
+ */
+
+/**
+ * Codex `NB`：code_mode_host 依赖同目录的宿主可执行文件，显式开启才能拿到与
  * 上游桌面端一致的工具集。
  */
-const AGENT_ARGS = [
-  '-c',
-  'features.code_mode_host=true',
-  'app-server',
-  '--listen',
-  'stdio://'
+const CODE_MODE_HOST_ARGS = ['-c', 'features.code_mode_host=true'] as const
+
+/**
+ * Codex `PB`：两个 base url 覆盖，走环境变量进来、以 `-c` 落到 config。
+ * 值用 `JSON.stringify` 包一层是必须的 —— `-c` 的值按 TOML 解析，裸字符串里
+ * 的 `:`、`/` 会让解析失败后退化成字面量，行为不确定。
+ */
+const BASE_URL_OVERRIDES = [
+  { configKey: 'chatgpt_base_url', envVar: 'CODEX_APP_SERVER_CHATGPT_BASE_URL' },
+  { configKey: 'openai_base_url', envVar: 'CODEX_APP_SERVER_OPENAI_BASE_URL' }
 ] as const
+
+/**
+ * Codex `MB`：originator 覆盖值。服务端把它当客户端标识上报，
+ * 不设的话 app-server 用它自己的默认值。
+ */
+const ORIGINATOR = 'WorkStudio'
+
+/**
+ * Codex `sV()`。两处刻意的差异：
+ *
+ * 1. **不传 `--listen stdio://`** —— `--help` 里 `stdio://` 就是 `--listen` 的
+ *    默认值，Codex 本地连接也不传。传了不错，但多一个参数就多一处将来会和
+ *    上游漂移的地方。
+ * 2. **不传 `--analytics-default-enabled`** —— Codex 传了这个，作用是把
+ *    analytics 的默认值翻成"开"（app-server 自身默认是关的）。那是第一方对
+ *    自己产品的选择；本项目照搬等于替用户把遥测打开、且数据发往 OpenAI。
+ *    需要时加回来即可，这是唯一一处主动偏离。
+ */
+function buildAgentArgs(env: NodeJS.ProcessEnv): string[] {
+  const overrides = BASE_URL_OVERRIDES.flatMap(({ configKey, envVar }) => {
+    const value = env[envVar]?.trim()
+    return value == null || value === '' ? [] : ['-c', `${configKey}=${JSON.stringify(value)}`]
+  })
+  return [...CODE_MODE_HOST_ARGS, ...overrides, 'app-server']
+}
+
+/**
+ * 读当前 env 里的 PATH 键名（Codex `HI`/`II`）。
+ *
+ * Windows 的环境变量名大小写不敏感，但 `{...process.env}` 之后对象上可能
+ * 同时存在 `Path` 与 `PATH`：只改一个，子进程拿到的是另一个。
+ */
+function pathKey(env: NodeJS.ProcessEnv): string {
+  if (process.platform !== 'win32') return 'PATH'
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
+}
+
+/** 写 PATH，并清掉同名异写的重复键（Codex `LI`） */
+function setPath(env: NodeJS.ProcessEnv, value: string): void {
+  const key = pathKey(env)
+  if (process.platform === 'win32') {
+    for (const other of Object.keys(env)) {
+      if (other !== key && other.toLowerCase() === 'path') delete env[other]
+    }
+  }
+  env[key] = value
+}
+
+/** 追加一个目录到 PATH 末尾，已存在则原样返回（Codex `cV`） */
+function appendToPath(current: string | undefined, entry: string): string {
+  const value = current ?? ''
+  if (value.split(delimiter).includes(entry)) return value
+  return value.length > 0 ? `${value}${delimiter}${entry}` : entry
+}
+
+/**
+ * Codex `QB()` 的环境部分。
+ *
+ * agent 目录是**追加**而不是前置（Codex 用 `cV` 追加 rg 目录与 codex bin
+ * 目录）：用户机器上自己的 rg/git 优先，我们只兜底。前置会静默改变用户
+ * 环境里同名工具的解析结果。
+ */
+function buildAgentEnv(agentDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    LOG_FORMAT: 'json',
+    RUST_LOG: process.env.RUST_LOG ?? 'warn',
+    CODEX_INTERNAL_ORIGINATOR_OVERRIDE: ORIGINATOR
+  }
+  setPath(env, appendToPath(env[pathKey(env)], agentDir))
+  return env
+}
 
 /** 崩溃重启退避：避免二进制本身有问题时疯狂重拉 */
 const RESTART_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000]
@@ -57,16 +138,12 @@ export class AgentServerHost extends EventEmitter<AgentServerHostEvents> impleme
     if (this.child) return
     this.stopping = false
 
-    const binary = resolveAgentBinary()
-    const agentDir = dirname(binary)
+    const { binary, dir: agentDir } = resolveAgentRuntime()
 
     // 附属可执行文件（rg 等）与主程序同目录，需要在子进程 PATH 里可见
-    const env = {
-      ...process.env,
-      PATH: `${agentDir}${delimiter}${process.env.PATH ?? ''}`
-    }
+    const env = buildAgentEnv(agentDir)
 
-    const child = spawn(binary, [...AGENT_ARGS], {
+    const child = spawn(binary, buildAgentArgs(env), {
       env,
       cwd: agentDir,
       stdio: ['pipe', 'pipe', 'pipe']

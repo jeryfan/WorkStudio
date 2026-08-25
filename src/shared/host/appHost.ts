@@ -13,9 +13,9 @@ import type { WorkspaceSnapshot, CreateProjectInput, ProjectSelection } from '..
  *   2. 新增服务不需要动 preload、不需要新通道名、不需要在两端各写一遍字符串；
  *   3. capnweb 的 promise pipelining 让 `a.b().c()` 只走一次往返。
  *
- * 命名严格沿用 Codex 的服务名。Codex 有而本项目没有对应实现的服务（terminal /
- * realtimeVoice / avatarOverlay / chronicle / codexMicro / remoteControl* …）
- * 这里不声明 —— 声明了却不实现只会让调用方以为能用。
+ * 命名严格沿用 Codex 的服务名。Codex 有而本项目没有对应实现的服务（realtimeVoice /
+ * avatarOverlay / chronicle / codexMicro / remoteControl* …）这里不声明 ——
+ * 声明了却不实现只会让调用方以为能用。
  */
 
 // ── appInfo（Codex `fae`，只有一个 get） ───────────────────────────────
@@ -217,6 +217,8 @@ export interface FileDragsService {
 /** 主进程暴露给渲染层的完整服务树 */
 export interface AppHostServices {
   appInfo: AppInfoService
+  appUpdates: AppUpdatesService
+  terminal: TerminalService
   applicationMenu: ApplicationMenuService
   clipboard: ClipboardService
   openIn: OpenInService
@@ -230,6 +232,107 @@ export interface AppHostServices {
   fileDrags: FileDragsService
   /** 仅 macOS/Windows 提供 */
   systemPermissions?: SystemPermissionsService
+}
+
+// ── appUpdates（Codex `Tce`） ─────────────────────────────────────────
+/**
+ * 更新状态。字段名与 Codex `getAppUpdateViewState()` 逐字一致 ——
+ * 渲染层的 app header 就是按这几个字段画的。
+ */
+export interface AppUpdateViewState {
+  /** 0–100；不在下载中为 null */
+  downloadProgressPercent: number | null
+  /** 已下载的那个包属于哪个 brand（Codex 同一个 Sparkle 服务多 brand 共用） */
+  downloadedUpdateAppBrand: string | null
+  installProgressPercent: number | null
+  /** 装完了、等重启 */
+  isUpdateReady: boolean
+  /**
+   * **不确定**：Codex 这里是 Sparkle 的生命周期枚举，具体取值在
+   * `sparkleManager`（原生 `sparkle.node`）里，压缩代码里挖不到完整表。
+   * 下面这组是本项目按 electron-updater 的事件推导出来的，语义对齐但不保证
+   * 与 Sparkle 的字符串逐字相同。
+   */
+  lifecycleState: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
+  /** 需要重启才能生效时给用户的一句话；没有就是 null */
+  relaunchNotice: string | null
+}
+
+export interface AppUpdatesService {
+  checkForUpdates(): void
+  /**
+   * 安装并重启。
+   * Codex 在 macOS 且有活动本地会话时先弹确认（"will quit to install the update,
+   * which will interrupt active local sessions"）—— 装更新会杀掉正在跑的任务。
+   */
+  installUpdate(): Promise<void>
+  /**
+   * Codex 用它给 Sparkle 的 feed URL 追加查询参数（灰度分桶、channel）。
+   * electron-updater 没有 feed 查询参数这一层，本项目把它记下来但**不使用** ——
+   * 见主进程实现里的说明。
+   */
+  setSparkleQueryParams(params: Record<string, string>): void
+}
+
+// ── terminal（Codex `tTe`） ────────────────────────────────────────────
+/**
+ * 终端会话的事件流。
+ *
+ * 取证：Codex 的 `TerminalManager` 只往订阅者推这五种。形状逐字照搬 ——
+ * 渲染层的 `attached` 是"可以开始渲染了"的信号，`init-log` 是宿主自己的诊断
+ * （shell 起不来、cwd 不存在这类），两者混成一种的话前端分不清该显示 banner
+ * 还是该往缓冲区里写。
+ */
+export type TerminalEvent =
+  | { type: 'data'; sessionId: string; data: string }
+  | { type: 'exit'; sessionId: string; code: number | null; signal: string | null }
+  | { type: 'init-log'; sessionId: string; log: string }
+  | { type: 'attached'; sessionId: string; cwd: string; shell: string }
+  | { type: 'error'; sessionId: string; message: string }
+
+/**
+ * Windows 上可选的集成终端。
+ * 非 Windows 恒为空数组（Codex `$we` 第一行就 return []）—— macOS/Linux 只用
+ * `$SHELL`，没有"挑一个 shell"的概念。
+ */
+export type TerminalShellPreference = 'powershell' | 'commandPrompt' | 'gitBash' | 'wsl'
+
+export interface TerminalCreateParams {
+  /** 不给就由宿主生成 UUID */
+  sessionId?: string
+  /** 会话（thread）id：同一窗口同一会话复用同一个终端会话 */
+  conversationId?: string
+  /** 注入成 `CODEX_APP_TITLE`，shell 提示符/标题可以用它 */
+  conversationTitle?: string
+  cwd?: string
+  cols?: number
+  rows?: number
+  /** 窗口销毁时保留会话（下次 attach 回来） */
+  preserveOnOwnerDestroy?: boolean
+}
+
+export interface TerminalSnapshot {
+  cwd: string
+  shell: string
+  /** 回放缓冲（尾部 16000 字符，与 Codex 同值） */
+  buffer: string
+  /** 缓冲已达上限，前面的输出已经丢了 */
+  truncated: boolean
+}
+
+export interface TerminalService {
+  create(params: TerminalCreateParams): Promise<string | null>
+  attach(params: TerminalCreateParams): Promise<string | null>
+  write(sessionId: string, data: string): void
+  resize(sessionId: string, cols: number, rows: number, repaint?: boolean): void
+  close(sessionId: string): void
+  /** 在已有会话里跑一条命令（Codex 的实现是重启会话并把命令喂进去） */
+  runAction(sessionId: string, cwd: string | null, command: string): void
+  getAvailableShells(): TerminalShellPreference[]
+  getShellCwd(sessionId: string, cwd: string): string | null
+  getThreadSnapshot(conversationId: string): TerminalSnapshot | null
+  subscribe(listener: (event: TerminalEvent) => void): void
+  unsubscribe(): void
 }
 
 /** capnweb 的对端主对象：渲染层 `await stub.services` 拿到上面那棵树 */
@@ -249,8 +352,20 @@ export interface ClientCoordinationService {
   invalidateQueryCache(params: { queryKey: readonly string[] }): void
 }
 
+/**
+ * 反向推送更新状态（Codex `broadcastAppUpdateState` → `appUpdates.stateChanged`）。
+ *
+ * 为什么是反向服务而不是宿主消息：更新状态是**快照**语义，新窗口注册时必须
+ * 立刻拿到当前值。走消息就得再定义一条"请给我当前状态"的请求，两条消息表达
+ * 一件事；反向服务只要在 registerAppView 里调一次。
+ */
+export interface AppUpdatesViewService {
+  stateChanged(state: AppUpdateViewState): void
+}
+
 export interface AppViewServices {
   clientCoordination: ClientCoordinationService
+  appUpdates: AppUpdatesViewService
 }
 
 export interface AppViewMain {
