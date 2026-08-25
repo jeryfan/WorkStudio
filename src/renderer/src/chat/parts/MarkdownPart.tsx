@@ -8,6 +8,7 @@ import { copyRichText } from '../../utils/clipboard'
 import { cx } from '../../utils/cx'
 import { TablePreviewDialog } from './TablePreviewDialog'
 import { buildTableHtml, toMarkdownTable } from '../model/table'
+import { hostServices } from '../../host/appHost'
 
 /**
  * Markdown 渲染。
@@ -73,7 +74,7 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
           // 外链一律交给系统浏览器：应用窗口不是浏览器，站内打开会把用户困住
           onClick={(e) => {
             e.preventDefault()
-            void window.api.openExternal(href)
+            void hostServices?.chromiumBrowser.openUrl(href)
           }}
         >
           {label}

@@ -1,10 +1,11 @@
 import { rpc } from '../../rpc/client'
 import { M } from '@shared/protocol/methods'
-import { LOCAL } from '@shared/protocol/local'
 import type { Chat, ChatListResponse } from '@shared/protocol/entities'
 import type { WorkspaceSnapshot } from '@shared/workspace/types'
 import { findProjectForCwd } from '@shared/workspace/resolve'
 import type { ChatSummary, ChatService, ListChatsOptions, ChatPage } from './types'
+import { whenHostServicesReady } from '../../host/appHost'
+import type { RemoteAppHostServices } from '@shared/host/appHost'
 
 /**
  * 协议 Thread → 本项目 ChatSummary。
@@ -69,16 +70,16 @@ export class RpcChatService implements ChatService {
     }
   }
 
-  setPinned(chatId: string, pinned: boolean): Promise<WorkspaceSnapshot> {
-    return rpc.request<WorkspaceSnapshot>(LOCAL.chatSetPinned, { chatId, pinned })
+  async setPinned(chatId: string, pinned: boolean): Promise<WorkspaceSnapshot> {
+    return (await threadAssignments()).setPinned(chatId, pinned)
   }
 
-  assignToProject(
+  async assignToProject(
     chatId: string,
     projectId: string | null,
     cwd: string
   ): Promise<WorkspaceSnapshot> {
-    return rpc.request<WorkspaceSnapshot>(LOCAL.chatAssign, { chatId, projectId, cwd })
+    return (await threadAssignments()).setAssignment(chatId, projectId, cwd)
   }
 
   async rename(chatId: string, name: string): Promise<void> {
@@ -96,6 +97,14 @@ export class RpcChatService implements ChatService {
   /** 删除会话，并清掉本地为它保存的置顶/归属状态 */
   async remove(chatId: string): Promise<WorkspaceSnapshot> {
     await rpc.request(M.chatDelete, { threadId: chatId })
-    return rpc.request<WorkspaceSnapshot>(LOCAL.chatForget, { chatId })
+    return (await threadAssignments()).forget(chatId)
   }
+}
+
+/**
+ * 会话的置顶与项目归属不在 agent 协议里（协议只认 cwd），由宿主服务树的
+ * `threadProjectAssignments` 维护 —— Codex 的同名服务也在宿主侧。
+ */
+async function threadAssignments(): Promise<RemoteAppHostServices['threadProjectAssignments']> {
+  return (await whenHostServicesReady()).threadProjectAssignments
 }

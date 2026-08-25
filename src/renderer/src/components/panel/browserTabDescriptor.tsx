@@ -5,6 +5,8 @@ import type {
 import { newBrowserTabId } from '../../state/AppShellContext'
 import { BrowserGlobeIcon } from '../icons'
 import { BrowserTab } from './BrowserTab'
+import { browserConversationId } from '../../host/browserScope'
+import { removeBrowserSurface } from '../../host/browserSurfaces'
 
 export interface BrowserTabState {
   /** 当前 URL;空 = 新标签页(标题 "New tab",空态引导 "Start browsing") */
@@ -25,11 +27,17 @@ export interface BrowserTabRenderProps extends AppShellTabRenderProps<BrowserTab
  * activeTabReactKey 退回 tabId(UUID),每个 browser tab 各自挂载。
  */
 export function createBrowserTabDescriptor(url = ''): AppShellTabDescriptorInput<BrowserTabState> {
+  const tabId = newBrowserTabId()
   return {
-    tabId: newBrowserTabId(),
+    tabId,
     title: 'New tab',
     icon: <BrowserGlobeIcon className="size-full" />,
     defaultState: () => ({ url, zoomPercent: 100 }),
+    /*
+     * tab 真的被关掉时才回收宿主侧的页面（Codex 的 tab 描述符 onClose 同义）。
+     * 面板卸载 / 切 tab 都不走这里 —— 页面要活过那些。
+     */
+    onClose: () => removeBrowserSurface(browserConversationId(), tabId),
     renderPanel: (props) => <BrowserTab {...props} initialUrl={url} />
   }
 }

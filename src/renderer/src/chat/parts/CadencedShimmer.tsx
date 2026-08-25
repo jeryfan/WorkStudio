@@ -42,11 +42,18 @@ const SWEEP_MS = 1000
 
 export function CadencedShimmer({
   active = true,
+  ariaHidden,
   children,
   className
 }: {
   /** false 时渲染成纯 span —— 完成态的行在 Codex 里没有 shimmer 结构 */
   active?: boolean
+  /**
+   * 挂到载体 span 上的 `aria-hidden` —— Codex 的调用方(`No` 的
+   * `aria-hidden={!isVisible}`)会在"占位但不可见"时把整块对屏幕阅读器藏掉。
+   * 与 `active` 是两件事:那一档摘的是流光结构,这一档只改可访问性。
+   */
+  ariaHidden?: boolean
   children: ReactNode
   className?: string
 }): React.JSX.Element {
@@ -90,10 +97,18 @@ export function CadencedShimmer({
 
   // Codex 的 `C` 的非活跃分支:纯 span,没有流光结构
   if (!active) {
-    return <span className={className}>{children}</span>
+    return (
+      <span aria-hidden={ariaHidden} className={className}>
+        {children}
+      </span>
+    )
   }
   return (
-    <span ref={ref} className={cx('loading-shimmer-pure-text', 'codex-cadencedShimmer', className)}>
+    <span
+      ref={ref}
+      aria-hidden={ariaHidden}
+      className={cx('loading-shimmer-pure-text', 'codex-cadencedShimmer', className)}
+    >
       {children}
       <span aria-hidden="true" className="codex-cadencedShimmerSweep">
         {/* 高亮副本 —— aria-hidden,否则屏幕阅读器会把同一句话念两遍 */}

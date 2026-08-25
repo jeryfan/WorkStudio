@@ -26,7 +26,9 @@ import { RightPanelTabs } from '../panel/RightPanelTabs'
 import { BottomPanelTabs } from '../panel/BottomPanelTabs'
 import { RightPanelNewTabPage } from '../panel/RightPanelNewTabPage'
 import { OpenSidePanelTabMenu } from '../panel/OpenSidePanelTabMenu'
+import { OpenFileTabsSync } from '../panel/file/OpenFileTabsSync'
 import { OverlayLayer } from '../overlay/OverlayLayer'
+import { BrowserSurfaceLayer } from '../panel/BrowserSurfaceLayer'
 import { TooltipProvider } from '../tooltip/Tooltip'
 import { AppPortals } from '../overlay/AppPortals'
 import { AppCommands } from '../command/AppCommands'
@@ -118,6 +120,8 @@ function Shell(): React.JSX.Element {
     >
       {/* 命令注册表的处理器接线(渲染 null;Codex 的 TM/_m 注册点) */}
       <AppCommands />
+      {/* 打开中的文件 tab → fs/watch(渲染 null;Codex `v$i` 的接线) */}
+      <OpenFileTabsSync />
       {/*
        * thread chrome 的槽位注册(Codex `Ar`/`Dr`,thread-app-shell-chrome):
        * 这些组件渲染 null,把内容写进 AppShell 的 slot store(KP);
@@ -169,6 +173,12 @@ function Shell(): React.JSX.Element {
         </MainContentLayout>
       </div>
       <OverlayLayer />
+      {/*
+        内置浏览器的 webview 持久层。
+        必须挂在这一层（而不是面板里）：webview 从 DOM 摘下 guest 就销毁，
+        而浏览器页面要活过 tab 切换、面板关闭与会话切换。
+      */}
+      <BrowserSurfaceLayer />
       {/* side chat 关闭确认弹窗(Codex `De`,closeGuard 驱动) */}
       <SideChatCloseDialogHost />
       {/* body 级 portal 层 —— 必须在 #root 外(这一层有 zoom,会给 fixed 建包含块) */}

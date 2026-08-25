@@ -95,10 +95,21 @@ const HOME_SUGGESTIONS: Suggestion[] = [
   { id: 'fix', label: 'Fix issues and failures', color: 'orange' }
 ]
 
+/** 宿主不在（预览页）时的空工作区：首帧不至于崩，侧栏显示空态 */
+const EMPTY_WORKSPACE: WorkspaceSnapshot = {
+  projects: [],
+  selection: { type: 'unassigned' },
+  pinnedChatIds: [],
+  pinnedProjectIds: [],
+  pinnedItemKeys: [],
+  projectThreadOrder: {},
+  chatAssignments: {}
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }): React.JSX.Element {
   // preload 已同步取好首屏快照，首帧即有真实项目列表，不出现空列表闪烁
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(
-    () => window.bootstrap.get().workspace
+    () => window.electronBridge?.getInitialSidebarBootstrap().workspace ?? EMPTY_WORKSPACE
   )
   const [projectExpanded, setProjectExpanded] = useState<Record<string, boolean>>({})
   const [chats, setChats] = useState<ChatSummary[]>([])

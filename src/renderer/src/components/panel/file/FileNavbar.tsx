@@ -1,4 +1,10 @@
 import { useAppShell } from '../../../state/AppShellContext'
+import {
+  baseName,
+  breadcrumbSegmentTargets,
+  fileDisplayPath,
+  fileDisplaySegments
+} from '../../../utils/workspacePath'
 import { FilesFolderIcon } from '../../icons'
 import { BreadcrumbChevronIcon } from '../../icons'
 import { APP_SHELL_BUTTON_CLASS, APP_SHELL_BUTTON_SECONDARY_CLASS } from '../appShellButtonClass'
@@ -26,38 +32,34 @@ import { OpenInSplitButton } from './OpenInSplitButton'
  *     └ Toggle file tree:共享按钮类 + ms-auto,树开时 secondary 变体(实测),
  *       图标 FilesFolderIcon icon-sm(18px,不是 icon-xs!)
  *
- * 段计算(Codex `n$i`/`r$i`,单 root 简化):[项目名, ...相对路径分段];
- * 第 i 段的 directoryPath = 前 i-1 个路径段(null=根),activePath = 前 i 个路径段;
- * 项目名段恒 {activePath:null, directoryPath:null}(下拉列根目录)。
- * Codex 里项目名 ≠ root 目录名时项目段退化为纯文本(不可点)。
+ * 段与下拉目标全走 Codex 的两个函数(见 utils/workspacePath):
+ * `n$i` = fileDisplaySegments(显示段,基准是 cwd 或 workspaceRoot),
+ * `r$i` = breadcrumbSegmentTargets(逐段的 activePath/directoryPath,root 相对;
+ * root 标签那段是 `{null, null}` 列根目录,对不上的段不可点)。
  */
 
 interface FileNavbarProps {
-  projectId: string
-  /** 项目名(面包屑首段;Codex `includeWorkspaceRootLabel: !0`) */
-  projectName: string
-  /** 项目根目录名(Codex:项目名 == root 名时首段才可点出根目录下拉) */
-  rootBaseName: string
-  /** 项目根绝对路径(Open in 用) */
-  rootAbsolutePath: string | null
-  /** 当前预览文件的项目内相对路径,null = 未选择(面包屑只显示 "/") */
-  selectedPath: string | null
+  /** Codex `s0a` 的 `cwd` prop —— 显示路径的首选基准 */
+  cwd: string | null
+  /** Codex `s0a` 的 `path` prop —— **绝对**文件路径;null = 未选择(只显示 "/") */
+  path: string | null
+  /** Codex `s0a` 的 `workspaceRoot` prop */
+  workspaceRoot: string
+  /** 选中文件(**绝对路径**,Codex `onSelectFile`) */
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }
 
 export function FileNavbar({
-  projectId,
-  projectName,
-  rootBaseName,
-  rootAbsolutePath,
-  selectedPath,
+  cwd,
+  path,
+  workspaceRoot,
   onSelectFile
 }: FileNavbarProps): React.JSX.Element {
   const { fileTreeOpen, toggleFileTree } = useAppShell()
-  // Codex `n$i`:无 path → [`/`];有 path → [项目名, ...相对路径分段]
-  const segments =
-    selectedPath == null ? ['/'] : [projectName, ...selectedPath.split('/').filter(Boolean)]
-  const displayPath = selectedPath == null ? '/' : `${projectName}/${selectedPath}`
+  // Codex `s0a`:无 path 时面包屑只有一段 `/`
+  const segments = path == null ? ['/'] : fileDisplaySegments({ cwd, path, workspaceRoot })
+  const targets = path == null ? null : breadcrumbSegmentTargets({ cwd, path, workspaceRoot })
+  const displayPath = path == null ? '/' : fileDisplayPath({ cwd, path, workspaceRoot })
 
   return (
     <nav
@@ -76,27 +78,18 @@ export function FileNavbar({
           {segments.map((segment, i) => {
             const isLast = i === segments.length - 1
             const labelClass = `whitespace-nowrap${isLast ? ' font-medium text-token-text-primary' : ''}`
-            // Codex `r$i`(单 root):首段 = 项目名;第 i 段对应相对路径前 i 段
-            const pathSegments = selectedPath == null ? [] : selectedPath.split('/').filter(Boolean)
-            const isProjectSegment = i === 0
-            // 项目名与 root 目录名不一致时,首段不可点(Codex r$i 的 d===null 分支)
-            const clickable =
-              selectedPath != null && (!isProjectSegment || projectName === rootBaseName)
-            const activePath = isProjectSegment ? null : pathSegments.slice(0, i).join('/')
-            const directoryPath = isProjectSegment
-              ? null
-              : pathSegments.slice(0, i - 1).join('/') || null
+            // Codex `r$i`:该段的下拉目标;undefined/整体 null = 纯文本,不可点
+            const target = targets?.[i]
             return (
               <li key={`${i}:${segment}`} className="flex shrink-0 items-center gap-1">
-                {clickable ? (
+                {target != null ? (
                   <BreadcrumbSegmentDropdown
                     label={segment}
                     labelClassName={labelClass}
-                    activePath={activePath}
-                    directoryPath={directoryPath}
+                    activePath={target.activePath}
+                    directoryPath={target.directoryPath}
                     shouldExpandActivePath={!isLast}
-                    projectId={projectId}
-                    rootAbsolutePath={rootAbsolutePath}
+                    root={workspaceRoot}
                     onSelectFile={onSelectFile}
                   />
                 ) : (
@@ -114,15 +107,10 @@ export function FileNavbar({
         </ol>
       </div>
       <div className="ms-2 flex shrink-0 items-center gap-1.5">
-        {selectedPath != null && (
+        {path != null && (
           <>
-            <FileViewerOptionsMenu projectId={projectId} path={selectedPath} />
-            {rootAbsolutePath != null && (
-              <OpenInSplitButton
-                absolutePath={`${rootAbsolutePath}/${selectedPath}`}
-                fileName={selectedPath.split('/').pop() ?? selectedPath}
-              />
-            )}
+            <FileViewerOptionsMenu path={path} />
+            <OpenInSplitButton absolutePath={path} fileName={baseName(path)} />
           </>
         )}
         {/* 实测:此按钮无 title/Tooltip,aria-label 也没有 title 属性 */}

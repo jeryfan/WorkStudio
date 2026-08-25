@@ -1,136 +1,48 @@
 import { useEffect } from 'react'
+import { COMMAND_DEFINITIONS, findCommand } from '@shared/commands/definitions'
+import {
+  commandKeybindingLabel as sharedKeybindingLabel,
+  eventToAccelerator,
+  isNativeAccelerator,
+  normalizeAccelerator,
+  resolveKeybindings,
+  type KeymapPlatform
+} from '@shared/commands/keybindings'
+import type { HostMessageType, SyntheticKeyboardEvent } from '@shared/host/messages'
+import { subscribeHostMessage } from '../host/hostMessages'
 
 /**
- * 命令注册表 —— Codex command registry 的 WS 移植:
- * - 静态定义(Codex `xxr`/`yxr` 等数组):id + defaultKeybindings(macOS 用
- *   platformDefaultKeybindings.macOS 覆盖;Codex `zxr` 解析)。
- * - `useCommandHandler`(Codex `TM`):注册处理器,LIFO + priority(normal→fallback)。
- * - `runCommand`(Codex `xM`):按 id 执行;返回是否被处理。
- * - `useCommandKeybindingLabel`(Codex `Po(yM, id)`):首个键位的展示串(⌘T)。
+ * 命令注册表（渲染层侧）。
  *
- * 触发链路:Codex Electron 是宿主注册 accelerator → 渲染进程收宿主消息(`_m`)。
- * WS 同构:渲染层把键位表同步给主进程,主进程 before-input-event 命中后
- * 发 `codex-command` IPC,这里分发(等价宿主消息)。浏览器预览(无 bridge)
- * 退化为 window keydown 监听。
+ * 命令定义与键位已经上移到 `@shared/commands` —— 主进程用同一张表生成原生
+ * 应用菜单的 accelerator，渲染层用它做命令面板与提示串。这一份只保留
+ * **处理器注册与分发**：
+ *   - `registerCommandHandler` / `useCommandHandler`（Codex `dEr` / `TM`）
+ *     LIFO + priority(normal→fallback)；
+ *   - `runCommand`（Codex `xM`）按 id 执行，返回是否被消费。
+ *
+ * 触发链路与 Codex 一致：**键位由原生菜单的 accelerator 匹配**，主进程命中后
+ * 发宿主消息，这里分发。渲染层不再把键位表同步给主进程，也不再有
+ * `before-input-event` 手工匹配那一套。
+ *
+ * 浏览器预览页（没有 electronBridge）退化为 window keydown 兜底。
  */
 
-/* ==================== 定义(右面板相关子集) ==================== */
-
-export interface CommandKeybinding {
-  /** Electron accelerator 语法:'CmdOrCtrl+T' / 'Ctrl+Shift+G' / 'Control+`' */
-  key: string
+const platform: KeymapPlatform = {
+  isMacOS: navigator.platform.toLowerCase().includes('mac')
 }
 
-export interface CommandDefinition {
-  id: string
-  defaultKeybindings?: CommandKeybinding[]
-  platformDefaultKeybindings?: {
-    macOS?: CommandKeybinding[]
-    default?: CommandKeybinding[]
-  }
-  /** Codex:长按连发(tab 切换用) */
-  allowsKeyRepeat?: boolean
-}
+export { COMMAND_DEFINITIONS }
 
-/**
- * 已取证的 Codex 命令(app-initial:203614-204470,键位为 electron 段实测)。
- * openReviewTab(⌃⇧G)/toggleTerminal(⌃`)在 Review/Terminal tab 落地前只定义不接。
- */
-export const COMMAND_DEFINITIONS: CommandDefinition[] = [
-  {
-    id: 'openBrowserTab',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+T' }]
-  },
-  {
-    id: 'toggleBrowserPanel',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Shift+B' }]
-  },
-  {
-    id: 'searchFiles',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+P' }]
-  },
-  {
-    id: 'toggleSidePanel',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Alt+B' }]
-  },
-  {
-    id: 'toggleMaximizeSidePanel'
-  },
-  {
-    id: 'toggleFileTreePanel',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Shift+E' }]
-  },
-  {
-    id: 'toggleBottomPanel',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+J' }]
-  },
-  {
-    id: 'openSideChat',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Alt+S' }]
-  },
-  {
-    id: 'nextTab',
-    allowsKeyRepeat: true,
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Shift+]' }],
-    platformDefaultKeybindings: {
-      macOS: [{ key: 'Ctrl+Tab' }, { key: 'Command+Shift+]' }, { key: 'Command+Alt+Right' }],
-      default: [{ key: 'Ctrl+Tab' }, { key: 'Ctrl+Shift+]' }, { key: 'Ctrl+PageDown' }]
-    }
-  },
-  {
-    id: 'previousTab',
-    allowsKeyRepeat: true,
-    defaultKeybindings: [{ key: 'CmdOrCtrl+Shift+[' }],
-    platformDefaultKeybindings: {
-      macOS: [{ key: 'Ctrl+Shift+Tab' }, { key: 'Command+Shift+[' }, { key: 'Command+Alt+Left' }],
-      default: [{ key: 'Ctrl+Shift+Tab' }, { key: 'Ctrl+Shift+[' }, { key: 'Ctrl+PageUp' }]
-    }
-  },
-  {
-    /*
-     * Codex 里它是宿主消息 `close-active-app-shell-tab`(⌘W 由应用菜单触发),
-     * 不走命令定义;WS 收进注册表统一管理(键位一致,链路见文件头注释)。
-     */
-    id: 'close-active-app-shell-tab',
-    defaultKeybindings: [{ key: 'CmdOrCtrl+W' }]
-  }
-]
-
-/* ==================== 键位解析与展示 ==================== */
-
-const IS_MACOS = navigator.platform.toLowerCase().includes('mac')
-
-/** Codex `zxr`:平台覆盖优先,否则 defaultKeybindings */
-export function resolveKeybindings(def: CommandDefinition): CommandKeybinding[] {
-  const platform = IS_MACOS
-    ? def.platformDefaultKeybindings?.macOS
-    : def.platformDefaultKeybindings?.default
-  return platform ?? def.defaultKeybindings ?? []
-}
-
-/** Codex `Uj`:键位 → 展示串(macOS 符号:⌘⌥⇧⌃) */
-export function formatKeybindingLabel(binding: string): string {
-  if (!IS_MACOS) return binding
-  const parts = binding.split('+')
-  const key = parts[parts.length - 1]
-  const mods = new Set(parts.slice(0, -1).map((p) => p.toLowerCase()))
-  const hasCmd = mods.has('cmdorctrl') || mods.has('cmd') || mods.has('command') || mods.has('meta')
-  const hasAlt = mods.has('alt') || mods.has('option')
-  const hasShift = mods.has('shift')
-  // Ctrl 与 CmdOrCtrl 互斥(Codex 的键位不会同时出现)
-  const hasCtrl = !hasCmd && (mods.has('ctrl') || mods.has('control'))
-  return `${hasCtrl ? '⌃' : ''}${hasAlt ? '⌥' : ''}${hasShift ? '⇧' : ''}${hasCmd ? '⌘' : ''}${key.length === 1 ? key.toUpperCase() : key}`
-}
-
-/** 命令 → 首个键位的展示串(没有 → undefined) */
+/** 命令 → 首个键位的展示串（⌘T） */
 export function commandKeybindingLabel(id: string): string | undefined {
-  const def = COMMAND_DEFINITIONS.find((d) => d.id === id)
-  if (!def) return undefined
-  const first = resolveKeybindings(def)[0]
-  return first ? formatKeybindingLabel(first.key) : undefined
+  return sharedKeybindingLabel(id, platform)
 }
 
-/* ==================== 处理器注册与分发(Codex `dEr`/`mEr`) ==================== */
+/** Codex `Po(yM, id)`：读键位展示串（本项目暂无用户自定义键位，静态直出） */
+export function useCommandKeybindingLabel(id: string): string | undefined {
+  return commandKeybindingLabel(id)
+}
 
 type CommandPriority = 'normal' | 'fallback'
 
@@ -140,7 +52,6 @@ interface CommandHandlerEntry {
   priority: CommandPriority
 }
 
-/** Codex `HEr` */
 const handlers = new Map<string, CommandHandlerEntry[]>()
 
 /** Codex `dEr` —— 返回注销函数 */
@@ -166,7 +77,7 @@ export function registerCommandHandler(
   }
 }
 
-/** Codex `mEr`/`xM`:priority normal→fallback,各自 LIFO;handler 返回 false 表示不消费 */
+/** Codex `mEr`/`xM`：priority normal→fallback，各自 LIFO；handler 返回 false 表示不消费 */
 export function runCommand(id: string, source?: string): boolean {
   const list = handlers.get(id)
   for (const priority of ['normal', 'fallback'] as const) {
@@ -180,7 +91,7 @@ export function runCommand(id: string, source?: string): boolean {
   return false
 }
 
-/** Codex `TM`:React hook 形式的注册 */
+/** Codex `TM`：React hook 形式的注册 */
 export function useCommandHandler(
   id: string,
   handler: (source?: string) => boolean | void,
@@ -189,67 +100,88 @@ export function useCommandHandler(
   useEffect(() => registerCommandHandler(id, handler, opts), [id, handler, opts])
 }
 
-/** Codex `Po(yM, id)`:读键位展示串(WS 无用户自定义键位表,静态直出) */
-export function useCommandKeybindingLabel(id: string): string | undefined {
-  return commandKeybindingLabel(id)
-}
+/* ==================== 宿主消息 → 命令 ==================== */
 
-/* ==================== 宿主桥(主进程 accelerator → 命令) ==================== */
-
-/** 归一化给主进程匹配的键位表 */
-function keybindingsPayload(): { id: string; key: string; allowsKeyRepeat: boolean }[] {
-  return COMMAND_DEFINITIONS.flatMap((def) =>
-    resolveKeybindings(def).map((b) => ({
-      id: def.id,
-      key: b.key,
-      allowsKeyRepeat: def.allowsKeyRepeat === true
-    }))
-  )
+/**
+ * 宿主为高频面板保留了专用消息（不走 `run-command`）。
+ *
+ * Codex 的组件是各自 `useHostMessage('toggle-sidebar', …)` 直接接这些消息；
+ * 本项目的面板已经按命令 id 注册了处理器，所以在这里把专用消息映射回命令 id，
+ * 保持只有一套分发出口。映射表与主进程 `ApplicationMenuManager` 里的
+ * `DEDICATED_MESSAGES` 是同一组对应关系，改一边要改另一边。
+ */
+const MESSAGE_TO_COMMAND: Partial<Record<HostMessageType, string>> = {
+  'toggle-sidebar': 'toggleSidebar',
+  'toggle-bottom-panel': 'toggleBottomPanel',
+  'toggle-file-tree-panel': 'toggleFileTreePanel',
+  'toggle-terminal': 'toggleTerminal',
+  'toggle-thread-pin': 'toggleThreadPin',
+  'toggle-browser-panel': 'toggleBrowserPanel',
+  'navigate-back': 'navigateBack',
+  'navigate-forward': 'navigateForward',
+  'find-in-thread': 'findInThread',
+  'open-browser-tab': 'openBrowserTab',
+  'close-active-app-shell-tab': 'closeTab',
+  'command-menu': 'openCommandMenu',
+  'chat-search-command-menu': 'searchChats',
+  'file-search-command-menu': 'searchFiles',
+  'new-projectless-task': 'newProjectlessTask',
+  'archive-thread': 'archiveThread',
+  'rename-thread': 'renameThread',
+  'copy-deeplink': 'copyDeeplink',
+  'copy-session-id': 'copySessionId',
+  'copy-working-directory': 'copyWorkingDirectory',
+  'copy-conversation-path': 'copyConversationPath'
 }
 
 let initialized = false
 
 /**
- * 启动命令链路(App 根挂一次):
- * 1. 键位表同步给主进程(before-input-event 匹配后回发 `codex-command`)
- * 2. 订阅主进程命令消息 → runCommand(…, 'keyboard_shortcut')(Codex `fEr` 同源)
- * 3. 无 bridge(浏览器预览)→ window keydown 兜底
+ * 启动命令链路（App 根挂一次）。
+ *
+ * Electron 宿主：订阅 `run-command` 与全部专用面板消息。
+ * 非 Electron 宿主（预览页）：没有原生菜单，退化为 window keydown 兜底 ——
+ * 这条兜底路径要自己做键位匹配与去重，只为预览页服务。
  */
 export function initCommandBridge(): void {
   if (initialized) return
   initialized = true
-  const bridge = window.codexBridge
-  if (bridge?.syncCommandKeybindings != null && bridge.subscribeCommand != null) {
-    void bridge.syncCommandKeybindings(keybindingsPayload())
-    bridge.subscribeCommand((id) => {
-      runCommand(id, 'keyboard_shortcut')
+
+  if (window.electronBridge != null) {
+    subscribeHostMessage('run-command', (message) => {
+      runCommand(message.id, sourceOf(message.keyboardEvent))
     })
+    for (const [type, commandId] of Object.entries(MESSAGE_TO_COMMAND) as Array<
+      [HostMessageType, string]
+    >) {
+      subscribeHostMessage(type, () => {
+        runCommand(commandId, 'host_message')
+      })
+    }
     return
   }
-  // 浏览器预览兜底
-  window.addEventListener('keydown', (e) => {
-    const pressed = eventToAccelerator(e)
-    if (pressed == null) return
-    for (const def of COMMAND_DEFINITIONS) {
-      if (resolveKeybindings(def).some((b) => b.key === pressed)) {
-        if (!def.allowsKeyRepeat && e.repeat) return
-        if (runCommand(def.id, 'keyboard_shortcut')) {
-          e.preventDefault()
-          return
-        }
-      }
+
+  // 预览页兜底：宿主不在，只能自己听键盘
+  const occupied = new Map<string, string>()
+  for (const def of COMMAND_DEFINITIONS) {
+    if (def.shortcutScope === 'os-global') continue
+    for (const binding of resolveKeybindings(def, platform)) {
+      if (!isNativeAccelerator(binding.key)) continue
+      const key = normalizeAccelerator(binding.key, platform)
+      if (!occupied.has(key)) occupied.set(key, def.id)
     }
+  }
+  window.addEventListener('keydown', (event) => {
+    const accelerator = eventToAccelerator(event)
+    if (accelerator == null) return
+    const commandId = occupied.get(normalizeAccelerator(accelerator, platform))
+    if (commandId == null) return
+    const def = findCommand(commandId)
+    if (event.repeat && def?.allowsKeyRepeat !== true) return
+    if (runCommand(commandId, 'keyboard_shortcut')) event.preventDefault()
   })
 }
 
-/** KeyboardEvent → accelerator 串(与主进程 eventToAccelerator 同一规则) */
-export function eventToAccelerator(e: KeyboardEvent): string | null {
-  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift') return null
-  const parts: string[] = []
-  if (e.metaKey || e.ctrlKey) parts.push('CmdOrCtrl')
-  if (e.altKey) parts.push('Alt')
-  if (e.shiftKey) parts.push('Shift')
-  const key = e.key.length === 1 ? e.key.toUpperCase() : e.key
-  parts.push(key)
-  return parts.join('+')
+function sourceOf(keyboardEvent: SyntheticKeyboardEvent | undefined): string {
+  return keyboardEvent == null ? 'app_menu' : 'keyboard_shortcut'
 }

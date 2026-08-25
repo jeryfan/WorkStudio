@@ -20,7 +20,12 @@ import {
   summarizeGroup,
   summaryPartText
 } from '../src/renderer/src/chat/model/renderUnits.ts'
-import { thinkingRowState } from '../src/renderer/src/chat/model/turnSections.ts'
+import {
+  shouldShowProcessToggle,
+  turnRunningState,
+  turnSummaryLabel
+} from '../src/renderer/src/chat/model/turnSections.ts'
+import { activeExecLabel, isWebCommand } from '../src/renderer/src/chat/model/toolActivityLabel.ts'
 
 let failed = 0
 function check(name, cond, extra) {
@@ -260,10 +265,31 @@ console.log('工具条目 → toolInvocation（归一化）')
   )
 
   // 状态映射
+  /*
+   * 两张文案表,不是一张:
+   * - 行摘要走 `toolSummaryForCmd`(`<verb>Read</verb> {path}`)
+   * - 组表头 active 走 `og`(`<action>Reading</action> <detail>{target}</detail>`)
+   */
   check(
-    'read 命令用人话文案',
-    tools[0].invocationMessage === 'Reading a.ts' && tools[0].pastTenseMessage === 'Read a.ts',
-    tools[0]
+    'read 行摘要 = Read {target}',
+    tools[0].pastTenseMessage === 'Read a.ts',
+    tools[0].pastTenseMessage
+  )
+  check(
+    'read 的 active 文案两段 = Reading / a.ts',
+    (() => {
+      const label = activeExecLabel(tools[0].data.parsedCmd, {
+        command: tools[0].data.commandForDisplay,
+        interrupted: false,
+        finished: true
+      })
+      return label.action === 'Reading' && label.detail === 'a.ts'
+    })(),
+    activeExecLabel(tools[0].data.parsedCmd, {
+      command: tools[0].data.commandForDisplay,
+      interrupted: false,
+      finished: true
+    })
   )
   check(
     'completed → completed',
@@ -666,66 +692,262 @@ console.log('渲染单元分组(Codex `Tr`/`Jr`)')
   )
 }
 
-console.log('状态行显隐(Codex `ja`/`W`/`kn`)')
+console.log('过程段折叠头(Codex `wo` → `mn`/`jn`/`Ln` + `ca` 三档文案)')
 {
-  // 空轮次在跑 → 显示
-  const bare = groupIntoRenderUnits([])
-  check(
-    '空轮次在跑 → 显示',
-    thinkingRowState({
-      isTurnInProgress: true,
-      assistantStarted: false,
-      hasFinalAnswerPhase: false,
-      hasBlockingRequest: false,
-      units: bare
-    }).visible === true
+  const md = (content, phase) => ({ kind: 'markdownContent', content, phase })
+  const oneUnit = groupIntoRenderUnits(
+    turnsToRows([turn('t1', [exec('c1', 'ls')])])[0].content
   )
-
-  // 完成 → 不显示
-  check(
-    '轮次完成 → 不显示',
-    thinkingRowState({
+  const toggle = (final, extra = {}) =>
+    shouldShowProcessToggle({
+      final,
+      processCount: 1,
+      units: oneUnit,
+      cancelled: false,
       isTurnInProgress: false,
-      assistantStarted: true,
-      hasFinalAnswerPhase: false,
-      hasBlockingRequest: false,
-      units: bare
-    }).visible === false
+      ...extra
+    })
+
+  check('phase 是 final_answer 且有正文 → 有折叠头', toggle([md('done', 'final_answer')]))
+  check('phase 为 null → 没有折叠头(协议常不发 phase)', !toggle([md('done', null)]))
+  check('phase 是 commentary → 没有折叠头', !toggle([md('done', 'commentary')]))
+  check('没有最终回答 → 没有折叠头', !toggle([]))
+  check('被取消 → 没有折叠头', !toggle([md('done', 'final_answer')], { cancelled: true }))
+  check('没有过程条目 → 没有折叠头', !toggle([md('done', 'final_answer')], { processCount: 0 }))
+  /*
+   * `mn` 里**没有** `!isTurnInProgress` —— `jn` 那个 `n == null` 是
+   * `voiceWorkActivity`,不是轮次状态。所以回答一开始流式产出,折叠头就出现。
+   */
+  check(
+    '轮次仍在跑但回答已流式 → 折叠头就出现(`mn` 不看轮次状态)',
+    toggle([md('部分回答', 'final_answer')], { isTurnInProgress: true })
+  )
+  check(
+    '轮次在跑、回答还空 → 没有折叠头',
+    !toggle([md('', 'final_answer')], { isTurnInProgress: true })
+  )
+  check(
+    '轮次收尾、回答空 → 仍有折叠头(`Dat` 的 completed 那一支)',
+    toggle([md('', 'final_answer')])
+  )
+  // 只有一条上下文压缩时不给折叠头(`Fn`)
+  const compactionUnits = groupIntoRenderUnits(
+    turnsToRows([turn('t1', [compaction('k1')])])[0].content
+  )
+  check(
+    '只有一条上下文压缩 → 没有折叠头',
+    !shouldShowProcessToggle({
+      final: [md('done', 'final_answer')],
+      processCount: 1,
+      units: compactionUnits,
+      cancelled: false,
+      isTurnInProgress: false
+    })
   )
 
-  // 待审批 → 不显示(审批控件自己在等)
+  // `ca` 的第二/第三档(第一档要协议的 worked-for 条目,WS 没有)
   check(
-    '待审批 → 不显示',
-    thinkingRowState({
-      isTurnInProgress: true,
-      assistantStarted: false,
-      hasFinalAnswerPhase: false,
-      hasBlockingRequest: true,
-      units: bare
-    }).visible === false
+    '有时长 → Worked for {time}',
+    turnSummaryLabel(1000, 8000, 3) === 'Worked for 7s',
+    turnSummaryLabel(1000, 8000, 3)
+  )
+  check('没有时长 → 数条数(单数)', turnSummaryLabel(null, null, 1) === '1 previous message')
+  check('没有时长 → 数条数(复数)', turnSummaryLabel(null, null, 3) === '3 previous messages')
+}
+
+console.log('活动文案两张表(Codex `og` vs `toolSummaryForCmd`)+ `Yt` 网络命令')
+{
+  const active = (parsedCmd, opts = {}) =>
+    activeExecLabel(parsedCmd, { command: '', interrupted: false, finished: false, ...opts })
+  const j = (label) => `${label.action}|${label.detail ?? ''}`
+
+  // search:`ng` 先判 path —— 有目录就只说目录,查询词不进句子
+  check(
+    'search 有 path → Searching files in {folder} folder',
+    j(active({ type: 'search', query: 'foo', path: 'src/renderer' })) ===
+      'Searching|files in renderer folder',
+    j(active({ type: 'search', query: 'foo', path: 'src/renderer' }))
+  )
+  check(
+    'search 只有 query → Searching for {query}',
+    j(active({ type: 'search', query: 'foo', path: null })) === 'Searching|for foo'
+  )
+  check(
+    'search 都没有 → Searching files',
+    j(active({ type: 'search', query: null, path: null })) === 'Searching|files'
+  )
+  check(
+    'listFiles 有 path → Listing files in {folder} folder',
+    j(active({ type: 'listFiles', path: '/a/b/src' })) === 'Listing|files in src folder'
+  )
+  check(
+    'listFiles 无 path → Listing files',
+    j(active({ type: 'listFiles', path: null })) === 'Listing|files'
+  )
+  // read 的 detail 取 `Ii(path ?? name)` —— 目录段全剥掉
+  check(
+    'read → Reading {basename}',
+    j(active({ type: 'read', name: 'a.ts', path: 'src/deep/a.ts' })) === 'Reading|a.ts'
+  )
+  // `ag` 的三态 × 有无命令文字
+  check(
+    'unknown + 命令 + 在跑 → Running {cmd}',
+    j(active({ type: 'unknown' }, { command: 'npm test' })) === 'Running|npm test'
+  )
+  check(
+    'unknown + 命令 + 完成 → Ran {cmd}',
+    j(active({ type: 'unknown' }, { command: 'npm test', finished: true })) === 'Ran|npm test'
+  )
+  check(
+    'unknown + 命令 + 中断 → Stopped {cmd}',
+    j(active({ type: 'unknown' }, { command: 'npm test', interrupted: true })) ===
+      'Stopped|npm test'
+  )
+  check(
+    'unknown + 空命令 → 只有 action 段',
+    active({ type: 'unknown' }, { command: '   ' }).detail === null &&
+      active({ type: 'unknown' }, { command: '' }).action === 'Running command'
   )
 
-  // 回答流式中(phase null)→ 仍显示(Codex `On`)
+  // 行摘要那张表(adapter 产出)与上面**不同措辞**,这是 Codex 的事实
+  const searchRow = turnsToRows([
+    turn('t1', [
+      exec('c1', 'rg foo src', {
+        commandActions: [{ type: 'search', command: 'rg foo src', query: 'foo', path: 'src' }]
+      })
+    ])
+  ])[0].content[0].invocation
   check(
-    '回答流式中(phase 未知)→ 显示',
-    thinkingRowState({
-      isTurnInProgress: true,
-      assistantStarted: true,
-      hasFinalAnswerPhase: false,
-      hasBlockingRequest: false,
-      units: bare
-    }).visible === true
+    '行摘要 = Searched for {query} in {path}(完整路径)',
+    searchRow.pastTenseMessage === 'Searched for foo in src',
+    searchRow.pastTenseMessage
   )
+  const noQuery = turnsToRows([
+    turn('t1', [
+      exec('c1', 'rg --files', {
+        commandActions: [{ type: 'search', command: 'rg --files', query: null, path: null }]
+      })
+    ])
+  ])[0].content[0].invocation
   check(
-    '回答流式中(明确 final_answer)→ 不显示',
-    thinkingRowState({
-      isTurnInProgress: true,
-      assistantStarted: true,
-      hasFinalAnswerPhase: true,
-      hasBlockingRequest: false,
-      units: bare
-    }).visible === false
+    '行摘要无查询词 = Searched for files',
+    noQuery.pastTenseMessage === 'Searched for files',
+    noQuery.pastTenseMessage
   )
+
+  // `Yt` —— curl 拉外网才算网络命令
+  check('curl 外网 URL → 网络命令', isWebCommand('curl https://example.com/a'))
+  check('curl 本机 → 不是', !isWebCommand('curl http://127.0.0.1:8214/'))
+  check('curl localhost → 不是', !isWebCommand('curl http://localhost:3000'))
+  check('curl -d 提交 → 不是(在写,不是在读)', !isWebCommand('curl -d x=1 https://example.com'))
+  check('curl -X POST → 不是', !isWebCommand('curl -X POST https://example.com'))
+  check('非 curl → 不是', !isWebCommand('wget https://example.com'))
+}
+
+console.log('轮次运行态(Codex `jr` + `ja` + `On`/`kn`/`An`/`W`)')
+{
+  // read 类命令的夹具:commandActions 有一个 read 动作 → parsedCmd.type = 'read'
+  const readCmd = (id, name, extra = {}) =>
+    exec(id, `cat ${name}`, {
+      commandActions: [{ type: 'read', command: `cat ${name}`, name, path: name }],
+      ...extra
+    })
+  const stateOf = (items, { isTurnInProgress = true, assistant = null, blocking = false } = {}) => {
+    const rows = turnsToRows([
+      turn('t1', items, { status: isTurnInProgress ? 'inProgress' : 'completed' })
+    ])
+    const content = rows.at(-1).content
+    // 分段:最末一条 markdown 进最终段(与 ThreadTurnBody 同一条路)
+    const last = content.at(-1)
+    const hasFinal = last?.kind === 'markdownContent'
+    const process = hasFinal ? content.slice(0, -1) : content
+    return turnRunningState({
+      process,
+      units: groupIntoRenderUnits(process),
+      isTurnInProgress,
+      assistantContent: assistant?.content ?? (hasFinal ? last.content : null),
+      assistantPhase: assistant?.phase ?? (hasFinal ? last.phase : null),
+      hasBlockingRequest: blocking
+    })
+  }
+
+  check('空轮次在跑 → 挂载且可见', (() => {
+    const s = stateOf([userMsg('u1', 'hi')])
+    return s.status.type === 'thinking' && s.showThinkingPlaceholder && s.isThinkingVisible
+  })())
+
+  check('轮次完成 → 不挂载', (() => {
+    const s = stateOf([answer('a1', 'done')], { isTurnInProgress: false })
+    return s.status.type === 'none' && !s.showThinkingPlaceholder
+  })())
+
+  check('待审批 → status none、不挂载', (() => {
+    const s = stateOf([userMsg('u1', 'hi')], { blocking: true })
+    return s.status.type === 'none' && !s.showThinkingPlaceholder
+  })())
+
+  check('明确 final_answer 且有正文 → status none', (() => {
+    const s = stateOf([userMsg('u1', 'hi')], {
+      assistant: { content: 'answer', phase: 'final_answer' }
+    })
+    return s.status.type === 'none' && s.isActivitySliceClosed
+  })())
+
+  // `ja` 里 `pi(assistantItem)` 排在 `isAnyNonExploringAgentItemInProgress` 前面:
+  // 回答在流式产出旁白时,即使有非探索工具在跑,状态行也仍然出现
+  check('旁白流式 + 命令在跑 → 仍然 thinking(`pi(B)` 优先)', (() => {
+    const s = stateOf([exec('c1', 'npm test', { status: 'inProgress', exitCode: null })], {
+      assistant: { content: '我先跑一下测试', phase: 'commentary' }
+    })
+    return s.status.type === 'thinking' && s.showThinkingPlaceholder
+  })())
+
+  // 没有回答在流时,尾部非探索工具在跑 → 那一行自己带流光,底部不重复
+  check('命令在跑(无回答)→ status none', (() => {
+    const s = stateOf([exec('c1', 'npm test', { status: 'inProgress', exitCode: null })])
+    return s.status.type === 'none' && !s.showThinkingPlaceholder
+  })())
+
+  // `jr` 的核心:MCP 在前、探索在后,`Jr` 会收成**一个**组,
+  // 但 `jr` 看到的是 [item(mcp), exploration([read])] → 尾部是探索段
+  check('混合组尾部是探索 → exploring', (() => {
+    const s = stateOf([
+      mcpLike('m1', 'playwright', 'browser_navigate'),
+      readCmd('c1', 'app.tsx', { status: 'inProgress', exitCode: null })
+    ])
+    return s.status.type === 'exploring' && s.isExploring && !s.showThinkingPlaceholder
+  })())
+
+  // 尾部探索段全跑完、回答还没开始 → 仍算 exploring(表头继续显示最后那条)
+  check('探索段跑完但回答未开始 → 仍 exploring', (() => {
+    const s = stateOf([readCmd('c1', 'app.tsx')])
+    return s.status.type === 'exploring' && s.isExploring
+  })())
+
+  // 回答开始流式(旁白)后,跑完的探索段不再算 exploring
+  check('旁白流式 + 探索段已跑完 → 不再 exploring', (() => {
+    const s = stateOf([readCmd('c1', 'app.tsx')], {
+      assistant: { content: '看完了', phase: 'commentary' }
+    })
+    return !s.isExploring
+  })())
+
+  // `kn`:最末单元是组且回答还没内容 → 状态行收进组表头
+  check('最末单元是组 → 状态行被吸收', (() => {
+    const s = stateOf([
+      mcpLike('m1', 'playwright', 'browser_navigate'),
+      mcpLike('m2', 'playwright', 'browser_evaluate')
+    ])
+    return s.status.type === 'thinking' && s.absorbedByLastUnit && !s.showThinkingPlaceholder
+  })())
+
+  // `hasActiveWebSearch`:尾部是检索条目 → none
+  check('尾部是网页检索 → status none', (() => {
+    const s = stateOf([
+      { type: 'webSearch', id: 'w1', query: 'codex', action: null, results: [] }
+    ])
+    return s.status.type === 'none'
+  })())
 }
 
 console.log('检索条目(Codex `nO`:只透传查询与动作,不抽结果)')

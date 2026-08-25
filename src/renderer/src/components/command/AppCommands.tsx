@@ -1,11 +1,12 @@
 import { useCallback, useEffect } from 'react'
 import { useAppShell, type AppShellTabPanelController } from '../../state/AppShellContext'
 import { initCommandBridge, useCommandHandler } from '../../state/commands'
-import { useWorkspace } from '../../state/WorkspaceContext'
+import { useThreadWorkspace } from '../../state/threadWorkspace'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { createBrowserTabDescriptor } from '../panel/browserTabDescriptor'
-import { createFilesTabDescriptor } from '../panel/filesTabDescriptor'
+import { openFilesTab } from '../panel/filesTabDescriptor'
 import { openSideChat } from '../panel/sideChat/openSideChat'
+import { setBrowserConversationId } from '../../host/browserScope'
 
 /**
  * 命令处理器接线 —— Codex 里命令的 handler 由各组件用 `TM` 注册、
@@ -21,8 +22,9 @@ import { openSideChat } from '../panel/sideChat/openSideChat'
  * | toggleFileTreePanel | ⌘⇧E | 文件树开合(全局) |
  * | toggleBottomPanel | ⌘J | 底部面板开合 |
  * | nextTab / previousTab | ⌃Tab/⌘⇧]/⌘⌥→ 等 | 焦点面板的相邻 tab 切换 |
- * | close-active-app-shell-tab | ⌘W | 焦点面板关 active tab(预览 tab 兜底) |
+ * | closeTab | ⌘W | 焦点面板关 active tab(预览 tab 兜底) |
  * | openSideChat | ⌘⌥S | 见 side chat(挂上后启用) |
+ * | toggleSidebar | ⌘B | 左侧栏开合 |
  */
 export function AppCommands(): null {
   const {
@@ -32,10 +34,14 @@ export function AppCommands(): null {
     toggleRightPanelFullWidth,
     toggleBottomPanel,
     toggleFileTree,
+    setFileTreeOpen,
+    toggleSidebar,
     rightPanelOpen,
     bottomPanelOpen
   } = useAppShell()
-  const { currentProject, projects } = useWorkspace()
+  // Codex 的命令 handler 与 launcher 读同一份会话工作区(见 state/threadWorkspace.ts)
+  const { cwd, workspaceKind, workspaceRoots } = useThreadWorkspace()
+  const workspaceRoot = workspaceRoots[0] ?? null
   const { activeChatId } = useChatRuntime()
 
   // 桥只初始化一次
@@ -43,18 +49,25 @@ export function AppCommands(): null {
     initCommandBridge()
   }, [])
 
-  /** 当前会话/选中项目的工作区(与 useSidePanelTabActions 同一规则) */
-  const workspaceProject = useCallback(() => {
-    // 命令触发时不依赖会话路由:以侧栏选中项目为准(Codex 用当前 thread 的 workspace)
-    const projectId = currentProject?.id ?? null
-    return {
-      projectId,
-      rootPath: projects.find((p) => p.id === projectId)?.rootPaths[0] ?? undefined
-    }
-  }, [currentProject, projects])
+  /*
+   * 内置浏览器的会话作用域。
+   *
+   * 浏览器 tab 在 Codex 里是挂在会话上的（路由键 `(conversationId, browserTabId)`），
+   * browser_use 也按 conversationId 找页。这里把当前会话 id 同步给宿主客户端，
+   * 没有活动会话时退回 'app'（首页也能开浏览器 tab）。
+   */
+  useEffect(() => {
+    setBrowserConversationId(activeChatId ?? 'app')
+  }, [activeChatId])
 
   /* ---------- 面板开合 ---------- */
 
+  useCommandHandler(
+    'toggleSidebar',
+    useCallback(() => {
+      toggleSidebar()
+    }, [toggleSidebar])
+  )
   useCommandHandler(
     'toggleSidePanel',
     useCallback(() => {
@@ -105,11 +118,11 @@ export function AppCommands(): null {
   useCommandHandler(
     'searchFiles',
     useCallback(() => {
-      const { projectId, rootPath } = workspaceProject()
-      rightPanelController.openTab(
-        createFilesTabDescriptor(rightPanelController, '', projectId ?? undefined, rootPath)
-      )
-    }, [rightPanelController, workspaceProject])
+      // Codex `se`:workspaceRoot 来自 workspaceRoots[0](projectless 会话没有该动作)
+      if (workspaceKind === 'projectless' || workspaceRoot == null) return false
+      openFilesTab(rightPanelController, { path: null, cwd, workspaceRoot, setFileTreeOpen })
+      return true
+    }, [rightPanelController, workspaceKind, workspaceRoot, cwd, setFileTreeOpen])
   )
 
   /* ---------- tab 切换 / 关闭 ---------- */
@@ -147,7 +160,7 @@ export function AppCommands(): null {
    * closeActiveTab 不成(active 不可关)→ 退到预览 tab 的 closeTab。
    */
   useCommandHandler(
-    'close-active-app-shell-tab',
+    'closeTab',
     useCallback(() => {
       const controller = focusedController()
       const open = controller.panelId === 'right' ? rightPanelOpen : bottomPanelOpen
@@ -162,12 +175,11 @@ export function AppCommands(): null {
     }, [focusedController, rightPanelOpen, bottomPanelOpen])
   )
 
-  // openSideChat:挂上 side chat 后在此注册(当前无 handler,快捷键不动作)
   useCommandHandler(
     'openSideChat',
     useCallback(() => {
       if (activeChatId == null) return
-      const cwd = projects.find((p) => p.id === currentProject?.id)?.rootPaths[0] ?? null
+      // Codex `B`:cwd 取会话工作区的 cwd(`f.cwd`),不是项目根
       void openSideChat({
         controller: rightPanelController,
         sourceChatId: activeChatId,
@@ -176,7 +188,7 @@ export function AppCommands(): null {
       }).catch((error: unknown) => {
         console.error('Failed to open side chat', error)
       })
-    }, [activeChatId, rightPanelController, currentProject, projects, rightPanelOpen])
+    }, [activeChatId, rightPanelController, cwd, rightPanelOpen])
   )
   return null
 }

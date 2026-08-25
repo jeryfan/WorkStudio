@@ -1,7 +1,7 @@
 import { useAppShell } from '../../state/AppShellContext'
-import { useWorkspace } from '../../state/WorkspaceContext'
-import { resolveInProjects } from '../../utils/workspacePath'
-import { createFilesTabDescriptor } from '../../components/panel/filesTabDescriptor'
+import { useThreadWorkspace } from '../../state/threadWorkspace'
+import { joinPath, resolveInWorkspaceRoots } from '../../utils/workspacePath'
+import { openFilesTab } from '../../components/panel/filesTabDescriptor'
 
 /**
  * 活动行里的文件引用 —— 照 Codex 的 agent-activity file link 实现。
@@ -36,27 +36,27 @@ import { createFilesTabDescriptor } from '../../components/panel/filesTabDescrip
  * 挂在活动行里会和表头那个 absolute 按钮抢事件)。
  */
 export function InlineAnchor({ path, label }: { path: string; label?: string }): React.JSX.Element {
-  const { projects, currentProject } = useWorkspace()
+  const { cwd, workspaceRoots } = useThreadWorkspace()
   const { rightPanelController } = useAppShell()
 
   // `src/a.ts:12` 里的行号单独拆出来做后缀
   const match = /^(.*?):(\d+)$/.exec(path)
   const filePath = match ? match[1] : path
   const suffix = match ? `:${match[2]}` : ''
+  // Codex `HY` 的 `line` 入参:引用带行号时打开后露出那一行
+  const line = match ? Number(match[2]) : undefined
 
   const open = (): void => {
-    const resolved = resolveInProjects(filePath, projects, currentProject?.id)
+    // Codex `HY`:`v = e$i({filePath, roots: get(DB)}) ?? workspaceRoot`
+    const resolved = resolveInWorkspaceRoots(filePath, workspaceRoots)
     if (!resolved) return
-    const rootAbsolutePath = projects.find((p) => p.id === resolved.projectId)?.rootPaths[0] ?? null
     // 会话里的文件引用 → 预览 tab(Codex HY:外部打开带 isPreview;
-    // launcher/「+」打开的空 Files tab 才不是预览)
-    rightPanelController.openTab({
-      ...createFilesTabDescriptor(
-        rightPanelController,
-        resolved.relPath,
-        resolved.projectId,
-        rootAbsolutePath ?? undefined
-      ),
+    // launcher/「+」打开的空 Files tab 才不是预览)。path 是绝对路径。
+    openFilesTab(rightPanelController, {
+      path: joinPath(resolved.workspaceRoot, resolved.relPath),
+      cwd,
+      workspaceRoot: resolved.workspaceRoot,
+      line,
       isPreview: true
     })
   }

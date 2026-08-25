@@ -1,20 +1,20 @@
-import { app, ipcMain, type BrowserWindow } from 'electron'
+import { app } from 'electron'
 import { AgentServerHost } from './AgentServerHost'
 import { ProtocolClient } from './ProtocolClient'
-import { RpcRouter } from './RpcRouter'
+import { AppServerConnection } from './AppServerConnection'
 import { AgentBinaryError, verifyAgentBinary } from './binaryPath'
-import { LOCAL } from '@shared/protocol/local'
+import type { WebviewWindow } from '../host/WebviewWindow'
 
 /**
- * agent 运行时的装配点：进程托管 → 协议客户端 → 渲染层路由。
+ * agent 运行时的装配点：进程托管 → 协议客户端 → 宿主侧连接门面。
  *
- * 三者的依赖是单向的，ProtocolClient 不知道 Electron 的存在，
- * AgentServerHost 不知道协议语义。
+ * 三者的依赖是单向的：ProtocolClient 不知道 Electron 的存在，
+ * AgentServerHost 不知道协议语义，AppServerConnection 不知道进程怎么起。
  */
 export class AgentRuntime {
   readonly host = new AgentServerHost()
   readonly client: ProtocolClient
-  readonly router: RpcRouter
+  readonly connection: AppServerConnection
 
   constructor() {
     this.client = new ProtocolClient(
@@ -26,14 +26,11 @@ export class AgentRuntime {
       },
       { onDiagnostic: (msg, detail) => console.warn('[agent]', msg, detail ?? '') }
     )
-    this.router = new RpcRouter(this.client, ipcMain)
-
-    this.router.registerLocal(LOCAL.agentStatus, () => this.router.getAgentStatus())
-    this.router.registerLocal(LOCAL.agentEnvironment, () => this.client.env)
+    this.connection = new AppServerConnection(this.client)
   }
 
   async start(): Promise<void> {
-    this.router.start()
+    this.connection.start()
 
     let version: string
     try {
@@ -41,7 +38,7 @@ export class AgentRuntime {
       version = verified.version
     } catch (err) {
       const isKnown = err instanceof AgentBinaryError
-      this.router.setAgentStatus({
+      this.connection.setConnectionState({
         state: 'failed',
         error: err instanceof Error ? err.message : String(err),
         hint: isKnown ? err.hint : undefined
@@ -54,7 +51,8 @@ export class AgentRuntime {
     this.host.on('diagnostic', (msg, detail) => console.warn('[agent]', msg, detail ?? ''))
 
     this.host.on('fatal', (error) => {
-      this.router.setAgentStatus({ state: 'failed', error: error.message })
+      this.connection.setConnectionState({ state: 'failed', error: error.message })
+      this.connection.reportFatalError(error.message)
     })
 
     // 进程重启后必须重放握手：服务端在握手前会拒绝一切业务请求
@@ -64,10 +62,10 @@ export class AgentRuntime {
         .initialize()
         .then((env) => {
           console.log(`[agent] ready — ${version}, dataDir=${env.codexHome}, os=${env.platformOs}`)
-          this.router.setAgentStatus({ state: 'ready', version })
+          this.connection.setConnectionState({ state: 'ready', version })
         })
         .catch((err: unknown) => {
-          this.router.setAgentStatus({
+          this.connection.setConnectionState({
             state: 'failed',
             error: err instanceof Error ? err.message : String(err)
           })
@@ -77,12 +75,13 @@ export class AgentRuntime {
     this.host.start()
   }
 
-  attachWindow(win: BrowserWindow): void {
-    this.router.attachWindow(win)
+  /** 新的渲染目标接进连接：先收到状态快照，再开始收事件 */
+  registerWebviewWindow(target: WebviewWindow): void {
+    this.connection.registerWebviewWindow(target)
   }
 
   async stop(): Promise<void> {
-    this.router.dispose()
+    this.connection.dispose()
     this.client.close('shutting down')
     await this.host.stop()
   }

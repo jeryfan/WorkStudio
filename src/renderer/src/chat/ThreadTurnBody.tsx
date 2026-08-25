@@ -6,7 +6,7 @@ import { ChatResponseFooter } from './parts/ChatResponseFooter'
 import {
   shouldShowProcessToggle,
   splitTurnContent,
-  thinkingRowState,
+  turnRunningState,
   turnSummaryLabel
 } from './model/turnSections'
 import {
@@ -49,18 +49,20 @@ export function ThreadTurnBody({
   const units = groupIntoRenderUnits(process)
   const isTurnInProgress = !res.isComplete
   const finalMessage = final[0]?.kind === 'markdownContent' ? final[0] : undefined
-  const assistantStarted =
-    finalMessage != null && (finalMessage.content.trim().length > 0 || res.isComplete)
-  const hasFinalAnswerPhase = finalMessage?.phase === 'final_answer'
 
-  const thinking = thinkingRowState({
+  /*
+   * 轮次运行态 —— Codex `ja` 的四态 + 轮次组件里的 `On`/`kn`/`An`/`W`。
+   * 探索段(`jr`)也在里面算,所以 `isExploring` 与组表头拿到的是同一个值。
+   */
+  const running = turnRunningState({
+    process,
+    units,
     isTurnInProgress,
-    assistantStarted,
-    hasFinalAnswerPhase,
+    assistantContent: finalMessage?.content ?? null,
+    assistantPhase: finalMessage?.phase ?? null,
     hasBlockingRequest: process.some(
       (c) => c.kind === 'toolInvocation' && c.invocation.state.type === 'waitingForConfirmation'
-    ),
-    units
+    )
   })
   const collapsedCount = countUnitItems(units)
 
@@ -80,11 +82,12 @@ export function ThreadTurnBody({
           >
             <ThreadItems>
               {units.map((unit, index) => {
+                const isLatestVisibleUnit = index === units.length - 1
                 const state = groupHeaderState(unit, {
-                  isLatestVisibleUnit: index === units.length - 1,
+                  isLatestVisibleUnit,
                   isTurnInProgress,
-                  isActivitySliceClosed: assistantStarted,
-                  isExploring: thinking.isExploring
+                  isActivitySliceClosed: running.isActivitySliceClosed,
+                  isExploring: running.isExploring
                 })
                 const demoted = demoteSingleItemGroup(unit, state)
                 const targetIds = unitTargetIds(demoted)
@@ -93,11 +96,20 @@ export function ThreadTurnBody({
                     {demoted.kind === 'group' ? (
                       <ActivityGroup
                         unit={demoted}
-                        isLatestVisibleUnit={index === units.length - 1}
+                        isLatestVisibleUnit={isLatestVisibleUnit}
                         isTurnInProgress={isTurnInProgress}
-                        isActivitySliceClosed={assistantStarted}
-                        isExploring={thinking.isExploring}
-                        thinkingFallbackMessage={res.thinkingFallback}
+                        isActivitySliceClosed={running.isActivitySliceClosed}
+                        isExploring={running.isExploring}
+                        /*
+                         * Codex `thinkingFallbackMessage: n === 'active' || kn ? tn : void 0`
+                         * —— 只在状态行被组表头吸收(`kn`)时下传。否则组表头的
+                         * thinking 态会和底部的状态行同时显示同一句推理标题。
+                         * Codex 把它下传给**每个**组(不只最新那个),因为组只在
+                         * thinking 态用它,而 thinking 态本身要求是最新单元。
+                         */
+                        thinkingFallbackMessage={
+                          running.absorbedByLastUnit ? res.thinkingFallback : null
+                        }
                       />
                     ) : demoted.item.kind === 'markdownContent' ? (
                       // 中间助手消息:与最终回复同一套结构(Codex 实测)
@@ -116,12 +128,14 @@ export function ThreadTurnBody({
         </>
       )}
       {/*
-       * 轮次状态行("Thinking" / 推理标题)—— turn 级兄弟段。
-       * 过程段折叠与否它都在;最新单元是组时收进组表头,这里不重复。
+       * 轮次状态行 —— Codex `An` 决定挂不挂载、`W` 决定可不可见。
+       * 两者分开是有意的:`An && !W` 时行仍然占位(`invisible`),
+       * 不让底部在"在想"与"不在想"之间抽动。
+       * 过程段折叠与否它都在;最新单元是组时(`kn`)收进组表头,这里不渲染。
        */}
-      {thinking.visible && (
+      {running.showThinkingPlaceholder && (
         <>
-          <ThinkingPlaceholder message={res.thinkingFallback} />
+          <ThinkingPlaceholder message={res.thinkingFallback} visible={running.isThinkingVisible} />
           <ThreadTurnGap />
         </>
       )}

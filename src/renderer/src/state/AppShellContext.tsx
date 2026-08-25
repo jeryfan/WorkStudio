@@ -404,6 +404,8 @@ interface AppShellContextValue {
   fileTreeWidth: number
   /** Codex `$Un(scope, !w)`:开合切换(Toggle file tree 按钮 / ⌘⇧E) */
   toggleFileTree(): void
+  /** Codex `$Un(scope, open, {animate})`:直接设开合(开空文件 tab 时强制展开树) */
+  setFileTreeOpen(open: boolean): void
   /** 拖拽设置宽度(Codex hyo 的 setSize:低于折叠阈值收起,否则 clamp) */
   setFileTreeWidth(desired: number, containerWidth: number): void
   slots: Partial<Record<AppShellSlotKey, ReactNode>>
@@ -599,6 +601,11 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       writeStoredFileTreeOpen(!open)
       return !open
     })
+  }, [])
+
+  const setFileTreeOpen = useCallback((open: boolean): void => {
+    writeStoredFileTreeOpen(open)
+    setFileTreeOpenState(open)
   }, [])
 
   /* ---------- controller 方法(写 docks state;两个 dock 共用一套) ---------- */
@@ -929,6 +936,7 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       fileTreeOpen,
       fileTreeWidth,
       toggleFileTree,
+      setFileTreeOpen,
       setFileTreeWidth,
       slots,
       registerSlot,
@@ -959,6 +967,7 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       fileTreeOpen,
       fileTreeWidth,
       toggleFileTree,
+      setFileTreeOpen,
       setFileTreeWidth,
       slots,
       registerSlot,

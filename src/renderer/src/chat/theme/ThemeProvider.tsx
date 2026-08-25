@@ -92,7 +92,7 @@ export function ThemeProvider({ children }: { children: ReactNode }): React.JSX.
   }, [])
 
   useEffect(() => {
-    const bridge = window.codexBridge
+    const bridge = window.electronBridge
     if (!bridge) return
 
     let disposed = false
@@ -101,7 +101,8 @@ export function ThemeProvider({ children }: { children: ReactNode }): React.JSX.
       if (THEME_VARIANTS.includes(next as ThemeVariant)) setVariant(next as ThemeVariant)
     }
 
-    void bridge.getSystemThemeVariant().then(accept)
+    // 首屏值是同步的（preload 阶段已用 sendSync 取好），不产生一帧错色
+    accept(bridge.getSystemThemeVariant())
     const unsubscribe = bridge.subscribeToSystemThemeVariant(accept)
 
     return () => {

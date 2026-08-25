@@ -5,11 +5,18 @@ import type {
 } from '../../state/AppShellContext'
 import { fileService } from '../../services'
 import { fileTabId } from '../../state/AppShellContext'
-import { baseName } from '../../utils/workspacePath'
+import { baseName, fileDisplayPath } from '../../utils/workspacePath'
 import type { AppContextMenuItem } from '../menu/AppContextMenu'
 import { fileTypeIcon } from '../icons/fileTypes/fileTypeIcon'
 import { FileTab } from './file/FileTab'
-import { openInTarget, resolvePrimaryTarget, type OpenTarget } from './file/openTargets'
+import {
+  listOpenTargets,
+  openInTarget,
+  resolvePrimaryTarget,
+  type OpenTarget
+} from './file/openTargets'
+import { hostServices } from '../../host/appHost'
+import { reviewFileSourceOf, type ReviewFileSource } from '../../services/file/openFilesWatcher'
 
 /**
  * Files tab 状态 —— Codex 的 file tab defaultState 是 `o$i = { scrollLeft: null,
@@ -20,14 +27,24 @@ export interface FilesTabState {
   scrollTop: number | null
 }
 
-/** renderPanel 额外收到的 props(Codex `HY` 的 `props: {cwd, path, hostId, tabId, workspaceRoot, onSelectFile, …}` 的 WS 版) */
+/**
+ * renderPanel 额外收到的 props —— Codex `HY` 的
+ * `props: {cwd, path, hostId, tabId, workspaceRoot, onSelectFile, initialLine, initialEndLine}`
+ * (WS 单 host,不带 hostId/tabId)。
+ */
 export interface FilesTabRenderProps extends AppShellTabRenderProps<FilesTabState> {
-  /** 项目内路径;'' = 未选择(tabId 即 `file:local:`,标题 "Open file") */
-  path: string
-  projectId: string | undefined
+  /** **绝对路径**;null = 未选择(tabId 即 `file:local:`,标题 "Open file") */
+  path: string | null
+  /** Codex `HY` 的 `cwd` prop(会话工作目录)—— 面包屑/显示路径的基准之一 */
+  cwd: string | null
+  /** Codex `HY` 的 `workspaceRoot` prop —— 绝对路径 */
+  workspaceRoot: string
+  /** Codex `HY` 的 `initialLine`/`initialEndLine` props:打开后要露出的行 */
+  initialLine?: number
+  initialEndLine?: number
   /**
-   * 在文件树里选中文件(Codex `onSelectFile`):打开该文件的 tab;
-   * 本 tab 是空文件 tab(path === '')时顺手关掉自己(Codex:`t ?? closeTab(b)`)。
+   * 在文件树里选中文件(Codex `onSelectFile`):**绝对路径**,打开该文件的 tab;
+   * 本 tab 是空文件 tab(path == null)时顺手关掉自己(Codex:`t ?? closeTab(b)`)。
    */
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }
@@ -40,16 +57,12 @@ export interface FilesTabRenderProps extends AppShellTabRenderProps<FilesTabStat
  *
  * Codex 侧是异步项(先 fetchQuery 取 open targets),WS 同样是 Promise。
  */
-async function fileTabContextMenuItems(
-  projectId: string | undefined,
-  path: string,
-  rootAbsolutePath: string | null
-): Promise<AppContextMenuItem[]> {
-  if (projectId == null || path === '') return []
-  const targets: OpenTarget[] = await window.codexBridge.openIn.listTargets().catch(() => [])
-  const absPath = rootAbsolutePath != null ? `${rootAbsolutePath}/${path}` : null
+async function fileTabContextMenuItems(path: string): Promise<AppContextMenuItem[]> {
+  const targets: OpenTarget[] = await listOpenTargets()
+  // Codex `KXi` 的 `l` 就是 tab 的 path(绝对路径),Copy path 复制的也是它
+  const absPath = path
   const items: AppContextMenuItem[] = []
-  if (absPath != null) {
+  {
     const primary = resolvePrimaryTarget(targets)
     if (primary != null) {
       items.push({
@@ -73,7 +86,7 @@ async function fileTabContextMenuItems(
     items.push({
       id: 'workspace-file-save-as',
       label: 'Save as…',
-      onSelect: () => void window.codexBridge.openIn.saveCopy(absPath, baseName(path))
+      onSelect: () => void hostServices?.workspaceFiles.saveCopy(absPath, baseName(path))
     })
   }
   items.push({
@@ -85,19 +98,82 @@ async function fileTabContextMenuItems(
     id: 'workspace-file-copy-contents',
     label: 'Copy file contents',
     onSelect: () => {
-      void fileService
-        .readFile(projectId, path)
-        .then((content) => navigator.clipboard.writeText(content))
+      void fileService.readFile(path).then((content) => navigator.clipboard.writeText(content))
     }
   })
-  if (absPath != null) {
-    items.push({
-      id: 'workspace-file-reveal-path',
-      label: 'Reveal in Finder',
-      onSelect: () => openInTarget({ target: 'fileManager' }, absPath)
-    })
-  }
+  items.push({
+    id: 'workspace-file-reveal-path',
+    label: 'Reveal in Finder',
+    onSelect: () => openInTarget({ target: 'fileManager' }, absPath)
+  })
   return items
+}
+
+/**
+ * tab → review file source(Codex `u$i`)。
+ *
+ * Codex 读的是描述符的 `props.path`/`props.hostId`;WS 的描述符没有 props 袋子
+ * (路径在闭包里),但 tabId 就是 `fileTabId(path)` = `file:<hostId>:<绝对路径>`,
+ * 同一份信息 —— 解析它即可,格式的唯一来源仍是 `fileTabId`。
+ *
+ * Codex 的 `refreshMode` 只有 artifact 类型是 manual,其余 auto;WS 没有 artifact tab。
+ */
+export function reviewFileSourceFromTab(tab: { kind?: string; tabId: string }): ReviewFileSource[] {
+  if (tab.kind !== 'workspaceFile:local') return []
+  const path = tab.tabId.slice('file:local:'.length)
+  return path === '' ? [] : [reviewFileSourceOf(path)]
+}
+
+/**
+ * 打开文件 tab —— Codex `HY` 的副作用部分(描述符之外的那些):
+ *
+ * - `t == null && S == null && $Un(e, !0, {animate:!1})`:**新开空文件 tab 时强制
+ *   展开文件树**(树的开合是全局持久化值,上次收起过就不会自己回来,否则点 Files
+ *   得到的是一个连树都没有的空面板 —— 实测撞到过);
+ * - `f && x.resetTabState(e, b)`(`f = line != null || endLine != null`):带行号
+ *   再打开同一个文件 tab 要重挂载,否则露出行不会重新生效。
+ *
+ * 打开中文件的 `fs/watch` 登记不在这里,由 `OpenFileTabsSync` 从 tab 列表派生
+ * (Codex 是在 `HY`/`onClose` 里 imperative 调 `v$i`)。
+ */
+export function openFilesTab(
+  controller: AppShellTabPanelController,
+  {
+    path,
+    cwd,
+    workspaceRoot,
+    line,
+    endLine,
+    isPreview,
+    setFileTreeOpen
+  }: {
+    path: string | null
+    cwd: string | null
+    workspaceRoot: string
+    line?: number
+    endLine?: number
+    isPreview?: boolean
+    /** 只有开空文件 tab 的调用点需要(它才会强制展开树) */
+    setFileTreeOpen?: (open: boolean) => void
+  }
+): void {
+  const descriptor = createFilesTabDescriptor(controller, {
+    path,
+    cwd,
+    workspaceRoot,
+    line,
+    endLine
+  })
+  const tabId = fileTabId(path ?? '')
+  const existing = controller.tabs.some((tab) => tab.tabId === tabId)
+  controller.openTab(isPreview == null ? descriptor : { ...descriptor, isPreview })
+  /*
+   * Codex `HY`:`f = resetTabState = line != null || endLine != null`,
+   * `f && x.resetTabState(e, b)` —— 同一个文件 tab 已开着时,带行号再打开要重挂载,
+   * 否则 revealLine 不会重新生效(滚动位置也按 resetState 收敛)。
+   */
+  if (line != null || endLine != null) controller.resetTabState(tabId)
+  if (path == null && !existing) setFileTreeOpen?.(true)
 }
 
 /**
@@ -120,37 +196,57 @@ async function fileTabContextMenuItems(
  */
 export function createFilesTabDescriptor(
   controller: AppShellTabPanelController,
-  path = '',
-  projectId?: string,
-  rootAbsolutePath?: string
+  {
+    path,
+    cwd,
+    workspaceRoot,
+    line,
+    endLine
+  }: {
+    /** **绝对**文件路径;null = 空文件 tab(Codex `HY` 的 `t == null` 分支) */
+    path: string | null
+    /** 会话工作目录(Codex `C = y$i(scope)`) */
+    cwd: string | null
+    /** workspace root 绝对路径(Codex `HY` 的 workspaceRoot 入参) */
+    workspaceRoot: string
+    /** Codex `HY` 的 `line`/`endLine` 入参(`src/a.ts:12` 这类引用带过来) */
+    line?: number
+    endLine?: number
+  }
 ): AppShellTabDescriptorInput<FilesTabState> {
-  const title = path === '' ? 'Open file' : baseName(path)
-  const Icon = fileTypeIcon(path === '' ? undefined : path)
+  // Codex:`w = 'Open file'`;`title: t == null ? w : (g ?? Zp(t))`
+  const title = path == null ? 'Open file' : baseName(path)
+  const Icon = fileTypeIcon(path ?? undefined)
   return {
-    tabId: fileTabId(path),
+    // Codex `cCo(path, hostId)`:`file:${hostId}:${path ?? ''}`
+    tabId: fileTabId(path ?? ''),
     kind: 'workspaceFile:local',
     title,
-    tooltip: path === '' ? 'Open file' : path,
+    // Codex:`E = t == null ? w : t$i({cwd, path, workspaceRoot})`
+    tooltip: path == null ? 'Open file' : fileDisplayPath({ cwd, path, workspaceRoot }),
     // Codex:`icon: s ?? createElement(MV(t), { className: 'icon-xs shrink-0' })`
     icon: <Icon className="icon-xs shrink-0" />,
     defaultState: () => ({ scrollLeft: null, scrollTop: null }),
-    contextMenuItems:
-      path === ''
-        ? undefined
-        : () => fileTabContextMenuItems(projectId, path, rootAbsolutePath ?? null),
+    contextMenuItems: path == null ? undefined : () => fileTabContextMenuItems(path),
     renderPanel: (props) => (
       <FileTab
         {...props}
         path={path}
-        projectId={projectId}
+        cwd={cwd}
+        workspaceRoot={workspaceRoot}
+        initialLine={line}
+        initialEndLine={endLine}
         onSelectFile={(nextPath, opts) => {
-          controller.openTab({
-            ...createFilesTabDescriptor(controller, nextPath, projectId, rootAbsolutePath),
+          // Codex 的 onSelectFile 就是再调一次 HY
+          openFilesTab(controller, {
+            path: nextPath,
+            cwd,
+            workspaceRoot,
             // Codex:`isPreview: t != null && r?.isPreview` —— 当前 tab 有路径时按树的
             // 意图(单击 = 预览);空 tab 里选的文件直接转正
-            isPreview: path !== '' && opts?.isPreview === true
+            isPreview: path != null && opts?.isPreview === true
           })
-          if (path === '') props.onClose()
+          if (path == null) props.onClose()
         }}
       />
     )

@@ -5,6 +5,7 @@ import {
   RunlocLocalIcon,
   RunlocSendCloudIcon
 } from '../../icons'
+import { hostServices } from '../../../host/appHost'
 
 /** Codex 菜单项基类(与运行时逐项一致) */
 const MENU_ITEM_CLASS =
@@ -45,7 +46,7 @@ export function RunLocationDropdown(): React.JSX.Element {
         href="https://chatgpt.com/codex/cloud"
         onClick={(e) => {
           e.preventDefault()
-          void window.api.openExternal('https://chatgpt.com/codex/cloud')
+          void hostServices?.chromiumBrowser.openUrl('https://chatgpt.com/codex/cloud')
         }}
         className={MENU_ITEM_CLASS}
       >

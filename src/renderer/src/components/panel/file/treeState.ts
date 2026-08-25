@@ -6,10 +6,10 @@ import { useSyncExternalStore } from 'react'
  * {expandedPaths, scrollTop, searchQuery, selectedPath},默认 `spo` =
  * {expandedPaths: [], scrollTop: 0, searchQuery: '', selectedPath: null}。
  *
- * **状态跟着 workspace root 走,不跟 tab**:同一个项目的多个 file tab
+ * **状态跟着 workspace root 走,不跟 tab**:同一个 workspace root 的多个 file tab
  * 共享同一棵树的状态(展开/选中/过滤词在 tab 间一致)。
  *
- * WS 按 projectId 作键(hostId 恒 local、includeHidden 恒 true)。
+ * WS 按 workspaceRoot 作键(hostId 恒 local、includeHidden 恒 true)。
  */
 
 export interface WorkspaceTreeState {
@@ -29,28 +29,28 @@ const DEFAULT_STATE: WorkspaceTreeState = {
 const states = new Map<string, WorkspaceTreeState>()
 const listeners = new Map<string, Set<() => void>>()
 
-function key(projectId: string): string {
-  return `local:true:${projectId}`
+function key(workspaceRoot: string): string {
+  return `local:true:${workspaceRoot}`
 }
 
-export function getWorkspaceTreeState(projectId: string): WorkspaceTreeState {
-  return states.get(key(projectId)) ?? DEFAULT_STATE
+export function getWorkspaceTreeState(workspaceRoot: string): WorkspaceTreeState {
+  return states.get(key(workspaceRoot)) ?? DEFAULT_STATE
 }
 
 export function setWorkspaceTreeState(
-  projectId: string,
+  workspaceRoot: string,
   next: WorkspaceTreeState | ((prev: WorkspaceTreeState) => WorkspaceTreeState)
 ): void {
-  const k = key(projectId)
-  const prev = getWorkspaceTreeState(projectId)
+  const k = key(workspaceRoot)
+  const prev = getWorkspaceTreeState(workspaceRoot)
   const value = typeof next === 'function' ? next(prev) : next
   if (value === prev) return
   states.set(k, value)
   listeners.get(k)?.forEach((l) => l())
 }
 
-function subscribe(projectId: string, listener: () => void): () => void {
-  const k = key(projectId)
+function subscribe(workspaceRoot: string, listener: () => void): () => void {
+  const k = key(workspaceRoot)
   let set = listeners.get(k)
   if (!set) {
     set = new Set()
@@ -62,10 +62,10 @@ function subscribe(projectId: string, listener: () => void): () => void {
   }
 }
 
-export function useWorkspaceTreeState(projectId: string): WorkspaceTreeState {
+export function useWorkspaceTreeState(workspaceRoot: string): WorkspaceTreeState {
   return useSyncExternalStore(
-    (l) => subscribe(projectId, l),
-    () => getWorkspaceTreeState(projectId)
+    (l) => subscribe(workspaceRoot, l),
+    () => getWorkspaceTreeState(workspaceRoot)
   )
 }
 

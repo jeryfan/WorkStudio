@@ -12,6 +12,9 @@ files:
   # agent 二进制按平台经 extraResources 单独投放，不能进 asar，
   # 否则每个安装包都会塞进全部平台的副本。
   - '!resources/agent'
+  # 原生右键菜单的图标由主进程按路径读盘（Codex 的
+  # nativeContextMenuIconSearchRoots 同理），因此 assets/apps 要以**文件**形式
+  # 投到 resources/apps；渲染层打包出来的是带 hash 的资源名，主进程用不上。
 asarUnpack:
   - resources/**
 win:
@@ -19,6 +22,8 @@ win:
   extraResources:
     - from: resources/agent/win32-${arch}
       to: agent
+    - from: src/renderer/src/assets/apps
+      to: apps
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -35,6 +40,8 @@ mac:
   extraResources:
     - from: resources/agent/darwin-${arch}
       to: agent
+    - from: src/renderer/src/assets/apps
+      to: apps
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
@@ -47,6 +54,8 @@ linux:
   extraResources:
     - from: resources/agent/linux-${arch}
       to: agent
+    - from: src/renderer/src/assets/apps
+      to: apps
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false

@@ -12,7 +12,8 @@ import { seedForkedThread } from '../../../state/ChatRuntimeContext'
  *    首个 "Side chat",其后 "Side chat {index}"(Codex `Te`)
  * 2. 先开 loading tab(`sidechat-loading:<sourceId>:<n>`,**isClosable=false**,
  *    内容是 LocalConversationSideChatLoadingTab.pending —— 居中加载态)
- * 3. fork(thread/fork,developerInstructions = SIDE_CHAT_INSTRUCTIONS,ephemeral)
+ * 3. fork(thread/fork:excludeTurns + ephemeral + developerInstructions,
+ *    随后 thread/inject_items 注入边界消息 —— 见 sideChatService)
  * 4. 开真 tab `sidechat:<id>`;**仅当目标面板当前开着才 activate**
  *    (Codex:`activate = existingConversationId != null || panelOpen`)
  * 5. 失败:关 loading tab、丢弃 fork 出的会话、抛错(调用方弹错误提示)

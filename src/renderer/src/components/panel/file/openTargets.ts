@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { whenHostServicesReady } from '../../../host/appHost'
+import type { OpenInTarget as HostOpenTarget } from '@shared/host/appHost'
 
 /**
  * Open in 目标(已安装编辑器)—— Codex 宿主 openIn 能力的 WS 版。
@@ -8,13 +10,23 @@ import { useEffect, useState } from 'react'
  * WS:主进程静态探测(/Applications + ~/Applications),preferred 存 localStorage。
  */
 
-export interface OpenTarget {
-  target: string
-  label: string
-  appPath: string
+/**
+ * 宿主返回的目标 + 渲染层补出的图标文件名。
+ *
+ * 图标资产名与 Codex 的 `/apps/<target>.png` 同名，所以由 target 直接推导，
+ * 不需要宿主把文件名一起传过来（宿主侧另有 `openIn.loadTargetIcon` 走 data URL，
+ * 留给"资产里没有这个编辑器"的情况）。
+ */
+export interface OpenTarget extends HostOpenTarget {
   iconFile: string
-  kind: 'editor'
 }
+
+/** target → assets/apps 里的文件名（大多同名，少数是 svg） */
+function iconFileFor(target: string): string {
+  return ICON_FILE_OVERRIDES[target] ?? `${target}.png`
+}
+
+const ICON_FILE_OVERRIDES: Record<string, string> = { webstorm: 'webstorm.svg' }
 
 const PREFERRED_TARGET_KEY = 'file-source:preferred-open-target'
 
@@ -36,13 +48,14 @@ export function appIconUrl(iconFile: string): string | undefined {
 let cachedTargets: OpenTarget[] | null = null
 let inflight: Promise<OpenTarget[]> | null = null
 
-function fetchTargets(): Promise<OpenTarget[]> {
+export function listOpenTargets(): Promise<OpenTarget[]> {
   if (cachedTargets) return Promise.resolve(cachedTargets)
-  inflight ??= window.codexBridge.openIn
-    .listTargets()
+  inflight ??= whenHostServicesReady()
+    .then((services) => services.openIn.getTargets())
     .then((list) => {
-      cachedTargets = list
-      return list
+      const targets = list.map((target) => ({ ...target, iconFile: iconFileFor(target.target) }))
+      cachedTargets = targets
+      return targets
     })
     .catch(() => [])
   return inflight
@@ -80,7 +93,7 @@ export function useOpenTargets(): {
   const [isLoading, setIsLoading] = useState(cachedTargets == null)
   useEffect(() => {
     let cancelled = false
-    void fetchTargets().then((list) => {
+    void listOpenTargets().then((list) => {
       if (!cancelled) {
         setTargets(list)
         setIsLoading(false)
@@ -102,11 +115,13 @@ export function openInTarget(
   if ('appPath' in target && opts?.persistPreferred !== false) {
     persistPreferredTarget(target.target)
   }
-  void window.codexBridge.openIn.open({
-    path: absolutePath,
-    target: target.target,
-    appPath: 'appPath' in target ? target.appPath : undefined,
-    line: opts?.line,
-    column: opts?.column
-  })
+  void whenHostServicesReady().then((services) =>
+    services.openIn.open({
+      path: absolutePath,
+      target: target.target,
+      appPath: 'appPath' in target ? target.appPath : undefined,
+      line: opts?.line,
+      column: opts?.column
+    })
+  )
 }

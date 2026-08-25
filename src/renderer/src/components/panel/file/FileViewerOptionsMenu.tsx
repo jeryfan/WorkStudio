@@ -19,13 +19,7 @@ import { APP_SHELL_BUTTON_CLASS } from '../appShellButtonClass'
  * aria-label "File viewer options";菜单 align=end,卡片类与「+」菜单同族。
  * 每项:hH.Item 结构(content flex gap-1.5 + LeftIcon shrink-0 opacity-75 + label)。
  */
-export function FileViewerOptionsMenu({
-  projectId,
-  path
-}: {
-  projectId: string
-  path: string
-}): React.JSX.Element {
+export function FileViewerOptionsMenu({ path }: { path: string }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const wordWrap = useWordWrap()
 
@@ -63,7 +57,7 @@ export function FileViewerOptionsMenu({
             LeftIcon={CopyIcon}
             onSelect={closeAnd(() => {
               void fileService
-                .readFile(projectId, path)
+                .readFile(path)
                 .then((content) => navigator.clipboard.writeText(content))
             })}
           >

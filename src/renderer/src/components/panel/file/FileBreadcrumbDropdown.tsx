@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { FileTreeView } from './FileTreeView'
 import { useDirectoryEntries } from './directoryEntries'
+import { joinPath } from '../../../utils/workspacePath'
 
 /**
  * 面包屑段的下拉文件树 —— Codex `c0a`(触发)+ `l0a`(内容)的移植
@@ -19,17 +20,18 @@ import { useDirectoryEntries } from './directoryEntries'
  */
 
 interface BreadcrumbSegmentDropdownProps {
-  /** 段文本(项目名 / 目录名 / 文件名) */
+  /** 段文本(root 标签 / 目录名 / 文件名) */
   label: string
   labelClassName: string
-  /** 该段对应的完整项目相对路径(末段是文件时为文件路径) */
+  /** 该段对应的 **root 相对**路径(末段是文件时为文件路径);null = 根 */
   activePath: string | null
-  /** 下拉列出的目录(null = 项目根) */
+  /** 下拉列出的目录(**root 相对**);null = 根 */
   directoryPath: string | null
   /** Codex:非末段才预展开 activePath 指向的子目录 */
   shouldExpandActivePath: boolean
-  projectId: string
-  rootAbsolutePath: string | null
+  /** Codex `c0a`/`l0a` 的 `root` prop —— workspace root 绝对路径 */
+  root: string
+  /** 选中文件时回调 **绝对路径**(Codex `l0a`:`o(Qp(s, d0a(t, r)), {isPreview:!0})`) */
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }
 
@@ -39,8 +41,7 @@ export function BreadcrumbSegmentDropdown({
   activePath,
   directoryPath,
   shouldExpandActivePath,
-  projectId,
-  rootAbsolutePath,
+  root,
   onSelectFile
 }: BreadcrumbSegmentDropdownProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -63,8 +64,7 @@ export function BreadcrumbSegmentDropdown({
             activePath={activePath}
             directoryPath={directoryPath}
             shouldExpandActivePath={shouldExpandActivePath}
-            projectId={projectId}
-            rootAbsolutePath={rootAbsolutePath}
+            root={root}
             onSelectFile={(path, opts) => {
               setOpen(false)
               onSelectFile(path, opts)
@@ -81,8 +81,7 @@ function BreadcrumbDirectoryTree({
   activePath,
   directoryPath,
   shouldExpandActivePath,
-  projectId,
-  rootAbsolutePath,
+  root,
   onSelectFile
 }: Omit<BreadcrumbSegmentDropdownProps, 'label' | 'labelClassName'>): React.JSX.Element {
   const baseDir = directoryPath ?? ''
@@ -99,7 +98,7 @@ function BreadcrumbDirectoryTree({
 
   // 聚合:baseDir + 各展开目录(展开目录在树内是相对的,取数时拼回项目根)
   const { paths, isLoading, error } = useDirectoryEntries(
-    projectId,
+    root,
     expandedPaths.map((p) => (baseDir === '' ? p : `${baseDir}/${p}`)),
     baseDir
   )
@@ -131,8 +130,7 @@ function BreadcrumbDirectoryTree({
   return (
     <div className="h-full min-h-0 w-full">
       <FileTreeView
-        projectId={projectId}
-        rootAbsolutePath={rootAbsolutePath}
+        workspaceRoot={root}
         paths={treePaths}
         surface="dropdown"
         selectedPath={activeRel}
@@ -145,11 +143,11 @@ function BreadcrumbDirectoryTree({
           )
         }
         onSelectionChange={(selected) => {
-          // Codex `b`:取第一个文件,拼回项目相对路径后 isPreview 打开
+          // Codex `b`:取第一个文件 → `o(Qp(root, d0a(t, directoryPath)), {isPreview:!0})`
           const file = selected.find((p) => !p.endsWith('/'))
           if (file == null) return
           const relPath = baseDir === '' ? file : `${baseDir}/${file}`
-          onSelectFile(relPath, { isPreview: true })
+          onSelectFile(joinPath(root, relPath), { isPreview: true })
         }}
       />
     </div>

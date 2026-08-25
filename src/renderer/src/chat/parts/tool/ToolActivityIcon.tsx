@@ -8,12 +8,13 @@ import {
   SearchIcon
 } from '../../../components/icons'
 import { McpToolIcon } from './McpToolIcon'
+import { isWebCommand } from '../../model/toolActivityLabel.ts'
 import type { TerminalToolData, ToolInvocation } from '../../model/toolInvocation'
 
 /**
  * 活动行图标 —— 逐条对应 Codex `subagent-activity-chip-group` 里的 `Fg(item)`。
  *
- * 那个函数的 exec 分支是**先看命令被解析成了什么**,才落到终端图标:
+ * exec 分支的**顺序**是这一版纠正的重点(源码逐字):
  *
  * ```
  * case 'exec':
@@ -22,11 +23,18 @@ import type { TerminalToolData, ToolInvocation } from '../../model/toolInvocatio
  *   if (parsedCmd.type === 'list_files')  → 文件夹
  *   if (executionStatus === 'interrupted')→ 圆角实心方块(停止)
  *   if (isWebCommand(cmd))                → 地球
+ *   if (可视化命令)                        → 柱状图
  *   …                                     → 终端
  * case 'patch':      → 笔
  * case 'web-search': → 地球
- * case 'reasoning':  → **无图标**(推理块走 ActivityHeader,不走 ActivityHeaderRow)
+ * case 'mcp-tool-call': → 服务器 logo 级联(`kg`)
+ * case 'dynamic-tool-call': → 工具注册表,查不到**不给图标**
+ * case 'assistant-message' / 'user-message' / 'worked-for': → 无图标
  * ```
+ *
+ * 上一版把「中断 → 停止图标」提到了最前面,而且对所有条目类型生效。两处都错:
+ * 被中断的 `Read foo.ts` 在 Codex 里仍然是**书**(命令类别比结束方式更能说明
+ * 这一行在干什么),而 patch / web-search / MCP 的图标**从不**因中断换掉。
  *
  * 类名在 Codex 里是个共享常量(`Lg`),所有活动行图标一字不差都用它:
  * `icon-xs shrink-0 text-token-conversation-body`。所以这里也只有一个常量。
@@ -41,18 +49,10 @@ export function ToolActivityIcon({
 }: {
   invocation: ToolInvocation
 }): React.JSX.Element | null {
-  const interrupted =
-    invocation.state.type === 'cancelled' && invocation.state.reason === 'interrupted'
-  if (interrupted) {
-    return <ActivityInterruptedIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
-  }
-
   const data = invocation.data
   switch (data.kind) {
     case 'terminal':
-      // 内层 switch 每个分支都 return,所以外层不需要 break —— 但 eslint 的
-      // no-fallthrough 看不穿嵌套 switch,给它一个显式的兜底 return。
-      return terminalIcon(data.commandKind)
+      return terminalIcon(data, invocation)
     case 'fileEdit':
       return <ActivityPatchIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
     case 'search':
@@ -75,9 +75,9 @@ export function ToolActivityIcon({
   }
 }
 
-/** exec 的图标按命令类别分 —— Codex `Fg()` 的 exec 分支 */
-function terminalIcon(kind: TerminalToolData['commandKind']): React.JSX.Element {
-  switch (kind) {
+/** exec 的图标 —— Codex `Fg()` 的 exec 分支,顺序照抄 */
+function terminalIcon(data: TerminalToolData, invocation: ToolInvocation): React.JSX.Element {
+  switch (data.parsedCmd.type) {
     case 'read':
       return <ActivityReadFileIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
     case 'search':
@@ -85,6 +85,18 @@ function terminalIcon(kind: TerminalToolData['commandKind']): React.JSX.Element 
     case 'listFiles':
       return <ActivityListFilesIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
     case 'unknown':
-      return <ActivityTerminalIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
+      break
   }
+  const interrupted =
+    invocation.state.type === 'cancelled' && invocation.state.reason === 'interrupted'
+  if (interrupted) return <ActivityInterruptedIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
+  // `Np(cmd)` —— curl 拉外网 URL:这一行的语义是"上网查",不是"跑了条命令"
+  if (isWebCommand(data.command)) {
+    return <BrowserGlobeIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
+  }
+  /*
+   * Codex 这里还有一档 `Fp(status) && kp(cmd) != null` → 柱状图(可视化命令),
+   * 要 visualization 通道,协议没有。
+   */
+  return <ActivityTerminalIcon aria-hidden className={ACTIVITY_ICON_CLASS} />
 }

@@ -23,6 +23,8 @@ export const M = {
   chatUnsubscribe: 'thread/unsubscribe',
   chatCompact: 'thread/compact/start',
   chatRollback: 'thread/rollback',
+  /** 向会话的模型可见历史追加 Responses API 条目(side chat 注入边界消息用) */
+  chatInjectItems: 'thread/inject_items',
 
   // 会话分组
   groupList: 'threadSection/list',

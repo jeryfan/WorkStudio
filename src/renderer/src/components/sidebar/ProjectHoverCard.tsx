@@ -5,11 +5,12 @@ import { useWorkspace } from '../../state/WorkspaceContext'
 import { ChatBubbleIcon, FolderIcon, RevealIcon, SettingsIcon, UnpinIcon } from '../icons'
 import { cx } from '../../utils/cx'
 import { HoverCardTitle } from './HoverCardParts'
+import { hostAppInfo, hostServices } from '../../host/appHost'
 
 /** 绝对路径缩写为 ~/… 展示(与 Codex 一致) */
 function displayPath(absPath: string): string {
-  const home = window.api.homeDir
-  return home && absPath.startsWith(home) ? `~${absPath.slice(home.length)}` : absPath
+  const home = hostAppInfo()?.homeDir
+  return home != null && absPath.startsWith(home) ? `~${absPath.slice(home.length)}` : absPath
 }
 
 /**
@@ -143,7 +144,7 @@ export function ProjectHoverCard({ project }: { project: Project }): React.JSX.E
               key={path}
               ariaLabel={`Open ${displayPath(path)}`}
               icon={<FolderIcon />}
-              onClick={() => void window.api.openProjectPath(project.id)}
+              onClick={() => void hostServices?.openIn.open({ path, target: 'fileManager' })}
               trailing={
                 <span className="flex h-5 w-5 items-center justify-center opacity-0 sidebar-hover-icon-tint group-hover/project-hover-card-row:opacity-100 group-focus-visible/project-hover-card-row:opacity-100">
                   <RevealIcon aria-hidden="true" className="icon-2xs" />

@@ -38,17 +38,31 @@ export type ToolState =
  * `npm test` 变成一长串 `sandbox-exec -p ... npm test`——展示那一串毫无意义。
  * 本项目的协议目前只给一个 `command` 字段，所以两者暂时同值，但形状先留出来。
  */
+/**
+ * 命令被解析成了什么 —— 对应 Codex `exec` 条目上的 `parsedCmd`。
+ *
+ * 之前这里只留了一个 `commandKind` 枚举(把 `parsedCmd.type` 抽出来选图标),
+ * 参数被 adapter 提前拼进了 `invocationMessage`。那样做不了 Codex 的两张文案表:
+ *
+ * - 组表头的活动文案(`og`,`localConversation.toolActivity.active.*`)要的是
+ *   `<action>Searching</action> <detail>files in {folder} folder</detail>` ——
+ *   两段分开、`folder` 是**目录名**(`Ii(path)`)
+ * - 行摘要(`toolSummaryForCmd.*`)要的是 `<verb>Searched</verb> for {query} in {path}`
+ *   —— 同一条命令、不同措辞、**完整路径**
+ *
+ * 从拼好的一句话里反推不出这两种形态,所以按 Codex 的形状把参数原样带下来。
+ * `type` 沿用协议 `CommandAction` 的键(`listFiles`,Codex 的 parsed_cmd 里写作
+ * `list_files`,一一对应)。
+ */
+export type ParsedCommand =
+  | { type: 'read'; name: string; path: string }
+  | { type: 'listFiles'; path: string | null }
+  | { type: 'search'; query: string | null; path: string | null }
+  | { type: 'unknown' }
+
 export interface TerminalToolData {
   kind: 'terminal'
-  /**
-   * 命令被解析成了哪一类动作 —— 对应 Codex 的 `exec` 条目上的 `parsedCmd.type`。
-   *
-   * 光有展示文案不够:Codex **按这个字段选活动行图标**(`Fg()` 里 exec 分支先看
-   * `parsedCmd.type === 'read' | 'search' | 'list_files'`,才落到终端图标),
-   * 而文案是给人读的、图标是给人扫的,不能从文案里反推。
-   * 协议已经给了 `commandActions`,adapter 只是把它收敛成一个枚举。
-   */
-  commandKind: 'read' | 'listFiles' | 'search' | 'unknown'
+  parsedCmd: ParsedCommand
   command: string
   /** 展示用命令；与 `command` 不同时说明经过了沙箱/包装改写 */
   commandForDisplay: string

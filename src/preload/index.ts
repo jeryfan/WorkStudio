@@ -1,161 +1,203 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
-import { homedir } from 'os'
-import { RPC_CHANNEL } from '@shared/rpc/channels'
-import type { RpcMessage } from '@shared/rpc/messages'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import {
+  HOST_CHANNEL,
+  WINDOW_TYPE_ELECTRON,
+  workerChannelForView,
+  workerChannelFromView
+} from '@shared/host/channels'
+import { isChunkedMessage } from '@shared/host/chunked'
+import type { ViewMessage, SystemThemeVariant } from '@shared/host/messages'
+import type { NativeContextMenuItem, NativeContextMenuResult } from '@shared/host/contextMenu'
 import type { BootstrapPayload } from '@shared/workspace/types'
 
-export interface DirEntryPayload {
-  name: string
-  relPath: string
-  kind: 'file' | 'dir'
-}
+/**
+ * 宿主桥 —— 与 Codex 的 `electronBridge` 同名、同形状、同语义。
+ *
+ * 三条硬性设计（都从 Codex preload.js 逐行还原）：
+ *
+ * 1. **业务消息只有一个信封**。`sendMessageFromView` 把整条消息 invoke 给主进程，
+ *    回程不是回调而是被**重新派发成 window 的 `message` 事件**。这样渲染层的
+ *    消息处理代码在 Electron 宿主和 web/iframe 宿主里是同一份，
+ *    `codexWindowType` 只用来做少量分支。新增功能不需要动这个文件。
+ *
+ * 2. **首屏同步取值**。外观、侧栏首屏数据、shared object 快照都用 `sendSync`：
+ *    代价是阻塞一次进程往返，换来第一帧就有真实内容。外观还必须在
+ *    `documentElement` 上**立刻**加 class —— 等渲染层 effect 再加就会闪白。
+ *
+ * 3. **分块消息在这一层只透传不重组**。preload 只认 marker 并提供 ACK 通道，
+ *    重组交给渲染层，这样大 payload 的重建成本落在渲染进程自己的时间片里，
+ *    不会卡住 preload 所在的主世界启动路径。
+ */
 
-interface NativeContextMenuItemPayload {
-  id: string
-  label: string
-  enabled?: boolean
-  type?: 'normal' | 'separator'
-  iconFile?: string
-  submenu?: NativeContextMenuItemPayload[]
-}
+const preloadStartedAtMs = performance.timeOrigin
 
-interface OpenTargetPayload {
-  target: string
-  label: string
-  appPath: string
-  iconFile: string
-  kind: 'editor'
-}
+/** 首屏同步快照：只取一次，之后由 shared-object-updated 维护本地镜像 */
+const sharedObjectSnapshot: Record<string, unknown> =
+  ipcRenderer.sendSync(HOST_CHANNEL.getSharedObjectSnapshot) ?? {}
 
-interface OpenRequestPayload {
-  path: string
-  target: string
-  appPath?: string
-  line?: number
-  column?: number
-}
+let systemThemeVariant: SystemThemeVariant = ipcRenderer.sendSync(
+  HOST_CHANNEL.getSystemThemeVariant
+)
 
 /**
- * RPC 桥：只搬运报文，不理解协议语义。
- *
- * 请求/响应的配对、反向请求的分发都在渲染层的 RpcPeer 里完成，
- * 因此新增任何方法都不需要改动 preload。
+ * 主题 class 必须在文档可用的第一刻就挂上。
+ * document.documentElement 在 preload 早期可能还是 null（document-start 注入），
+ * 此时用 MutationObserver 等它出现 —— 与 Codex 的写法一致。
  */
-const rpcBridge = {
-  send: (message: RpcMessage): void => {
-    ipcRenderer.send(RPC_CHANNEL.fromView, message)
+const themeClass = systemThemeVariant === 'dark' ? 'electron-dark' : 'electron-light'
+const rootElement = document.documentElement
+if (rootElement != null) {
+  rootElement.classList.add(themeClass)
+} else {
+  const observer = new MutationObserver(() => {
+    const root = document.documentElement
+    if (root != null) {
+      root.classList.add(themeClass)
+      observer.disconnect()
+    }
+  })
+  observer.observe(document, { childList: true })
+}
+
+const themeListeners = new Set<(variant: SystemThemeVariant) => void>()
+ipcRenderer.on(HOST_CHANNEL.systemThemeVariantUpdated, (_event, variant: SystemThemeVariant) => {
+  systemThemeVariant = variant
+  themeListeners.forEach((listener) => listener(variant))
+})
+
+/** 本地镜像：渲染层自己写的值立刻可读，不必等主进程回推 */
+function mirrorSharedObject(key: string, value: unknown): void {
+  if (value === undefined) {
+    delete sharedObjectSnapshot[key]
+    return
+  }
+  sharedObjectSnapshot[key] = value
+}
+
+let sidebarBootstrap: BootstrapPayload | undefined
+
+// ── worker 独立频道（按 worker id 分频道，不与主消息总线抢序） ──────────
+const workerListeners = new Map<string, Set<(message: unknown) => void>>()
+const workerForwarders = new Map<string, (event: unknown, message: unknown) => void>()
+
+const electronBridge = {
+  windowType: WINDOW_TYPE_ELECTRON,
+
+  getPreloadStartedAtMs: (): number => preloadStartedAtMs,
+
+  sendMessageFromView: async (message: ViewMessage): Promise<void> => {
+    if (message.type === 'shared-object-set') mirrorSharedObject(message.key, message.value)
+    await ipcRenderer.invoke(HOST_CHANNEL.messageFromView, message)
   },
-  subscribe: (handler: (message: RpcMessage) => void): (() => void) => {
-    const listener = (_e: unknown, message: RpcMessage): void => handler(message)
-    ipcRenderer.on(RPC_CHANNEL.toView, listener)
+
+  acknowledgeChunkedMessage: (transferId: string, sequence: number): void => {
+    ipcRenderer.send(HOST_CHANNEL.chunkedMessageAck, transferId, sequence)
+  },
+
+  /** Electron 32+ 拿拖入文件真实路径的唯一正解 */
+  getPathForFile: (file: File): string | null => webUtils.getPathForFile(file) || null,
+
+  /** 反向拖拽：把工作区文件拖到 Finder/Explorer */
+  startFileDrag: (paths: string[]): boolean =>
+    ipcRenderer.sendSync(HOST_CHANNEL.startFileDrag, paths) === true,
+
+  sendWorkerMessageFromView: async (workerId: string, message: unknown): Promise<void> => {
+    await ipcRenderer.invoke(workerChannelFromView(workerId), message)
+  },
+
+  subscribeToWorkerMessages: (
+    workerId: string,
+    handler: (message: unknown) => void
+  ): (() => void) => {
+    let listeners = workerListeners.get(workerId)
+    if (!listeners) {
+      listeners = new Set()
+      workerListeners.set(workerId, listeners)
+    }
+    let forwarder = workerForwarders.get(workerId)
+    if (!forwarder) {
+      forwarder = (_event: unknown, message: unknown): void => {
+        workerListeners.get(workerId)?.forEach((listener) => listener(message))
+      }
+      workerForwarders.set(workerId, forwarder)
+      ipcRenderer.on(workerChannelForView(workerId), forwarder)
+    }
+    listeners.add(handler)
     return () => {
-      ipcRenderer.removeListener(RPC_CHANNEL.toView, listener)
+      const current = workerListeners.get(workerId)
+      if (!current) return
+      current.delete(handler)
+      if (current.size > 0) return
+      workerListeners.delete(workerId)
+      const registered = workerForwarders.get(workerId)
+      if (registered) ipcRenderer.removeListener(workerChannelForView(workerId), registered)
+      workerForwarders.delete(workerId)
+    }
+  },
+
+  showContextMenu: (items: NativeContextMenuItem[]): Promise<NativeContextMenuResult> =>
+    ipcRenderer.invoke(HOST_CHANNEL.showContextMenu, items),
+
+  getSharedObjectSnapshotValue: (key: string): unknown => sharedObjectSnapshot[key],
+
+  getInitialSidebarBootstrap: (): BootstrapPayload => {
+    sidebarBootstrap ??= ipcRenderer.sendSync(HOST_CHANNEL.getInitialSidebarBootstrap)
+    return sidebarBootstrap as BootstrapPayload
+  },
+
+  getSystemThemeVariant: (): SystemThemeVariant => systemThemeVariant,
+
+  subscribeToSystemThemeVariant: (handler: (variant: SystemThemeVariant) => void): (() => void) => {
+    themeListeners.add(handler)
+    return () => {
+      themeListeners.delete(handler)
     }
   }
 }
 
 /**
- * 首屏同步快照。
- *
- * 同步 IPC 会阻塞一次进程往返，代价换的是侧栏首帧就有真实数据，
- * 不出现"空列表闪一下再填充"。只在 preload 取一次并缓存。
+ * 主 → 渲染：不做回调分发，重新派发成 window 的 message 事件。
+ * shared object 的变更顺手更新本地镜像，`getSharedObjectSnapshotValue`
+ * 才能在渲染层同步读到最新值。
  */
-const bootstrapPayload: BootstrapPayload = ipcRenderer.sendSync(RPC_CHANNEL.bootstrap)
-
-const bootstrap = {
-  get: (): BootstrapPayload => bootstrapPayload
-}
-
-// 文件服务：经 IPC 访问主进程 fs（见 src/main/fileIpc.ts）
-const fileApi = {
-  listDir: (projectId: string, relPath: string): Promise<DirEntryPayload[]> =>
-    ipcRenderer.invoke('file:listDir', projectId, relPath),
-  readFile: (projectId: string, relPath: string): Promise<string> =>
-    ipcRenderer.invoke('file:readFile', projectId, relPath),
-  searchFiles: (projectId: string, query: string): Promise<string[]> =>
-    ipcRenderer.invoke('file:searchFiles', projectId, query)
-}
-
-// Custom APIs for renderer
-const api = {
-  // 外部浏览器打开（仅 http/https，主进程侧校验）
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
-  // 系统文件管理器打开项目根目录（主进程侧解析路径）
-  openProjectPath: (projectId: string): Promise<void> =>
-    ipcRenderer.invoke('shell:openProjectPath', projectId),
-  // 用户主目录，渲染层把绝对路径缩写为 ~/… 展示（侧栏项目悬浮卡片）
-  homeDir: homedir()
-}
+ipcRenderer.on(HOST_CHANNEL.messageForView, (_event, payload: unknown) => {
+  if (!isChunkedMessage(payload)) {
+    const message = payload as { type?: string; key?: string; value?: unknown }
+    if (message.type === 'shared-object-updated' && typeof message.key === 'string') {
+      mirrorSharedObject(message.key, message.value)
+    }
+  }
+  window.dispatchEvent(new MessageEvent('message', { data: payload }))
+})
 
 /**
- * 宿主能力桥 —— 方法名沿用 Codex 的 electronBridge。
- *
- * 保持同名不是形式主义:渲染层订阅外观的那段代码可以和 Codex 逐行对照,
- * 将来 Codex 改了行为,diff 一眼就能看出来。
+ * 服务树握手：渲染层 `postMessage({type:'connect-app-host', port})`，
+ * 这里把 MessagePort 转移给主进程。转移之后主/渲染是点对点通道，
+ * 不再经过上面的主消息总线 —— 这是 Codex 让服务调用不被事件流阻塞的关键。
  */
-const codexBridge = {
-  windowType: 'electron' as const,
-  getSystemThemeVariant: (): Promise<'light' | 'dark'> =>
-    ipcRenderer.invoke('theme:getSystemVariant'),
-  subscribeToSystemThemeVariant: (handler: (variant: 'light' | 'dark') => void): (() => void) => {
-    const listener = (_e: unknown, variant: 'light' | 'dark'): void => handler(variant)
-    ipcRenderer.on('theme:systemVariantChanged', listener)
-    return () => {
-      ipcRenderer.removeListener('theme:systemVariantChanged', listener)
-    }
-  },
-  showContextMenu: (items: NativeContextMenuItemPayload[]): Promise<string | null> =>
-    ipcRenderer.invoke('context-menu:show', items),
-  syncCommandKeybindings: (
-    list: { id: string; key: string; allowsKeyRepeat: boolean }[]
-  ): Promise<void> => ipcRenderer.invoke('commands:sync-keybindings', list),
-  subscribeCommand: (handler: (commandId: string) => void): (() => void) => {
-    const listener = (_e: unknown, commandId: string): void => handler(commandId)
-    ipcRenderer.on('codex-command', listener)
-    return () => {
-      ipcRenderer.removeListener('codex-command', listener)
-    }
-  },
-  openIn: {
-    listTargets: (): Promise<OpenTargetPayload[]> => ipcRenderer.invoke('open-in:list-targets'),
-    open: (req: OpenRequestPayload): Promise<void> => ipcRenderer.invoke('open-in:open', req),
-    saveCopy: (absolutePath: string, suggestedName?: string): Promise<boolean> =>
-      ipcRenderer.invoke('open-in:save-copy', absolutePath, suggestedName)
-  },
-  browser: {
-    saveDataUrl: (dataUrl: string, suggestedName: string): Promise<boolean> =>
-      ipcRenderer.invoke('browser:save-data-url', dataUrl, suggestedName),
-    clearData: (kind: 'cookies' | 'cache'): Promise<boolean> =>
-      ipcRenderer.invoke('browser:clear-data', kind)
+window.addEventListener('message', (event) => {
+  if (
+    event.source !== window ||
+    (event.data as { type?: string } | null)?.type !== 'connect-app-host'
+  ) {
+    return
   }
-}
+  const { port } = event.data as { port: MessagePort }
+  ipcRenderer.postMessage(HOST_CHANNEL.connectAppHost, undefined, [port])
+})
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-    contextBridge.exposeInMainWorld('fileApi', fileApi)
-    contextBridge.exposeInMainWorld('rpcBridge', rpcBridge)
-    contextBridge.exposeInMainWorld('bootstrap', bootstrap)
-    contextBridge.exposeInMainWorld('codexBridge', codexBridge)
+    contextBridge.exposeInMainWorld('codexWindowType', WINDOW_TYPE_ELECTRON)
+    contextBridge.exposeInMainWorld('electronBridge', electronBridge)
   } catch (error) {
     console.error(error)
   }
 } else {
   // @ts-ignore (define in dts)
-  window.electron = electronAPI
+  window.codexWindowType = WINDOW_TYPE_ELECTRON
   // @ts-ignore (define in dts)
-  window.api = api
-  // @ts-ignore (define in dts)
-  window.fileApi = fileApi
-  // @ts-ignore (define in dts)
-  window.rpcBridge = rpcBridge
-  // @ts-ignore (define in dts)
-  window.bootstrap = bootstrap
-  // @ts-ignore (define in dts)
-  window.codexBridge = codexBridge
+  window.electronBridge = electronBridge
 }
+
+export type ElectronBridge = typeof electronBridge

@@ -19,6 +19,7 @@
  */
 import type { ChatContent, ChatToolInvocationContent } from './content'
 import type { ToolInvocation } from './toolInvocation'
+import { isExplorationCommand } from './toolActivityLabel.ts'
 import { humanizeToolName } from './toolName.ts'
 
 // ── 单元类型 ─────────────────────────────────────────────────
@@ -122,13 +123,22 @@ function isVisibleGroupChild(item: ChatToolInvocationContent): boolean {
   if (data.kind === 'fileEdit') return data.changes.length > 0
   if (data.kind === 'terminal') {
     if (!isItemInProgress(item)) return true
-    if (data.commandKind === 'read') return data.commandForDisplay.trim().length > 0
-    return data.commandKind !== 'search' && data.commandKind !== 'listFiles'
+    if (data.parsedCmd.type === 'read') return data.commandForDisplay.trim().length > 0
+    return data.parsedCmd.type !== 'search' && data.parsedCmd.type !== 'listFiles'
   }
   return true
 }
 
-/** Codex `Zr`/`kr` —— 条目是否还在进行 */
+/**
+ * Codex `Zr`(单元级)/ `kr`(条目级)—— 还在进行吗。
+ *
+ * Codex 按条目类型分别判(exec 看 `!parsedCmd.isFinished` 且未中断、patch 看
+ * `success == null`、mcp/dynamic/web-search 看 `!completed`,而 system-error /
+ * stream-error / worked-for 这些**恒为假** —— 它们是既成事实,没有进行中的态)。
+ * WS 的工具调用统一有 `state`,三个映射:`executing`/`streaming` 显然在跑,
+ * `waitingForConfirmation` 也算(等审批时 Codex 的 `parsedCmd.isFinished` 同样是假),
+ * `cancelled`(= interrupted)与 `completed` 不算。
+ */
 export function isItemInProgress(item: ChatToolInvocationContent): boolean {
   const { state } = item.invocation
   return (
@@ -136,6 +146,101 @@ export function isItemInProgress(item: ChatToolInvocationContent): boolean {
     state.type === 'streaming' ||
     state.type === 'waitingForConfirmation'
   )
+}
+
+/**
+ * `kr` 的条目级入口 —— 非工具条目一律不算在跑。
+ *
+ * 留在过程段里的助手正文都已定稿(还在流的那一条被分段算法摘走,由轮次状态机
+ * 单独处理),上下文压缩 / 错误 / 重连 / 审阅模式也都是既成事实。
+ */
+export function isContentInProgress(content: ChatContent): boolean {
+  return content.kind === 'toolInvocation' && isItemInProgress(content)
+}
+
+// ── 探索段(Codex `jr`)───────────────────────────────────────
+
+/** Codex `jr` 的产物单元 */
+export type AgentActivityRun =
+  | { kind: 'item'; item: ChatContent }
+  | { kind: 'exploration'; items: ChatToolInvocationContent[]; status: 'exploring' | 'explored' }
+
+/**
+ * Codex `jr` —— 把过程条目切成「探索段」与「单条目」,顺带算出两个状态位。
+ *
+ * ## 与渲染单元是**两条**管线,不是一条
+ *
+ * 同一批条目 Codex 分了两次:`Gr`/`Jr`(上面)产出渲染用的组,`jr`(这里)
+ * 只把连续的 read/search/list 收成 run,给轮次状态机用。
+ *
+ * 上一版 WS 只有前者,`isExploring` 是从渲染单元反推的("最末单元是组、
+ * 成员全是探索类、且有在跑的")。那个近似在一种常见形态下就错:条目是
+ * `[mcp, read, read]` 时 `Jr` 收成**一个**组(mcp 也可成组),
+ * `every(探索类)` 为假 → 不算探索;而 `jr` 看到的是
+ * `[item(mcp), exploration([read, read])]` —— 尾部**是**一段探索。
+ * 表头因此从 "Reading foo.ts" 掉回 "Thinking"。
+ *
+ * ## `isExploring` 的第二个坑
+ *
+ * 源码是 `a = isTurnInProgress && (!isAnyNonAgentItemInProgress || anyRunning)`
+ * —— **尾部探索段全跑完了也可能算"探索中"**:只要回答还没开始流式
+ * (`isAnyNonAgentItemInProgress` 为假),表头就继续显示最后那条
+ * "Read foo.ts",而不是跳成 "Thinking"。这不是 bug,是刻意的:
+ * 两次工具调用之间的空档不该让表头闪一下。
+ *
+ * `Er(n, next)`(把喂给下一条 patch 的 read 合并掉)在 WS 落不了地:
+ * 那要 visualization 通道,协议没有。
+ */
+export function splitAgentActivityRuns({
+  items,
+  isTurnInProgress,
+  isAnyNonAgentItemInProgress
+}: {
+  items: ChatContent[]
+  isTurnInProgress: boolean
+  isAnyNonAgentItemInProgress: boolean
+}): {
+  renderableAgentItems: AgentActivityRun[]
+  isExploring: boolean
+  isAnyNonExploringAgentItemInProgress: boolean
+} {
+  const runs: AgentActivityRun[] = []
+  let pending: ChatToolInvocationContent[] | null = null
+  let isExploring = false
+  let isAnyNonExploringAgentItemInProgress = false
+
+  const flush = (status: 'exploring' | 'explored'): void => {
+    if (pending != null && pending.length > 0) {
+      runs.push({ kind: 'exploration', items: pending, status })
+    }
+    pending = null
+  }
+
+  for (const item of items) {
+    if (item.kind === 'toolInvocation' && isExplorationItem(item)) {
+      if (pending != null) pending.push(item)
+      else pending = [item]
+      continue
+    }
+    /*
+     * Codex 这里还有一支 `if (item.type === 'reasoning') { pending?.push(item); continue }`
+     * —— 推理条目**不打断**探索段。WS 的推理不进内容流(见 `content.ts`),
+     * 效果等价:那条目根本不在列表里。
+     */
+    if (pending != null) flush('explored')
+    runs.push({ kind: 'item', item })
+  }
+
+  if (pending != null) {
+    const anyRunning = pending.some(isItemInProgress)
+    isExploring = isTurnInProgress && (!isAnyNonAgentItemInProgress || anyRunning)
+    flush(isExploring ? 'exploring' : 'explored')
+  } else {
+    const last = runs[runs.length - 1]
+    if (last?.kind === 'item') isAnyNonExploringAgentItemInProgress = isContentInProgress(last.item)
+  }
+
+  return { renderableAgentItems: runs, isExploring, isAnyNonExploringAgentItemInProgress }
 }
 
 /** Codex `qr` —— summary 态的单条目组降级为 standalone 渲染 */
@@ -153,15 +258,10 @@ export function demoteSingleItemGroup(unit: RenderUnit, state: GroupHeaderState)
 
 // ── 组表头状态(Codex `Yr`)───────────────────────────────────
 
-/** 探索类命令(read/search/list)—— Codex 的 `lr` */
-function isExplorationItem(item: ChatToolInvocationContent): boolean {
+/** 探索类命令(read/search/list)—— Codex 的 `lr`(判据本体在 `toolActivityLabel`) */
+export function isExplorationItem(item: ChatToolInvocationContent): boolean {
   const { data } = item.invocation
-  return (
-    data.kind === 'terminal' &&
-    (data.commandKind === 'read' ||
-      data.commandKind === 'search' ||
-      data.commandKind === 'listFiles')
-  )
+  return data.kind === 'terminal' && isExplorationCommand(data)
 }
 
 /**

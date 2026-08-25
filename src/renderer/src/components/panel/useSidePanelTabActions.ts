@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
 import type { AppShellTabPanelController } from '../../state/AppShellContext'
 import { useAppShell } from '../../state/AppShellContext'
-import { useWorkspace } from '../../state/WorkspaceContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
+import { useThreadWorkspace } from '../../state/threadWorkspace'
 import { commandKeybindingLabel } from '../../state/commands'
 import { BrowserGlobeIcon, FilesFolderIcon, SideChatIcon } from '../icons'
 import { createBrowserTabDescriptor } from './browserTabDescriptor'
-import { createFilesTabDescriptor } from './filesTabDescriptor'
+import { openFilesTab } from './filesTabDescriptor'
 import { openSideChat } from './sideChat/openSideChat'
 
 /**
@@ -16,7 +16,7 @@ import { openSideChat } from './sideChat/openSideChat'
  * Codex 的组装方式(顺序即非 git workspace 的显示顺序):
  *
  *   de = [
- *     ...(hasWorkspaceRoot ? [open-file] : []),   // A:非 projectless 且有 workspaceRoot
+ *     ...(A ? [open-file] : []),                  // A = workspaceKind !== 'projectless' && workspaceRoots[0] != null
  *     ...(sideChatEnabled ? [side-chat] : []),    // j:有当前会话且非 side chat
  *     ...(browserSidebarEnabled ? [browser] : []),// M:WS 恒 true
  *     ...(isGit && !hasDiffTab ? [review] : []),  // N:需要 git diff 数据源 —— 未实现
@@ -25,7 +25,11 @@ import { openSideChat } from './sideChat/openSideChat'
  *     ...(terminalCapable ? [terminal] : []),     // F:需要 PTY/host 终端 —— 未实现
  *   ].filter((a) => codexAccessAllowed || !a.requiresCodexAccess)
  *
- *   actions = isGit ? sortBy(Rn) : de   // Rn = { review:0, terminal:1, browser:2, 'open-file':3 }
+ *   actions = f.kind === 'git' ? sortBy(Rn) : de   // Rn = { review:0, terminal:1, browser:2, 'open-file':3 }
+ *
+ * 排序**只在 git 工作区生效**:实测 Codex 的 projectless 会话(cwd 是
+ * `~/Documents/Codex/<日期>/<名字>`)launcher 就是组装顺序 `Side chat / Browser /
+ * Terminal`,项目内会话才是 `Review / Terminal / Browser / Files / Side chat`。
  *
  * 每项的形状:{ id, Icon, keyboardShortcut, onSelect, requiresCodexAccess, title,
  * deferSelectionUntilDropdownClose? }。open-file 与 browser 带 defer 标记
@@ -55,17 +59,19 @@ const GIT_SORT_ORDER: Record<string, number> = {
 export function useSidePanelTabActions(
   controller: AppShellTabPanelController
 ): SidePanelTabAction[] {
-  const { chats, currentProject, projects } = useWorkspace()
   const { activeChatId } = useChatRuntime()
-  const { rightPanelOpen, bottomPanelOpen } = useAppShell()
-  // Codex `A`:当前会话(路由)的 workspace 非 projectless 且有 workspaceRoot。
-  // WS:会话归属的项目即其 workspace;首页无会话时退回侧栏选中的项目。
-  const activeChatProjectId =
-    activeChatId != null ? (chats.find((c) => c.id === activeChatId)?.projectId ?? null) : null
-  const workspaceProjectId = activeChatProjectId ?? currentProject?.id ?? null
-  const hasWorkspaceRoot = workspaceProjectId != null
-  const workspaceRootPath =
-    projects.find((p) => p.id === workspaceProjectId)?.rootPaths[0] ?? undefined
+  const { rightPanelOpen, bottomPanelOpen, setFileTreeOpen } = useAppShell()
+  /*
+   * Codex `In` 里的三个来源:
+   *   f = V(je)      → 会话工作区({kind, cwd})
+   *   b = W(he, _)   → workspaceKind('project' | 'projectless')
+   *   p = V(pe)[0]   → workspaceRoots[0]
+   * 见 state/threadWorkspace.ts。
+   */
+  const { kind, cwd, workspaceKind, workspaceRoots } = useThreadWorkspace()
+  const workspaceRoot = workspaceRoots[0] ?? null
+  // Codex `A = b !== 'projectless' && p != null`
+  const canOpenFile = workspaceKind !== 'projectless' && workspaceRoot != null
   // Codex side-chat 条件 `j = _ != null && !vt()`:有当前会话且当前不在 side chat
   // (WS 的 side chat 开在 tab 里,主路由恒为普通会话 —— vt() 恒 false)
   const canOpenSideChat = activeChatId != null
@@ -73,7 +79,7 @@ export function useSidePanelTabActions(
 
   return useMemo(() => {
     const de: SidePanelTabAction[] = [
-      ...(hasWorkspaceRoot
+      ...(canOpenFile && workspaceRoot != null
         ? [
             {
               id: 'open-file',
@@ -81,15 +87,9 @@ export function useSidePanelTabActions(
               Icon: FilesFolderIcon,
               keyboardShortcut: commandKeybindingLabel('searchFiles'),
               deferSelectionUntilDropdownClose: true,
+              // Codex `se`:`C(scope, null, {hostId, target, workspaceRoot: p})` —— path 为 null
               onSelect: () =>
-                controller.openTab(
-                  createFilesTabDescriptor(
-                    controller,
-                    '',
-                    workspaceProjectId ?? undefined,
-                    workspaceRootPath
-                  )
-                )
+                openFilesTab(controller, { path: null, cwd, workspaceRoot, setFileTreeOpen })
             } satisfies SidePanelTabAction
           ]
         : []),
@@ -100,9 +100,9 @@ export function useSidePanelTabActions(
               title: 'Side chat',
               Icon: SideChatIcon,
               keyboardShortcut: commandKeybindingLabel('openSideChat'),
+              // Codex `B`:`{sourceConversationId: _, cwd: f.cwd, hostId, collaborationMode, target}`
+              // —— cwd 是**会话工作区的 cwd**,不是项目根
               onSelect: () => {
-                const cwd =
-                  workspaceRootPath ?? chats.find((c) => c.id === activeChatId)?.cwd ?? null
                 void openSideChat({
                   controller,
                   sourceChatId: activeChatId,
@@ -126,19 +126,20 @@ export function useSidePanelTabActions(
       }
       // review / timeline / terminal / MCP 工具:未实现(条件不成立,不出现 —— 与 Codex 的条件组装语义一致)
     ]
-    // Codex:git workspace 下按 Rn 排序。WS 的项目都是本地 git 仓库场景,恒按 Rn 排
-    // (非 git 时 Codex 保持组装顺序 open-file 在前 —— 差异点,暂无 git 检测,先恒排)。
+    // Codex `f.kind === 'git' ? [...de].sort(Rn) : de` —— 非 git 工作区保持组装顺序
+    if (kind !== 'git') return de
     return [...de].sort(
       (a, b) => (GIT_SORT_ORDER[a.id] ?? de.length) - (GIT_SORT_ORDER[b.id] ?? de.length)
     )
   }, [
     controller,
-    hasWorkspaceRoot,
-    workspaceProjectId,
-    workspaceRootPath,
+    canOpenFile,
+    workspaceRoot,
     canOpenSideChat,
     activeChatId,
-    chats,
-    panelOpen
+    cwd,
+    kind,
+    panelOpen,
+    setFileTreeOpen
   ])
 }

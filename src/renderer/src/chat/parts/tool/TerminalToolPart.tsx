@@ -3,6 +3,7 @@ import type { TerminalToolData, ToolInvocation } from '../../model/toolInvocatio
 import { formatDuration } from '../../model/toolDisplay'
 import { CadencedShimmer } from '../CadencedShimmer'
 import { ActivityHeaderRow, DisclosureBody } from '../activity'
+import { InlineAnchor } from '../InlineAnchor'
 import { ToolActivityIcon } from './ToolActivityIcon'
 import { TerminalOutput } from './TerminalOutput'
 
@@ -30,17 +31,44 @@ import { TerminalOutput } from './TerminalOutput'
  *    收起 "Ran npm test in 2.3s" / 展开 "Ran command in 2.3s"。
  */
 
-/** 分类行(read/search/list)—— Codex 的 `jS`。仅完成态会走到这里 */
-function ClassifiedCommandLabel({ text }: { text: string }): React.JSX.Element {
-  // `<verb>Read</verb> {path}` —— 动词一词带 leading 色(Codex `iC`),其余原样
+/**
+ * 分类行(read/search/list)—— Codex 的 `jS`(壳)+ `KS`/`PS`/`VS`(文案)。
+ * 仅完成态会走到这里。
+ *
+ * `KS` 的 read 分支里 `{path}` **不是文字而是一个文件链接**(`ES`,
+ * `data-agent-activity-file-link`):显示 basename、点开在右面板里打开那个文件。
+ * 上一版这里整句都是纯文本 —— 所以那一大串
+ * `:not(:has([data-agent-activity-file-link]:hover))` 的 hover 规则一直没有作用对象。
+ * search / list 两支的参数是普通文字(查询词、目录),Codex 也没给链接。
+ */
+function ClassifiedCommandLabel({
+  invocation,
+  data
+}: {
+  invocation: ToolInvocation
+  data: TerminalToolData
+}): React.JSX.Element {
+  const text =
+    invocation.state.type === 'cancelled'
+      ? invocation.invocationMessage
+      : (invocation.pastTenseMessage ?? invocation.invocationMessage)
+  // `<verb>…</verb> 其余` —— 动词一词带 leading 色(Codex `iC`)
   const space = text.indexOf(' ')
   const verb = space === -1 ? text : text.slice(0, space)
   const rest = space === -1 ? '' : text.slice(space + 1)
+  const readTarget = data.parsedCmd.type === 'read' ? data.parsedCmd : null
   return (
     <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 truncate text-token-conversation-summary-trailing [@media(hover:hover)]:group-[:hover:not(:has([data-agent-activity-file-link]:hover))]/activity-header:text-token-foreground [&_*]:text-token-foreground/30 [@media(hover:hover)]:group-[:hover:not(:has([data-agent-activity-file-link]:hover))]/activity-header:[&_*]:text-token-foreground">
       <span className="min-w-0 truncate">
         <span className="text-token-conversation-summary-leading">{verb}</span>
-        {rest ? ` ${rest}` : ''}
+        {readTarget != null && readTarget.path ? (
+          <>
+            {' '}
+            <InlineAnchor path={readTarget.path} label={rest} />
+          </>
+        ) : rest ? (
+          ` ${rest}`
+        ) : null}
       </span>
     </span>
   )
@@ -56,7 +84,7 @@ export function TerminalToolPart({
   const { state } = invocation
   const running = state.type === 'executing' || state.type === 'streaming'
   const cancelled = state.type === 'cancelled'
-  const classified = data.commandKind !== 'unknown'
+  const classified = data.parsedCmd.type !== 'unknown'
 
   // Codex exec 分支:未完成的 read/search/list_files 不渲染成行
   // (WS 的 cancelled 对应 Codex 的 interrupted —— isFinished 为 false,同样不渲染)
@@ -66,15 +94,7 @@ export function TerminalToolPart({
     return (
       <ActivityHeaderRow
         icon={<ToolActivityIcon invocation={invocation} />}
-        summary={
-          <ClassifiedCommandLabel
-            text={
-              cancelled
-                ? invocation.invocationMessage
-                : (invocation.pastTenseMessage ?? invocation.invocationMessage)
-            }
-          />
-        }
+        summary={<ClassifiedCommandLabel invocation={invocation} data={data} />}
       />
     )
   }

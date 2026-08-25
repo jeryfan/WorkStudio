@@ -1,40 +1,27 @@
-import { RpcPeer, type RpcTransport } from '@shared/rpc/peer'
-import type { RpcMessage } from '@shared/rpc/messages'
-import { LOCAL } from '@shared/protocol/local'
-import type { AgentRuntimeStatus } from '@shared/rpc/channels'
+import { appServer, type AppServerConnectionState } from '../host/appServer'
+import type { AppServerRequestPriority } from '@shared/host/messages'
 
 /**
- * 渲染层的 RPC 端点。
+ * 渲染层的 app-server 入口。
  *
- * 与主进程之间是同一套 JSON-RPC 语义：调用方不需要知道某个方法是主进程
- * 本地实现的还是转发给 agent 的。
+ * 传输层已经换成宿主消息信封（`mcp-request` / `mcp-response` / `mcp-notification`，
+ * 见 `host/appServer.ts`），与 Codex 一致；这里保留 `rpc` 这个门面是因为业务代码
+ * 只关心"发一个协议请求"，不关心它骑在哪条通道上。
  */
-class BridgeTransport implements RpcTransport {
-  send(message: RpcMessage): void {
-    window.rpcBridge.send(message)
-  }
-  onMessage(handler: (message: RpcMessage) => void): void {
-    window.rpcBridge.subscribe(handler)
-  }
-}
-
-const peer = new RpcPeer(new BridgeTransport(), {
-  onDiagnostic: (msg, detail) => console.warn('[rpc]', msg, detail ?? '')
-})
-
 export const rpc = {
-  request: <T = unknown>(method: string, params?: unknown): Promise<T> =>
-    peer.request<T>(method, params),
-
-  notify: (method: string, params?: unknown): void => peer.notify(method, params),
+  request: <T = unknown>(
+    method: string,
+    params?: unknown,
+    options?: { priority?: AppServerRequestPriority }
+  ): Promise<T> => appServer.request<T>(method, params, options),
 
   /** 订阅单个通知 */
   on: (method: string, handler: (params: unknown) => void): (() => void) =>
-    peer.onNotification(method, handler),
+    appServer.onNotification(method, handler),
 
   /** 订阅全部通知；会话事件流用它，避免逐个方法注册 */
   onAny: (handler: (method: string, params: unknown) => void): (() => void) =>
-    peer.onAnyNotification((params, method) => handler(method, params)),
+    appServer.onAnyNotification((params, method) => handler(method, params)),
 
   /**
    * 注册服务端反向请求处理器（审批、工具提问）。
@@ -44,14 +31,16 @@ export const rpc = {
   onServerRequest: (
     method: string,
     handler: (params: unknown) => unknown | Promise<unknown>
-  ): (() => void) => peer.onRequest(method, (params) => handler(params))
+  ): (() => void) => appServer.onServerRequest(method, handler)
 }
 
-/** agent 运行时状态：启动期用于区分"还在起"与"起不来" */
-export function getAgentStatus(): Promise<AgentRuntimeStatus> {
-  return rpc.request<AgentRuntimeStatus>(LOCAL.agentStatus)
+/** agent 连接状态：启动期用于区分"还在起"与"起不来" */
+export function getConnectionState(): AppServerConnectionState {
+  return appServer.getConnectionState()
 }
 
-export function onAgentStatusChanged(handler: (status: AgentRuntimeStatus) => void): () => void {
-  return rpc.on('app/agent/statusChanged', (params) => handler(params as AgentRuntimeStatus))
+export function onConnectionStateChanged(
+  handler: (state: AppServerConnectionState) => void
+): () => void {
+  return appServer.onConnectionStateChanged(handler)
 }

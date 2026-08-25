@@ -9,6 +9,7 @@ import {
   useOpenTargets,
   type OpenTarget
 } from './openTargets'
+import { hostServices } from '../../../host/appHost'
 
 /**
  * "Open in" 分割按钮 —— Codex `Sia`(app-initial:325077)的移植。
@@ -142,7 +143,7 @@ export function OpenInSplitButton({
                 Open in folder
               </DropdownMenu.Item>
               <DropdownMenu.Item
-                onSelect={() => void window.codexBridge.openIn.saveCopy(absolutePath, fileName)}
+                onSelect={() => void hostServices?.workspaceFiles.saveCopy(absolutePath, fileName)}
                 className="no-drag rounded-lg px-[var(--padding-row-x)] py-[var(--padding-row-y)] text-sm text-token-foreground outline-hidden hover:bg-token-list-hover-background focus:bg-token-list-hover-background cursor-interaction"
               >
                 Save as…

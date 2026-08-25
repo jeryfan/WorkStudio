@@ -12,6 +12,7 @@ import { FileTree } from '@pierre/trees/react'
 import { AppContextMenu, type AppContextMenuItem } from '../../menu/AppContextMenu'
 import { openInTarget, resolvePrimaryTarget, useOpenTargets } from './openTargets'
 import { fileService } from '../../../services'
+import { joinPath } from '../../../utils/workspacePath'
 import { getTheme, subscribeTheme } from '../../../chat/theme/themeStore'
 
 /**
@@ -206,10 +207,8 @@ function filePathFromDoubleClick(e: MouseEvent): string | null {
 export interface FileTreeViewProps {
   /** 扁平路径(目录以 `/` 结尾);也可传 {displayPath, path}(搜索结果) */
   paths: readonly (string | { displayPath: string; path: string })[]
-  /** 项目 id(右键菜单的 Copy file contents 读文件需要) */
-  projectId: string
-  /** 项目根绝对路径(右键菜单的 open in / copy path 需要) */
-  rootAbsolutePath?: string | null
+  /** workspace root 绝对路径(读文件与右键菜单的 open in / reveal 都用它) */
+  workspaceRoot: string
   selectedPath?: string | null
   initialExpandedPaths?: readonly string[]
   initialScrollTop?: number
@@ -232,8 +231,7 @@ export interface FileTreeViewProps {
 
 export function FileTreeView({
   paths,
-  projectId,
-  rootAbsolutePath = null,
+  workspaceRoot,
   selectedPath = null,
   initialExpandedPaths,
   initialScrollTop = 0,
@@ -461,11 +459,12 @@ export function FileTreeView({
   const buildContextItems = (): AppContextMenuItem[] => {
     const clicked = contextPathRef.current
     if (clicked == null) return []
-    const absPath = rootAbsolutePath != null ? `${rootAbsolutePath}/${clicked}` : null
+    // 树里的 clicked 是 root 相对路径;右键菜单的动作都要绝对路径(Codex `KXi` 的 `l`)
+    const absPath = joinPath(workspaceRoot, clicked)
     const primary = resolvePrimaryTarget(targets)
     const items: AppContextMenuItem[] = []
     // Codex `jXi`:Open in <primary> + Open with ▸(子菜单含全部可见目标)
-    if (primary != null && absPath != null) {
+    if (primary != null) {
       items.push({
         id: 'open-in-primary',
         label: `Open in ${primary.label}`,
@@ -487,24 +486,20 @@ export function FileTreeView({
     items.push({
       id: 'copy-path',
       label: 'Copy path',
-      onSelect: () => void navigator.clipboard.writeText(clicked)
+      onSelect: () => void navigator.clipboard.writeText(absPath)
     })
     items.push({
       id: 'copy-contents',
       label: 'Copy file contents',
       onSelect: () => {
-        void fileService
-          .readFile(projectId, clicked)
-          .then((content) => navigator.clipboard.writeText(content))
+        void fileService.readFile(absPath).then((content) => navigator.clipboard.writeText(content))
       }
     })
-    if (absPath != null) {
-      items.push({
-        id: 'reveal-path',
-        label: 'Reveal in Finder',
-        onSelect: () => openInTarget({ target: 'fileManager' }, absPath)
-      })
-    }
+    items.push({
+      id: 'reveal-path',
+      label: 'Reveal in Finder',
+      onSelect: () => openInTarget({ target: 'fileManager' }, absPath)
+    })
     return items
   }
 

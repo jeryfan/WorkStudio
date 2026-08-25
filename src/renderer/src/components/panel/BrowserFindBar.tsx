@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { CloseIcon, SubmenuChevronIcon } from '../icons'
+import type { BrowserPageCommand } from '@shared/host/messages'
+import { subscribeHostMessage } from '../../host/hostMessages'
 
 /**
- * Browser 页内查找条 —— Codex 的浏览器查找由宿主叠加层渲染(`open-find-in-page`
- * 宿主消息),webview 里无 DOM 可取证;此处是同设计语义的推断实现(参照
- * Codex threadFindBar 家族:输入框 + n/m 结果计数 + 上一个/下一个/关闭)。
+ * Browser 页内查找条。
  *
- * 查找能力:webview.findInPage(text) + found-in-page 事件(matches/activeMatchOrdinal);
- * 关闭时 stopFindInPage('clearSelection')。
+ * 查找**全部走宿主**：渲染层发 `set-find-query` / `find-next` / `find-previous` /
+ * `close-find`，命中数从宿主的 `browser-sidebar-find-state` 回来（宿主侧监听
+ * guest 的 `found-in-page`）。
+ *
+ * 为什么不在渲染层直接 `webview.findInPage`：webview 已经不住在这个组件里了
+ *（见 BrowserSurfaceLayer），而且 agent 也可能在查找 —— 命中数只能有一个来源。
  */
 export function BrowserFindBar({
-  viewRef,
+  conversationId,
+  browserTabId,
+  runPageCommand,
   onClose
 }: {
-  viewRef: React.RefObject<HTMLElement | null>
+  conversationId: string
+  browserTabId: string
+  runPageCommand(command: BrowserPageCommand): void
   onClose(): void
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -24,50 +32,37 @@ export function BrowserFindBar({
     inputRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    const view = viewRef.current as unknown as {
-      findInPage?(text: string, opts?: { forward?: boolean; findNext?: boolean }): void
-      stopFindInPage?(action: string): void
-      addEventListener(type: string, fn: (e: unknown) => void): void
-      removeEventListener(type: string, fn: (e: unknown) => void): void
-    } | null
-    if (!view) return
-    const onFound = (e: unknown): void => {
-      const r = e as { result?: { matches?: number; activeMatchOrdinal?: number } }
-      if (r.result?.matches != null) {
-        setMatches({ total: r.result.matches, active: r.result.activeMatchOrdinal ?? 0 })
-      }
-    }
-    view.addEventListener('found-in-page', onFound)
-    return () => {
-      view.removeEventListener('found-in-page', onFound)
-      view.stopFindInPage?.('clearSelection')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // 命中数来自宿主（它监听 guest 的 found-in-page）
+  useEffect(
+    () =>
+      subscribeHostMessage('browser-sidebar-find-state', (message) => {
+        if (message.conversationId !== conversationId || message.browserTabId !== browserTabId) {
+          return
+        }
+        setMatches({ total: message.matches, active: message.activeMatchOrdinal })
+      }),
+    [conversationId, browserTabId]
+  )
+
+  // 关闭时让宿主清掉高亮
+  useEffect(
+    () => () => runPageCommand({ type: 'close-find' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在卸载时收尾
+    []
+  )
 
   useEffect(() => {
-    const view = viewRef.current as unknown as {
-      findInPage?(t: string): void
-      stopFindInPage?(a: string): void
-    } | null
-    if (!view) return
+    runPageCommand({ type: 'set-find-query', query })
     if (query === '') {
-      view.stopFindInPage?.('clearSelection')
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 清空查询时同步重置计数(webview 外部状态)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 清空查询时同步重置计数
       setMatches(null)
-      return
     }
-    view.findInPage?.(query)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runPageCommand 每次渲染都是新函数
   }, [query])
 
   const step = (forward: boolean): void => {
-    const view = viewRef.current as unknown as {
-      findInPage?(t: string, opts?: { forward?: boolean; findNext?: boolean }): void
-    } | null
     if (query === '') return
-    view?.findInPage?.(query, { forward, findNext: true })
+    runPageCommand({ type: forward ? 'find-next' : 'find-previous' })
   }
 
   return (

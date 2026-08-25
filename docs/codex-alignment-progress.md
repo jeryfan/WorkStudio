@@ -352,3 +352,302 @@ home/thread 两个分支分别渲染。截图验证:hero/建议卡/utility bar/c
   `workspace-write` 沙箱禁止写 .git(cannot lock ref)。最终写操作用
   `dangerFullAccess`(用户显式发起的分支切换)。
 - 实测:create+checkout 新分支(pill 同步)→ checkout main(同步)→ 清理,全链路通过。
+
+## 2026-08-25:对话区「运行状态」对齐(`jr` + `ja` + 两张活动文案表)
+
+**范围**:轮次运行中的每一种展示态 —— 思考行、探索中、工具在跑、被中断、
+组表头被吸收、过程段折叠头。上一轮(commit `ec83b04`)把组、散文结果块、
+推理归属做完了,状态机本身还是近似实现;这一轮按源码逐条改成移植。
+
+### 纠正的三处机制错误
+
+**① `showToggle` 的 `turnStatus == null` 不是"轮次没在跑"。**
+把轮次组件(`local-conversation-turn` 的 `Oo`)的入参逐个对完:那个 `n` 是
+**`voiceWorkActivity`** prop(同一处还有 `n === 'active'` / `n === 'terminal'`
+两个比较,轮次状态枚举不长这样)。WS 没有语音,恒 `null`,恒放行。
+`wo()` 的 `mn` 里也**没有** `!isTurnInProgress`。
+
+真实行为:**最终回答一开始流式产出(且 phase 是 final_answer),折叠头就出现,
+过程段随即收起**;不是等轮次跑完。上一版运行中一律不给折叠头,过程条目会在
+回答下面多挂一阵。
+
+顺带定死了 `Pe`(`wS` 那个按会话记的派生 atom,同时进 `preventAutoCollapse`
+与 `Qt`)的取值:它若等于"轮次在跑",`Qt = H && (!P || !Pe)` 在运行中恒假,
+而 `Qt` 正是 `isActivitySliceClosed` 的来源、又只在 `isTurnInProgress` 时被
+`Yr` 读 —— 那个 prop 就成了穿过三层组件的死值。所以 `Pe` 常态为假,
+`Qt` 退化成"回答已有内容"。
+
+**② `isExploring` 不能从渲染单元反推。** Codex 对同一批过程条目跑**两条**管线:
+`Gr`/`Jr` 产出渲染用的组,`jr` 只把连续的 read/search/list 收成 run 供状态机用。
+上一版按"最末单元是组且成员全是探索类"近似,`[mcp, read, read]` 这种常见形态
+就错:`Jr` 收成**一个**组(mcp 也可成组)→ `every(探索类)` 为假 → 表头从
+"Reading foo.ts" 掉回 "Thinking"。已按 `jr` 移植(`renderUnits.ts`)。
+
+`jr` 的第二个坑:`isExploring = isTurnInProgress && (!isAnyNonAgentItemInProgress
+|| anyRunning)` —— **尾部探索段全跑完也可能算"探索中"**,只要回答还没开始流。
+两次工具调用之间的空档不让表头闪一下,是刻意的。
+
+**③ `ja` 返回四态,不是布尔。** `{thinking,isVisible}` / `{exploring}` /
+`{planning}` / `{none}`,**分支顺序即优先级**。三个此前缺的入参补上了:
+`hasActiveWebSearch`(尾部条目是检索)、`hasActiveDynamicToolCallSummary`
+(`ko`+`Ea`:尾部连续动态工具里有没在跑的)、以及 `pi(assistantItem)`
+**排在** `isAnyNonExploringAgentItemInProgress` **前面** —— 回答在流式产出旁白时
+即使有非探索工具在跑,状态行也仍然出现(轮次组件里另一条 `On` 也走这个语义)。
+`An`(挂不挂载)/ `W`(可不可见)/ `kn`(被组表头吸收)三个派生值一并落地,
+`thinkingFallbackMessage` 现在只在 `kn` 时下传(否则组表头与底部状态行会同时
+显示同一句推理标题)。
+
+### 两张活动文案表(此前混用了一张)
+
+同一条命令 Codex 在两处说两种话,这不是时态开关:
+
+| 位置 | 源 | 例 |
+|---|---|---|
+| 活动行行摘要 | `toolSummaryForCmd.*` | `Searched for foo in src/renderer`(**完整路径**) |
+| 组表头 active | `localConversation.toolActivity.active.*`(`og`) | `Searching files in renderer folder`(**目录名**,查询词不进句子) |
+
+上一版 `GroupActiveLabel` 拿行摘要切第一个空格当 action/detail,措辞、参数形态、
+切分点三处全错。现在 `og` 表移植到 `model/toolActivityLabel.ts`
+(`activeExecLabel`),两段渲染成 Codex `YO`/`JO` 那两个 span(action
+`whitespace-nowrap`、detail `min-w-0 truncate`);行摘要那张表补齐了
+`Searched for {query} in {path}` / `Searched for files` / `Listed files in {path}`。
+`ag` 的三态(`Running` / `Ran` / `Stopped {command}`)也在这张表里 ——
+**中断文案是 active 表的一档,不是错误提示**。
+
+### 数据形状:`commandKind` → `parsedCmd`
+
+`TerminalToolData` 上那个 `commandKind` 枚举换成 Codex 同名的 `parsedCmd`
+(带 `name`/`path`/`query`)。理由是上面两张表都要参数,而从 adapter 拼好的
+一句话里反推不出来。read 行的路径因此能改成 Codex 的文件链接(`ES`,
+`data-agent-activity-file-link`)—— 那一大串
+`:not(:has([data-agent-activity-file-link]:hover))` 的 hover 规则此前一直没有
+作用对象。
+
+### 图标:`Fg` 的 exec 分支顺序
+
+上一版把「中断 → 停止图标」提到最前面且对所有条目类型生效。源码是先看
+`parsedCmd.type`(read/search/list_files),**再**看 interrupted,再看
+`Yt(cmd)`(curl 拉外网 → 地球),兜底终端;patch / web-search / MCP 的图标
+**从不**因中断换掉。被中断的 `Read foo.ts` 在 Codex 里仍然是书。
+`Yt` 的三条排除正则(改了 HTTP 方法 / 带请求体 / `-d -F -T`)逐字照抄。
+
+### 验证
+
+- `scripts/verify-chat-adapter.mjs` 新增三段共 42 项:过程段折叠头(`wo`/`ca`
+  三档)、两张文案表 + `Yt`、轮次运行态(`jr`/`ja`/`On`/`kn`)。全绿。
+- `preview.html` 新增 6 个运行态样张(exploring 两形态 / 命令在跑 / 旁白流式 +
+  命令在跑 / thinking 被组表头吸收 / 被中断),浏览器实测 DOM + 截图逐项核对:
+  组表头 `Reading ChatView.tsx` 带流光、行内 `Read ThreadTurn.tsx` 带文件链接
+  (同一条命令两种措辞,与 Codex 一致)、`Running npm run build`、
+  `Stopped npm run watch` + 停止图标、`核对求值规则` 进组表头。
+- typecheck(node + web)与 eslint 干净。
+
+**踩坑新条目:**
+- **预览页在 `/preview.html`,不是 `/`**。根路径是真 app 的 `index.html`,
+  没有 preload 桥的 stub → `rpc/client.ts` 在**导入时**构造 RpcPeer 就抛
+  `Cannot read properties of undefined (reading 'subscribe')`,页面全白且只有
+  一行 console 报错。
+- **HMR 会把活动行的展开状态带过去**(改 fixture 后组莫名是展开的),
+  断言展开/折叠默认值前先 reload。
+- 本机 agent 当前选的模型(`5.6 Sol`)与 provider(deepseek)不匹配,
+  `turn/start` 立刻回 `The supported API model names are deepseek-v4-*` ——
+  真会话驱动不了运行态,只能走预览页夹具。
+
+## 2026-08-25 补:右面板 Files 门控 + side chat fork(工作区推导层缺失)
+
+两个用户可见故障,根因不在渲染层,而在**上层缺了 Codex 的工作区推导**与
+**fork 请求少了一个必需字段**。
+
+### 1. Files 动作不显示 —— 门控读了 WS 自造的项目归属
+
+Codex(`thread-app-shell-chrome` 的 actions hook `In`):
+
+```js
+b = W(he, _)   // Rk        → workspaceKind: 'project' | 'projectless'
+p = V(pe)[0]   // DB ← JWi  → workspaceRoots[0]
+A = b !== 'projectless' && p != null      // ← open-file 的唯一门控
+actions = f.kind === 'git' ? [...de].sort(Rn) : de
+```
+
+- `workspaceRoots`(`DWi`):`o = projectRoots.length > 0 ? projectRoots : (runtimeWorkspaceRoots ?? [cwd])`
+  —— **没有项目归属就退回会话 cwd**;
+- `workspaceKind`(`getThreadWorkspaceKind`,app-initial:4654893):默认 `'project'`,
+  只有 projectless 注册表命中、或 cwd 命中草稿目录正则 `N_n`
+  (`.../Documents/Codex/<YYYY-MM-DD>/<slug>`)才是 `'projectless'`;
+- 排序**只在 git 工作区生效**。
+
+WS 之前是 `hasWorkspaceRoot = 会话.projectId ?? 侧栏选中项目 != null`,并且无条件排序。
+后果:cwd 是个真仓库但没归到 WS 项目的会话(CLI/其他客户端建的会话)看不到 Files。
+
+移植进 `state/threadWorkspace.ts`(`useThreadWorkspace`):`kind`(`VWi`)/`cwd`/
+`workspaceKind`(`Rk`)/`workspaceRoots`(`DB`)/`workspaceBrowserRoot`(`Wrr`),
+`N_n` 正则逐字照搬。`useSidePanelTabActions` 与 `AppCommands`(searchFiles /
+openSideChat)改读它;side chat 的 cwd 从「项目根」改成 Codex 的 `f.cwd`。
+
+### 2. 文件层的键:projectId → workspaceRoot
+
+Codex 文件 tab 的 props 是 `{cwd, path, hostId, tabId, workspaceRoot, onSelectFile}`
+(app-initial `HY`),`fs/*` 只吃绝对路径,**没有项目 id 这一层**。WS 之前
+`FileService(projectId, relPath)` 内部再查 localProjects 快照解析根目录,
+于是「有工作区但没项目」的会话根本开不了文件 —— 只改门控会得到一个空壳 tab。
+
+因此把整条链的键换成 workspaceRoot 绝对路径:`FileService` 三个方法、
+`createFilesTabDescriptor(controller, workspaceRoot, path)`、FileTab / FileNavbar /
+WorkspaceTreePane / FileTreeView / FileBreadcrumbDropdown / FileViewerOptionsMenu /
+treeState(键变成 Codex 的 `{hostId, includeHidden, root}` 形态)/ directoryEntries。
+顺带删掉与 workspaceRoot 完全重复的 `rootAbsolutePath` prop 链和
+`appServerFileService` 里的项目根缓存。`resolveInProjects` 换成 Codex `e$i` 的移植
+`resolveInWorkspaceRoots`(命中多个 root 取**最长**的)。
+面包屑首段的标签走 Codex `SAe({root, labels})`:项目名(按 root 匹配)优先,否则目录名。
+
+### 2b. 路径表示:tab 层改绝对路径(与 Codex 完全一致)
+
+Codex 的两层路径空间(8214 实测确认):
+
+| 层 | 表示 | 证据 |
+|---|---|---|
+| 文件 tab(props / tabId) | **绝对路径** | `data-tab-id="file:local:/Users/…/agent-explore/.gitignore"` |
+| 文件树 / 面包屑下拉 | **root 相对** | 树行 `data-item-path="src/"`、`build/builtin/package.json` |
+
+换算点也照抄:树/下拉选中文件时 `Qp(root, rel)` 转绝对再交给 `onSelectFile`
+(Codex `l0a` 的 `o(Qp(s, d0a(t, r)), {isPreview:!0})`),`fs/*` 与
+`fuzzyFileSearch` 直接吃绝对路径/roots。
+
+顺带把 Codex 的一整组路径原语移植进 `utils/workspacePath.ts`,不再手写:
+`Xp` normalizePath / `tm`(`Su`) isAbsolutePath / `Zp` baseName / `D3e`
+workspaceRootLabel / `Qp` joinPath / `qQi` relativeToRoot / `nb` relativeFrom /
+`T3e` displayPathFor / `t$i` fileDisplayPath / `n$i` fileDisplaySegments /
+`r$i` breadcrumbSegmentTargets / `e$i` resolveInWorkspaceRoots。
+
+因此几处此前的近似实现被真实算法替掉:
+
+- 面包屑段与可点性:原来是"首段=项目名、其余按相对路径切",现在是 `n$i` + `r$i`
+  —— 显示路径的基准**先看 cwd**(文件在 cwd 里就以 cwd 为基准,否则 workspaceRoot),
+  段与 root 相对段右对齐比对,对不上的段不可点,root 标签段的下拉列根目录。
+- 面包屑首段的标签是 **root 目录名**(`D3e`),不是项目名 —— 上一版用项目名是错的
+  (`SAe({root, labels})` 那套标签用在别处)。
+- `Copy path` 复制的是**绝对路径**(Codex `KXi` 的 `l` 就是 tab 的 path)。
+- `FileViewerOptionsMenu` / `FileTreeView` / `FileTab` 的 readFile 都直接给绝对路径,
+  `fileService` 变成 `listDir(dir)` / `readFile(path)` / `searchFiles(roots, query)`
+  的纯协议包装,root↔相对的折算收到查询层(`directoryEntries`,对应 Codex 的
+  `workspace-directory-entries`)。
+
+同时补上 `HY` 末尾漏掉的一个副作用:**新开空文件 tab 时强制展开文件树**
+(`t == null && S == null && $Un(e, !0, {animate:!1})`)。之前树的全局开合是
+持久化的 false 时,点 Files 得到的是一个连树都没有的空面板 —— 实测就撞到了。
+为此 AppShellContext 补了 `setFileTreeOpen(open)`(Codex `$Un` 的 setter 形态),
+并把三个打开入口(launcher / ⌘P / 会话文件引用 / tab 内选文件)统一走
+`openFilesTab()` 这一条路径(Codex 侧同样只有 `HY` 一个入口)。
+
+### 3. side chat 打不开 —— `thread/fork` 缺 `excludeTurns`
+
+实测(拦 `appServer.request`):`thread/fork` 回 -32600
+`ephemeral paginated thread/fork requires \`excludeTurns: true\``。
+先开的 `sidechat-loading:` 占位 tab 在 catch 里被关掉,失败只走 console.error,
+所以表现是「菜单项在、点了没反应、标签页也不出现」。
+
+Codex 两层:上层 `we()` 传 `sideConversation: true` / `ephemeral: true` /
+`addForkedSyntheticItem: false` + developerInstructions(`B`);下层 `VNn` 发
+`thread/fork {threadId, path, cwd, threadSource, developerInstructions,
+excludeTurns: true, ephemeral: true}`,**再 `thread/inject_items` 注入一条 user
+消息**(边界文本 `KNn`,已逐字加进 `sideChatInstructions.ts`)。失败走 `HNn`
+(`thread/archive` 掉半成品);关闭时的 `discard-conversation-from-cache` 只发
+`thread/unsubscribe`(WS 之前还发 `thread/delete`,ephemeral 线程必然回
+`thread is not persisted and cannot be deleted`)。
+
+`excludeTurns` 不在 ts-rs 导出的 `ThreadForkParams` 里,但二进制 strings 里与
+`threadSource`/`deferGoalContinuation` 同列,是真实线上字段 —— 在
+`sideChatService.ts` 显式扩了一层类型,没动 `generated/`。副作用:fork 响应不再
+带回继承的 turns(`turns: 0`),side chat UI 从空白开始(与 Codex 一致)。
+
+### 验证
+
+- Codex 运行时(127.0.0.1:8214,CDP)逐项对照:项目内会话 launcher =
+  `Review / Terminal / Browser / Files / Side chat`(`Rn` 序);Recents 的
+  projectless 会话 = `Side chat / Browser / Terminal`(**无 Files 且不排序**)。
+- 本项目 dev 应用(CDP :9333)实测:
+  - cwd 是 git 仓库、未归项目的会话 → `Browser / Files / Side chat`(git 序,
+    Review/Terminal 未实现);点 Files → `fs/readDirectory` 打到
+    `/Users/.../github/vscode`,树出真实条目;点文件 → tab
+    `file:local:build/builtin/package.json`、`fs/readFile` 成功、面包屑
+    `vscode / build / builtin / package.json`。
+  - cwd 是 `~/Documents/Codex/2026-08-21/new-chat-2` 的会话(哪怕被拖进了 WS 项目)
+    → `Side chat / Browser`,无 Files、不排序。
+  - side chat:`thread/fork` → `thread/inject_items` 双双 ok,tab
+    `sidechat:<id>` 出现并渲染会话;关 tab 只发 `thread/unsubscribe`。
+- 绝对路径改造后再跑一轮:空文件 tab = `file:local:`(面包屑 `/`,树被强制展开);
+  树里点 `.editorconfig` → tabId
+  `file:local:/Users/…/github/vscode/.editorconfig`、标题 `.editorconfig`、
+  面包屑 `vscode / .editorconfig`;过滤框搜 `build/builtin/package.json` 打开 →
+  绝对 tabId + 面包屑 `vscode / build / builtin / package.json`;点面包屑
+  `builtin` 段 → 下拉列出 `build/` 的一层(root 相对),选 `builtin/browser-main.js`
+  → 绝对 tabId 打开。side chat 与 projectless 会话的门控回归复测一遍,行为不变。
+- typecheck(node + web)干净;eslint src 下 0 error。
+
+## 2026-08-25 补2:打开中文件的 fs/watch 链 + 行号跳转
+
+### 先纠正一个说法
+
+上一节末尾写的"`syncOpenTabs` 需要宿主 `set-open-file-tabs` 通道,WS 没有这条通道"
+**不准确**。`set-open-file-tabs` / `set-open-review-file-source-tabs` 不是 Electron IPC,
+是 Codex **渲染层内部**的 store 消息(`dm(...)` → manager 的处理表,app-initial:20648031);
+真正跨进程的部分是 app-server 协议的 `fs/watch` / `fs/unwatch` / `fs/changed` ——
+这三个 WS 一直有(`M.fsWatch`/`M.fsUnwatch`、`NOTIFICATION_POLICY['fs/changed'] = true`)。
+
+所以缺的不是通道,是**渲染层这一层注册与分发**:文件 tab 只在挂载/换路径时读一次,
+磁盘上被改了界面不会动。之所以一直没写,是文件查看器当初是按"只读快照"做的
+(`readFile` 一次 → shiki 高亮 → 完),没有 Codex 那套 open-files 注册表。
+
+### Codex 的链(逐段取证)
+
+```
+文件 tab 开/关 → v$i(scope, {excludeTab})                       # app-initial:9124191
+  → dm('set-open-review-file-source-tabs', {conversationId, openFiles: l$i(N1n(scope))})
+  → manager.setOpenReviewFileSourceTabs → setOpenFilesBySource → sync()
+  → 每个 (hostId, 绝对路径) 起一个 fs/watch {path, watchId: `open-file-${uuid}`}
+app-server 推 fs/changed {watchId, changedPaths}
+  → getFileChangeMessages(watchId):
+      reviewFiles → refreshMode==='manual' ? 'review-file-source-changed' : 'refetch-review-file-source'
+      openFiles   → 'open-file-changed'（text-editor tab 用）
+  → 查看器重读(h$i 重取 read-file 查询)
+```
+`l$i`/`u$i` 只收 `kind` 以 `workspaceFile:` 开头、props 里有 string `hostId`+`path` 的 tab;
+`N1n` = 右面板 + 底部面板全部 tab;`getWatchPath` = `Qp(会话 cwd, path)` 且必须是绝对路径;
+watch key 是 `kPn(hostId, path)` = `${hostId}\0${path}`;忽略窗口 `APn = 5000`ms。
+
+### WS 侧实现
+
+- `services/file/openFilesWatcher.ts` = Codex `jPn` 的移植:
+  `setOpenReviewFileSourceTabs` / `removeConversation` / `sync()`(做差集,不 churn)/
+  `startWatch`(watchId 同样是 `open-file-<uuid>`)/ `stopWatch` / `fs/changed` 分发。
+- `components/panel/file/OpenFileTabsSync.tsx` = `v$i` 的接线:从两个面板的 tab 列表派生
+  (Codex 是在 `HY` 与 tab 的 `onClose` 里 imperative 调,WS 用派生 effect —— 覆盖时机是
+  那两处的超集;注销单独一个 effect,否则每次 tab 变化都会先注销再登记,把没变的文件
+  也 unwatch/watch 一遍)。
+- `FileTab` 订阅变更 → 重读 + 重新高亮(Codex 的 auto 刷新档)。
+- `reviewFileSourceFromTab`(Codex `u$i`):WS 描述符没有 props 袋子,从 tabId 解析
+  (格式的唯一来源仍是 `fileTabId`)——**这是与 Codex 的结构差异,见下方"仍存差异"**。
+
+未移植(无对应物,不做假实现):`openFiles`(text-editor tab)与 `mcpResources` 两支;
+`ignoreFileChangeEvents` + 5s 忽略窗口(它防的是"自己写盘触发自我刷新",WS 查看器只读)。
+
+### 行号跳转(`initialLine`/`initialEndLine`)
+
+`HY` 的 `line`/`endLine` 入参一路带到 props,并且 **`f = line != null || endLine != null`
+时要 `resetTabState`**(同一个文件 tab 已开着时带行号再打开,不重挂载就不会重新露出行)。
+WS 现在:`openFilesTab({line, endLine})` → 描述符 props → `CodePane revealLine`
+(滚到该行,放在视口 1/3 处);`InlineAnchor` 里 `src/a.ts:12` 的行号以前只用于显示,
+现在真的传下去了。Codex 富查看器的行范围选中带与 `onLineRevealHandled` 未移植
+(属于 `Myo` pierre 查看器)。
+
+### 验证(运行中的 dev 应用,CDP :9333)
+
+- 在工作区根下放 `.ws-watch-probe.txt` → 树里打开 → 抓到
+  `fs/watch {watchId:"open-file-<uuid>", path:"/Users/…/vscode/.ws-watch-probe.txt"}`,
+  内容显示 `probe-before`;**在终端改写该文件 → 界面 3 秒内变成新内容**(收到
+  `fs/changed` → 重读);关 tab → `fs/unwatch {watchId}`;探针文件已删除。
+- churn 检查:同时开两个文件 = 恰好 2 次 `fs/watch`(两个不同 watchId)、0 次 unwatch;
+  关掉其中一个 = 恰好 1 次 `fs/unwatch`,另一个 watch 存活。
+- `fs/watch` 通路本身另做过一次裸探针(watch /tmp 文件 → 追加 → 收到
+  `{watchId, changedPaths:[…]}`),确认协议侧可用后才动手写这一层。
+- typecheck(node + web)干净;eslint src 0 error。

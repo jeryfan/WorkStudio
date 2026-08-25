@@ -21,7 +21,7 @@ import {
 } from '../model/mcpContent.ts'
 import { humanizeToolName } from '../model/toolName.ts'
 import type {
-  TerminalToolData,
+  ParsedCommand,
   ToolInvocation,
   ToolSpecificData,
   ToolState
@@ -66,60 +66,80 @@ function mapStatus(
 }
 
 /**
- * 命令的展示文案。
+ * 命令的**行摘要**文案 —— Codex 的 `toolSummaryForCmd.*` 表
+ * (`subagent-activity-chip-group` 的 `KS` / `PS` / `VS`)。
  *
- * 协议已经把命令解析成 `commandActions`（read / listFiles / search / unknown），
- * 用它生成人话比展示整条命令行好读得多——`grep -rn "foo" --include=*.ts src`
- * 对用户的信息量还不如 "Searched for foo"。
+ * 每类命令都有 finished / inProgress 两套措辞,由 `rC({isFinished})` 二选一;
+ * 这里把两套都产出来(`pastTense` / `invocation`),渲染层按状态取。
  *
- * 但只在**只有一个动作**时这么做：管道串起来的复合命令用人话概括会失真，
- * 那种情况老老实实展示命令本身。
+ * 注意这**不是**组表头 active 态的那套文案(那是 `og` 表,措辞与参数形态都不同,
+ * 见 `model/toolActivityLabel.ts`)。同一条命令两处说法不一样是 Codex 的事实:
+ * 行里说 `Searched for foo in src`,组表头说 `Searching files in src folder`。
  */
-function commandLabels(entry: Narrow<'commandExecution'>): {
+function commandLabels(
+  parsed: ParsedCommand,
+  command: string
+): {
   invocation: string
   pastTense: string
 } {
-  const actions = entry.commandActions
-  if (actions.length === 1) {
-    const action = actions[0]
-    switch (action.type) {
-      case 'read':
-        return { invocation: `Reading ${action.name}`, pastTense: `Read ${action.name}` }
-      case 'listFiles': {
-        // Codex `toolSummaryForCmd.exploredFilesInPath`:`Listed files in {path}`
-        const where = action.path ? ` in ${action.path}` : ''
-        return { invocation: `Listing files${where}`, pastTense: `Listed files${where}` }
-      }
-      case 'search': {
-        const what = action.query ? ` for ${action.query}` : ''
-        return { invocation: `Searching${what}`, pastTense: `Searched${what}` }
-      }
-      case 'unknown':
-        break
+  switch (parsed.type) {
+    case 'read': {
+      // `KS`:显示名 = displayLabel ?? basename(name);协议不给 displayLabel
+      const target = baseName(parsed.name)
+      // 未完成的 read 行不渲染(Codex `case 'exec'` 直接 return null),
+      // in-progress 措辞给不出来,沿用完成态
+      return { invocation: `Read ${target}`, pastTense: `Read ${target}` }
     }
+    case 'listFiles': {
+      const where = parsed.path ? ` in ${parsed.path}` : ''
+      return { invocation: `Listing files${where}`, pastTense: `Listed files${where}` }
+    }
+    case 'search': {
+      const query = parsed.query?.trim()
+      if (query && parsed.path) {
+        return {
+          invocation: `Searching for ${query} in ${parsed.path}`,
+          pastTense: `Searched for ${query} in ${parsed.path}`
+        }
+      }
+      if (query) {
+        return { invocation: `Searching for ${query}`, pastTense: `Searched for ${query}` }
+      }
+      // `toolSummaryForCmd.searchedForFiles` —— 没有查询词时是 "for files",不是干说 "Searched"
+      return { invocation: 'Searching for files', pastTense: 'Searched for files' }
+    }
+    case 'unknown':
+      return { invocation: `Running ${command}`, pastTense: `Ran ${command}` }
   }
-  return { invocation: `Running ${entry.command}`, pastTense: `Ran ${entry.command}` }
+}
+
+/** Codex `Ii` —— 路径取末段 */
+function baseName(path: string): string {
+  const trimmed = path.replace(/\/+$/u, '')
+  const index = trimmed.lastIndexOf('/')
+  return index === -1 ? trimmed : trimmed.slice(index + 1)
 }
 
 /**
- * 命令归到哪一类 —— 给活动行选图标用(Codex 的 `parsedCmd.type`)。
+ * 命令的解析结果 —— 协议 `commandActions` → Codex 的 `parsedCmd`。
  *
- * 与 `commandLabels` 同一个判据(只有单一动作才敢分类;管道串起来的复合命令
- * 归 unknown),所以图标和文案永远一致 —— 不会出现"文案说 Searched、
- * 图标画的是终端"这种错位。
+ * 只在**只有一个动作**时分类:管道串起来的复合命令归 `unknown`,展示命令本身。
+ * Codex 那边是 agent 侧 parse 出来的单个 `parsedCmd`,同一个取舍。
  */
-function commandKind(entry: Narrow<'commandExecution'>): TerminalToolData['commandKind'] {
+function parseCommand(entry: Narrow<'commandExecution'>): ParsedCommand {
   const actions = entry.commandActions
-  if (actions.length !== 1) return 'unknown'
-  switch (actions[0].type) {
+  if (actions.length !== 1) return { type: 'unknown' }
+  const action = actions[0]
+  switch (action.type) {
     case 'read':
-      return 'read'
+      return { type: 'read', name: action.name, path: action.path }
     case 'listFiles':
-      return 'listFiles'
+      return { type: 'listFiles', path: action.path }
     case 'search':
-      return 'search'
+      return { type: 'search', query: action.query, path: action.path }
     case 'unknown':
-      return 'unknown'
+      return { type: 'unknown' }
   }
 }
 
@@ -177,10 +197,11 @@ function dynamicResultBlocks(entry: Narrow<'dynamicToolCall'>): McpContentBlock[
 export function toToolInvocation(entry: Entry): ToolInvocation | null {
   switch (entry.type) {
     case 'commandExecution': {
-      const labels = commandLabels(entry)
+      const parsedCmd = parseCommand(entry)
+      const labels = commandLabels(parsedCmd, displayCommand(entry.command))
       const data: ToolSpecificData = {
         kind: 'terminal',
-        commandKind: commandKind(entry),
+        parsedCmd,
         command: entry.command,
         // Codex 的 `Ae`:剥掉 `/bin/zsh -lc '…'` 与引号包装,展示用户写的命令本身
         commandForDisplay: displayCommand(entry.command),
@@ -356,7 +377,7 @@ export function approvalToInvocation(approval: PendingApproval): ToolInvocation 
       data: {
         kind: 'terminal',
         // 审批阶段拿不到 commandActions(那在条目里),所以只能归 unknown
-        commandKind: 'unknown',
+        parsedCmd: { type: 'unknown' },
         command,
         commandForDisplay: command,
         cwd: approval.fallback.cwd,

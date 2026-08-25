@@ -7,7 +7,12 @@
  */
 import { formatDuration } from '../../utils/time.ts'
 import type { ChatContent, ChatToolInvocationContent } from './content'
-import type { RenderUnit } from './renderUnits'
+import {
+  isItemInProgress,
+  splitAgentActivityRuns,
+  type AgentActivityRun,
+  type RenderUnit
+} from './renderUnits.ts'
 
 /**
  * 把一轮回复拆成「过程」与「最终输出」—— 照 Codex 的
@@ -108,9 +113,20 @@ export function splitTurnContent(content: ChatContent[]): {
  *
  * ## 落不了地的三个前置条件
  *
- * `turnStatus == null`(Codex 的 turn 有 `terminal` 等展示态)、`!showFullTranscript`、
- * `!startAfterTurnIntro` 都是 Codex 特有的视图模式,WS 没有对应物,恒等于放行。
- * `Et`(后台 subagent 行)同理,WS 没有这一路数据。
+ * `!showFullTranscript`、`!startAfterTurnIntro` 是 Codex 特有的视图模式,
+ * `Et`(后台 subagent 行)WS 没有这一路数据,三者恒等于放行。
+ *
+ * ## 更正:`turnStatus == null` **不是**"轮次没在跑"
+ *
+ * 上一版把 `jn` 里的 `n == null` 读成"轮次不在跑",于是运行中一律不给折叠头。
+ * 把轮次组件的入参逐个对完之后,那个 `n` 是 **`voiceWorkActivity`** 这个 prop
+ * (同一处还有 `n === 'active'` / `n === 'terminal'` 两个比较,状态枚举不长这样),
+ * 语音工作流的展示态 —— WS 没有语音,恒 `null`,恒放行。
+ *
+ * 于是真实行为是:**回答一开始流式产出(且 phase 是 final_answer),折叠头就出现**,
+ * 而不是等轮次跑完。`wo` 那边 `isCollapsed = persistedCollapsed ?? !preventAutoCollapse`,
+ * 常态下 `preventAutoCollapse` 为假 → 默认折叠 —— 所以观感是"回答一开始写,
+ * 上面的过程就收成一行"。上一版要等轮次结束才收,过程条目会在回答下面多挂一阵。
  */
 export function shouldShowProcessToggle({
   final,
@@ -125,17 +141,15 @@ export function shouldShowProcessToggle({
   /** 渲染单元 —— 只用末位的形态与「只有一条压缩」判定 */
   units: RenderUnit[]
   cancelled: boolean
-  /** Codex `jn` 里的 `turnStatus == null`:轮次在跑时没有折叠头,过程全部摊开 */
+  /** `Dat` 的 `completed` 那一支:轮次收尾了,空正文也算"回答已开始" */
   isTurnInProgress: boolean
 }): boolean {
-  // 轮次在跑(turnStatus === 'active')→ `jn` 为假 → 没有折叠头
-  if (isTurnInProgress) return false
   const assistant = final[0]
-  // Dat(B):phase 必须是显式的 final_answer,且这条真的有内容
+  // Dat(B):phase 必须是显式的 final_answer,且这条真的有内容(或轮次已收尾)
   const hasFinalAssistantStarted =
     assistant?.kind === 'markdownContent' &&
     assistant.phase === 'final_answer' &&
-    assistant.content.trim().length > 0
+    (assistant.content.trim().length > 0 || !isTurnInProgress)
 
   if (!hasFinalAssistantStarted || cancelled) return false
   // Pn > 0:折叠起来至少得有一条东西
@@ -183,95 +197,216 @@ export function turnSummaryLabel(
   return processCount === 1 ? '1 previous message' : `${processCount} previous messages`
 }
 
-// ── 轮次状态行(Codex `ja` + `kn`/`An`/`W`)────────────────────────────
+// ── 轮次运行态(Codex `ja` + 轮次组件里的 `On`/`kn`/`An`/`W`)──────────
 
-export interface ThinkingRowState {
-  /** 底部状态行是否出现 */
-  visible: boolean
-  /**
-   * 轮次是否处于「探索中」(尾部连续 read/search/list 且有未完成) ——
-   * 组表头的 active 态标签要用它(Codex `Yr` 的 isExploring 入参)。
-   */
+/**
+ * Codex `ja` 的返回 —— 轮次的展示态。
+ *
+ * 上一版这里是个布尔("状态行显不显示")。真实的 `ja` 返回四种态,而且
+ * **分支顺序就是优先级**:探索 > 计划 > 无 > 在想。四态各有承载者:
+ *
+ * | 态 | 谁在表达进度 |
+ * |---|---|
+ * | `exploring` | 组表头的 active 文案("Reading foo.ts") |
+ * | `planning` | 计划卡片(协议没有 proposed-plan 条目,进不来) |
+ * | `none` | 那一行工具自己的流光,或者审批控件,或者已经在写回答了 |
+ * | `thinking` | 底部的 thinking-placeholder(或被组表头吸收) |
+ */
+export type TurnStatus =
+  | { type: 'thinking'; isVisible: boolean }
+  | { type: 'exploring' }
+  | { type: 'planning' }
+  | { type: 'none' }
+
+/**
+ * Codex `ko` + `Ea` —— 尾部连续的动态工具调用里有没有还在跑的。
+ *
+ * 为什么单拎出来:动态工具的摘要是"一串调用共用一行"的形态,尾部那一串
+ * 只要有一个没完就仍在表达进度,底部的状态行不该再重复一句 "Thinking"。
+ * Codex 还有一档 `continuesLiveActivityBetweenCalls`(工具注册表里声明
+ * "两次调用之间也算活着"),WS 没有注册表,落不了地。
+ */
+function hasActiveDynamicToolCallSummary(
+  runs: AgentActivityRun[],
+  isTurnInProgress: boolean
+): boolean {
+  if (!isTurnInProgress) return false
+  const trailing: ChatToolInvocationContent[] = []
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const run = runs[i]
+    if (run.kind !== 'item') break
+    const { item } = run
+    if (
+      item.kind !== 'toolInvocation' ||
+      item.invocation.data.kind !== 'inputOutput' ||
+      item.invocation.data.source.kind !== 'dynamic'
+    ) {
+      break
+    }
+    trailing.unshift(item)
+  }
+  return trailing.some(isItemInProgress)
+}
+
+/** Codex `ja` —— 轮次展示态。分支顺序即优先级,不能重排 */
+export function turnStatus({
+  isTurnInProgress,
+  assistantInProgress,
+  hasFinalAssistantStarted,
+  isExploring,
+  hasActiveWebSearch,
+  hasActiveDynamicToolCall,
+  isAnyNonExploringAgentItemInProgress,
+  hasBlockingRequest
+}: {
+  isTurnInProgress: boolean
+  /** Codex `pi(assistantItem)` —— 最终回答那条还在流 */
+  assistantInProgress: boolean
+  /** Codex `g(assistantItem)` = `Dat` —— 已进入 final_answer 且有内容 */
+  hasFinalAssistantStarted: boolean
   isExploring: boolean
+  hasActiveWebSearch: boolean
+  hasActiveDynamicToolCall: boolean
+  isAnyNonExploringAgentItemInProgress: boolean
+  hasBlockingRequest: boolean
+}): TurnStatus {
+  // `forceThinking` 是外部强制档(WS 没有调用方传它)
+  if (!isTurnInProgress) return { type: 'none' }
+  if (isExploring) return { type: 'exploring' }
+  /*
+   * `pi(proposedPlanItem)` → planning:协议没有 proposed-plan 条目,
+   * 这一档进不来。保留注释而不是删掉分支,是为了让这台状态机与源码同形 ——
+   * 下次协议加了 plan 条目,补在这里就行。
+   */
+  if (
+    hasBlockingRequest ||
+    hasFinalAssistantStarted ||
+    hasActiveWebSearch ||
+    hasActiveDynamicToolCall
+  ) {
+    return { type: 'none' }
+  }
+  // 回答还在流(且还不是 final_answer)→ 仍然显示"在想",**优先于**下面那条
+  if (assistantInProgress) return { type: 'thinking', isVisible: true }
+  if (isAnyNonExploringAgentItemInProgress) return { type: 'none' }
+  return { type: 'thinking', isVisible: true }
+}
+
+/** 轮次运行态的全部派生值 —— 渲染层照着摆就行,不再自己算条件 */
+export interface TurnRunningState {
+  status: TurnStatus
+  /** 给组表头(`Yr`)的入参 */
+  isExploring: boolean
+  /** Codex `Qt` —— `isActivitySliceClosed`:回答已有内容,组表头停止播实况 */
+  isActivitySliceClosed: boolean
+  /** Codex `An` —— thinking-placeholder 挂不挂载 */
+  showThinkingPlaceholder: boolean
+  /** Codex `W` —— 挂载后可不可见(不可见时占位但 `invisible`) */
+  isThinkingVisible: boolean
+  /** Codex `kn` —— 状态行被最末那个组的表头吸收,底部不重复 */
+  absorbedByLastUnit: boolean
 }
 
 /**
- * 「思考中」状态行的显隐 —— Codex `local-conversation-turn` 的 `ja`/`W`/`kn`。
- *
- * 源码条件展开后是这样(逐条都有出处):
+ * 轮次组件里那四个派生值。
  *
  * ```
- * W = P && !blocking && !exploring && !anyNonExploringRunning
- *     && (!assistantStarted || !finalAnswerPhase)
+ * Qt = H && (!P || !Pe)
+ * On = P && Qt && !Yt && !jt && turnStatus.type === 'none' && postAssistantUnits.length === 0
+ * kn = !Me && !hasPendingItems && turnStatus.type === 'thinking' && !Qt && lastUnit?.kind === 'group'
+ * An = !Me && (turnStatus.type === 'thinking' || On) && !kn && !hasPendingItems
+ * W  = (turnStatus.type === 'thinking' && turnStatus.isVisible) || On
  * ```
  *
- * - `P`:轮次在跑。`assistantStarted`:最终回答已有内容(流式中也算)。
- * - `blocking`:有待决审批(审批控件自己就是等待的表达)。
- * - `exploring`:尾部是连续的探索命令且有在跑的 —— 状态由组表头的
- *   active 态承担("Reading foo.ts"),底部不再重复。
- * - `anyNonExploringRunning`:最末单元是非探索类工具且在跑 —— 那行自己
- *   带流光。注意 Codex 看的是**最末一条**(`jr` 的 `on`),不是任意一条。
- * - 回答流式期间也显示(Codex 的 `On` 分支),**除非**它已明确是
- *   final_answer(那时回答本身就是收尾,没有"还在想"可言)。
+ * 三个恒定项:`Me`(安全缓冲 UI)、`hasPendingItems`(生成图片的占位)、
+ * `postAssistantUnits`(尾部的自动审批复盘)WS 都没有数据源,恒假/恒空。
  *
- * 最后:`kn` —— 最末单元是组时,状态行进组表头(thinking 态),
- * 底部不重复出现。
+ * `Pe` 是按会话记的「这一轮不要自动折叠」标记(`wS` 那个派生 atom)。
+ * 它同时进 `wo` 的 `preventAutoCollapse`,而 Codex 的实测行为是**完成态默认折叠**
+ * —— 也就是常态下 `Pe` 为假。所以这里按 `Pe = false` 落地,`Qt` 退化成 `H`
+ * (回答已有内容)。这个取值同时让 `On` 这一档活着:回答在流式产出**旁白**
+ * (phase 不是 final_answer)、而某个非探索工具正在跑时,底部仍显示"在想"。
  */
-export function thinkingRowState({
+export function turnRunningState({
+  process,
+  units,
   isTurnInProgress,
-  assistantStarted,
-  hasFinalAnswerPhase,
-  hasBlockingRequest,
-  units
+  assistantContent,
+  assistantPhase,
+  hasBlockingRequest
 }: {
-  isTurnInProgress: boolean
-  assistantStarted: boolean
-  hasFinalAnswerPhase: boolean
-  hasBlockingRequest: boolean
+  process: ChatContent[]
   units: RenderUnit[]
-}): ThinkingRowState {
+  isTurnInProgress: boolean
+  /** 最终回答那条的正文;没有最终回答时为 null */
+  assistantContent: string | null
+  assistantPhase: 'commentary' | 'final_answer' | null
+  hasBlockingRequest: boolean
+}): TurnRunningState {
+  /*
+   * `Nt = pi(assistantItem) || pi(proposedPlanItem)` —— 助手正文还在流。
+   * WS 的条目级 `completed` 没有,用轮次状态做代理:轮次在跑且已经有最终回答
+   * 那条,就是它在流。
+   */
+  const assistantInProgress = assistantContent != null && isTurnInProgress
+  // `H` —— 回答那条已经有内容(或轮次收尾了)
+  const assistantHasContent =
+    assistantContent != null && (assistantContent.trim().length > 0 || !isTurnInProgress)
+  // `Yt = je || g(B)`,`g` = `Dat`:phase 必须是显式的 final_answer 且这条真有内容
+  const hasFinalAssistantStarted = assistantPhase === 'final_answer' && assistantHasContent
+
+  const { renderableAgentItems, isExploring, isAnyNonExploringAgentItemInProgress } =
+    splitAgentActivityRuns({
+      items: process,
+      isTurnInProgress,
+      isAnyNonAgentItemInProgress: assistantInProgress
+    })
+
+  const lastRun = renderableAgentItems[renderableAgentItems.length - 1]
+  const status = turnStatus({
+    isTurnInProgress,
+    assistantInProgress,
+    hasFinalAssistantStarted,
+    isExploring,
+    hasActiveWebSearch:
+      isTurnInProgress &&
+      lastRun?.kind === 'item' &&
+      lastRun.item.kind === 'toolInvocation' &&
+      lastRun.item.invocation.data.kind === 'search',
+    hasActiveDynamicToolCall: hasActiveDynamicToolCallSummary(
+      renderableAgentItems,
+      isTurnInProgress
+    ),
+    isAnyNonExploringAgentItemInProgress,
+    hasBlockingRequest
+  })
+
+  const isActivitySliceClosed = assistantHasContent
+
   const lastUnit = units[units.length - 1]
-  const exploring = isTurnInProgress && lastUnit != null && isExplorationRun(lastUnit)
-  const lastNonExploringRunning =
-    lastUnit?.kind === 'standalone' &&
-    lastUnit.item.kind === 'toolInvocation' &&
-    !isExplorationInvocation(lastUnit.item) &&
-    isInvocationInProgress(lastUnit.item)
-
-  const wantsRow =
+  // `On`
+  const showThinkingWhileCommentaryStreams =
     isTurnInProgress &&
+    isActivitySliceClosed &&
+    !hasFinalAssistantStarted &&
     !hasBlockingRequest &&
-    !exploring &&
-    !lastNonExploringRunning &&
-    (!assistantStarted || !hasFinalAnswerPhase)
+    status.type === 'none'
+  // `kn`
+  const absorbedByLastUnit =
+    status.type === 'thinking' && !isActivitySliceClosed && lastUnit?.kind === 'group'
+  // `An`
+  const showThinkingPlaceholder =
+    (status.type === 'thinking' || showThinkingWhileCommentaryStreams) && !absorbedByLastUnit
+  // `W`
+  const isThinkingVisible =
+    (status.type === 'thinking' && status.isVisible) || showThinkingWhileCommentaryStreams
 
-  // kn:最末单元是组 → 状态行收进组表头(thinking 态),底部不重复
-  const absorbedByGroup = wantsRow && !assistantStarted && lastUnit?.kind === 'group'
-  return { visible: wantsRow && !absorbedByGroup, isExploring: exploring }
-}
-
-/** 尾部单元是否「探索中」—— 组内全是探索命令且有在跑的(Codex `jr` 的 isExploring) */
-function isExplorationRun(unit: RenderUnit): boolean {
-  if (unit.kind !== 'group') return false
-  if (!unit.items.every(isExplorationInvocation)) return false
-  return unit.items.some(isInvocationInProgress)
-}
-
-function isExplorationInvocation(content: ChatToolInvocationContent): boolean {
-  const { data } = content.invocation
-  return (
-    data.kind === 'terminal' &&
-    (data.commandKind === 'read' ||
-      data.commandKind === 'search' ||
-      data.commandKind === 'listFiles')
-  )
-}
-
-function isInvocationInProgress(content: ChatToolInvocationContent): boolean {
-  const { state } = content.invocation
-  return (
-    state.type === 'executing' ||
-    state.type === 'streaming' ||
-    state.type === 'waitingForConfirmation'
-  )
+  return {
+    status,
+    isExploring,
+    isActivitySliceClosed,
+    showThinkingPlaceholder,
+    isThinkingVisible,
+    absorbedByLastUnit
+  }
 }

@@ -13,7 +13,18 @@ export default defineConfig(
       '**/dist',
       '**/out',
       'src/shared/protocol/generated',
-      'resources/agent'
+      'resources/agent',
+      /*
+       * 逆向取证的产物不是本项目代码。
+       *
+       * `reverse/` 里是 Codex 打包后的 JS（329MB，单文件动辄几 MB），
+       * 不排掉的话 `npm run lint` 会在解析这些文件时把 V8 堆打爆 ——
+       * 表现是打印一段 V8 backtrace 然后 **exit 0**，看起来像"检查通过"，
+       * 实际上一条规则都没跑完。踩过一次，别再让它伪装成绿灯。
+       */
+      'reverse',
+      'prototype',
+      '.playwright-mcp'
     ]
   },
   tseslint.configs.recommended,

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { fileService } from '../../../services'
-import { useWorkspace } from '../../../state/WorkspaceContext'
+import { openFilesWatcher } from '../../../services/file/openFilesWatcher'
 import { highlightCode } from './highlight'
 import { FileNavbar } from './FileNavbar'
 import { CodePane } from './CodePane'
 import { WorkspaceTreePane } from './WorkspaceTreePane'
 import { FilesFolderIcon } from '../../icons'
-import { baseName } from '../../../utils/workspacePath'
+import { relativeToRoot } from '../../../utils/workspacePath'
 import { useWordWrap } from '../../../state/fileViewerPrefs'
 import type { FilesTabRenderProps } from '../filesTabDescriptor'
 
@@ -27,23 +27,34 @@ import type { FilesTabRenderProps } from '../filesTabDescriptor'
  */
 export function FileTab({
   path,
-  projectId: projectIdProp,
+  cwd,
+  workspaceRoot,
+  initialLine,
   onSelectFile
 }: FilesTabRenderProps): React.JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
   const [lineCount, setLineCount] = useState(0)
   const [loading, setLoading] = useState(false)
+  /** 外部改动触发的重读(Codex `refetch-review-file-source` → 重取 read-file) */
+  const [reloadToken, setReloadToken] = useState(0)
   const wordWrap = useWordWrap()
 
-  const projectId = projectIdProp ?? 'ideact'
-  const { projects } = useWorkspace()
-  const project = projects.find((p) => p.id === projectId)
-  const projectName = project?.name ?? projectId
-  const rootAbsolutePath = project?.rootPaths[0] ?? null
-  const rootBaseName = rootAbsolutePath != null ? baseName(rootAbsolutePath) : projectName
+  // 树控件在 root 相对空间里工作(Codex 同:`data-item-path` 是相对路径)
+  const activeRelativePath = path == null ? null : relativeToRoot(path, workspaceRoot)
+
+  /*
+   * 磁盘上被改了就重读 —— Codex 的 review file source 是 auto 刷新
+   * (`u$i` 的 refreshMode);watch 由 openFilesWatcher 按打开的 tab 起。
+   */
+  useEffect(() => {
+    if (path == null) return
+    return openFilesWatcher.subscribe((event) => {
+      if (event.path === path) setReloadToken((n) => n + 1)
+    })
+  }, [path])
 
   useEffect(() => {
-    if (!path) {
+    if (path == null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 切换文件时同步清空预览
       setHtml(null)
       return
@@ -51,7 +62,7 @@ export function FileTab({
     let cancelled = false
     setLoading(true)
     fileService
-      .readFile(projectId, path)
+      .readFile(path)
       .then(async (code) => {
         const highlighted = await highlightCode(code, path)
         return { highlighted, lines: code.split('\n').length }
@@ -70,21 +81,14 @@ export function FileTab({
     return () => {
       cancelled = true
     }
-  }, [projectId, path])
+  }, [path, reloadToken])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-token-main-surface-primary">
-      <FileNavbar
-        projectId={projectId}
-        projectName={projectName}
-        rootBaseName={rootBaseName}
-        rootAbsolutePath={rootAbsolutePath}
-        selectedPath={path === '' ? null : path}
-        onSelectFile={onSelectFile}
-      />
+      <FileNavbar cwd={cwd} path={path} workspaceRoot={workspaceRoot} onSelectFile={onSelectFile} />
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
-          {path === '' ? (
+          {path == null ? (
             /* Codex 空态(Zyo 空态家族,与 Browser tab 同结构;这里标题套 h2) */
             <div className="flex w-full flex-col items-center justify-center px-4 py-8 text-center h-full min-h-0 p-6">
               <div className="flex w-full max-w-72 flex-col items-center gap-3">
@@ -104,13 +108,18 @@ export function FileTab({
           ) : (
             /* word wrap 是 Codex 的全局查看器偏好(vB),作用于代码容器 */
             <div className={wordWrap ? '[&_.code-shiki]:whitespace-pre-wrap h-full' : 'h-full'}>
-              <CodePane html={html} loading={loading} lineCount={lineCount} />
+              <CodePane
+                html={html}
+                loading={loading}
+                lineCount={lineCount}
+                revealLine={initialLine}
+              />
             </div>
           )}
         </div>
         <WorkspaceTreePane
-          projectId={projectId}
-          activeFilePath={path === '' ? null : path}
+          workspaceRoot={workspaceRoot}
+          activeFilePath={activeRelativePath}
           onSelectFile={onSelectFile}
         />
       </div>

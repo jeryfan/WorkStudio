@@ -1,5 +1,9 @@
 import { cloneElement, isValidElement, useCallback, type ReactElement, type ReactNode } from 'react'
 import * as RadixContextMenu from '@radix-ui/react-context-menu'
+import type {
+  NativeContextMenuItem,
+  NativeContextMenuResult
+} from '@shared/host/contextMenu'
 
 /**
  * 右键上下文菜单 —— Codex `gv`(app-initial:81830)的 WS 移植。
@@ -51,29 +55,33 @@ function findHandler(items: AppContextMenuItem[], id: string): (() => void) | nu
   return null
 }
 
-/** 宿主(主进程)契约 —— 与 preload CodexBridge.showContextMenu 的参数一致 */
-interface NativeContextMenuItem {
-  id: string
-  label: string
-  enabled?: boolean
-  type?: 'normal' | 'separator'
-  iconFile?: string
-  submenu?: NativeContextMenuItem[]
-}
-
-/** 序列化成宿主契约(只留数据,不带函数) */
+/**
+ * 序列化成宿主契约(只留数据,不带函数)。
+ *
+ * 图标字段是 `icon`（相对宿主图标搜索根的路径），不是自造的 iconFile ——
+ * 与 Codex 的 showContextMenu 规格一致。
+ */
 function serializeItems(items: AppContextMenuItem[]): NativeContextMenuItem[] {
   return items.map((item) =>
     item.type === 'separator'
-      ? { id: item.id, label: '', type: 'separator' as const }
+      ? ({ type: 'separator' } as const)
       : {
           id: item.id,
           label: item.label ?? '',
           enabled: item.enabled !== false,
-          iconFile: item.iconFile,
-          submenu: item.submenu ? serializeItems(item.submenu) : undefined
+          ...(item.iconFile != null ? { icon: item.iconFile } : {}),
+          ...(item.submenu != null ? { submenu: serializeItems(item.submenu) } : {})
         }
   )
+}
+
+/** 弹原生菜单；宿主不可用时当作取消 */
+async function showNativeContextMenu(
+  items: AppContextMenuItem[]
+): Promise<NativeContextMenuResult> {
+  const bridge = window.electronBridge
+  if (bridge?.showContextMenu == null) return { id: null }
+  return bridge.showContextMenu(serializeItems(items))
 }
 
 export function AppContextMenu({
@@ -84,7 +92,7 @@ export function AppContextMenu({
   children
 }: AppContextMenuProps): React.JSX.Element {
   // 原生路径(Codex 的 d 分支):electronBridge.showContextMenu 可用
-  const native = window.codexBridge?.showContextMenu != null
+  const native = window.electronBridge?.showContextMenu != null
 
   const resolveItems = useCallback(async (): Promise<AppContextMenuItem[]> => {
     if (getItems) {
@@ -102,15 +110,15 @@ export function AppContextMenu({
         if (awaitBeforeOpen) {
           await onBeforeOpen?.()
           const resolved = await resolveItems()
-          const selectedId = await window.codexBridge.showContextMenu(serializeItems(resolved))
-          if (selectedId != null) findHandler(resolved, selectedId)?.()
+          const { id } = await showNativeContextMenu(resolved)
+          if (id != null) findHandler(resolved, id)?.()
         } else {
           // Codex gv 的 awaitBeforeOpen=false:onBeforeOpen 异步跑着,菜单先弹
           const prefetch = onBeforeOpen?.()
           const resolved = await resolveItems()
           await prefetch
-          const selectedId = await window.codexBridge.showContextMenu(serializeItems(resolved))
-          if (selectedId != null) findHandler(resolved, selectedId)?.()
+          const { id } = await showNativeContextMenu(resolved)
+          if (id != null) findHandler(resolved, id)?.()
         }
       })()
     },

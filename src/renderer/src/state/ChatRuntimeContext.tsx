@@ -130,9 +130,10 @@ function isOverloaded(info: unknown): boolean {
 }
 
 /*
- * fork 回来的会话(side chat):历史随 fork 响应带回来,ephemeral 会话不落盘,
- * resume 会报 "no rollout found"。调用方在 fork 成功后先登记到这里,
- * 运行时绑定时直接 seed,不走 resume。
+ * fork 回来的会话(side chat):ephemeral 会话不落盘,resume 会报 "no rollout found"。
+ * 调用方在 fork 成功后先登记到这里,运行时绑定时直接 seed,不走 resume。
+ * 注意 side chat 的 fork 带 `excludeTurns: true`(Codex 同),响应里 turns 恒为空 ——
+ * 继承的父线程历史只在模型侧可见,UI 从空白开始。
  * (模块级:登记发生在 fork 完成的事件里,不在渲染期 —— lint 友好。)
  */
 const pendingThreadSeeds = new Map<string, Chat>()

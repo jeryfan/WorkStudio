@@ -4,7 +4,6 @@ import { useAppShell, FILE_TREE_MIN_WIDTH } from '../../../state/AppShellContext
 import { ResizeHandle } from '../../layout/ResizeHandle'
 import { usePanelResize } from '../../../utils/usePanelResize'
 import { fileService } from '../../../services'
-import { useWorkspace } from '../../../state/WorkspaceContext'
 import { SearchIcon, CloseIcon } from '../../icons'
 import { FileTreeView } from './FileTreeView'
 import {
@@ -17,6 +16,7 @@ import {
   ancestorPaths
 } from './treeState'
 import { useDirectoryEntries } from './directoryEntries'
+import { joinPath, relativeToRoot } from '../../../utils/workspacePath'
 
 /**
  * 工作区文件树面板 —— Codex `hyo`/`gyo`/`qfo` 的合并移植
@@ -26,7 +26,7 @@ import { useDirectoryEntries } from './directoryEntries'
  *   motion.div.relative.flex.h-full.shrink-0.border-l[style maxWidth:60%](hyo)
  *   ├ ResizeHandle(edge=left)
  *   └ div.flex.min-h-0.min-w-0.flex-1.flex-col(gyo)
- *     ├ (多 root 时的 root 选择器 —— WS 项目单 root,不渲染)
+ *     ├ (多 root 时的 root 选择器 —— WS 当前只用 workspaceRoots[0],不渲染)
  *     └ qfo:keyed by root
  *       ├ div.shrink-0.px-2.pt-2.pb-px > FileTreeSearchInput(Bfo)
  *       └ div.min-h-0.flex-1
@@ -41,12 +41,12 @@ import { useDirectoryEntries } from './directoryEntries'
 const STATE_SETTLE_MS = 100
 
 export function WorkspaceTreePane({
-  projectId,
+  workspaceRoot,
   activeFilePath,
   onSelectFile
 }: {
-  projectId: string
-  /** 当前打开的文件(相对项目根);树会选中并 reveal 它 */
+  workspaceRoot: string
+  /** 当前打开的文件(**root 相对**);树会选中并 reveal 它 */
   activeFilePath: string | null
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }): React.JSX.Element | null {
@@ -112,8 +112,8 @@ export function WorkspaceTreePane({
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspaceTreeRoot
-          key={projectId}
-          projectId={projectId}
+          key={workspaceRoot}
+          workspaceRoot={workspaceRoot}
           activeFilePath={activeFilePath}
           onSelectFile={onSelectFile}
         />
@@ -125,18 +125,19 @@ export function WorkspaceTreePane({
 /* ==================== qfo:单 root 的树(搜索 + 状态机) ==================== */
 
 function WorkspaceTreeRoot({
-  projectId,
+  workspaceRoot,
   activeFilePath,
   onSelectFile
 }: {
-  projectId: string
+  workspaceRoot: string
   activeFilePath: string | null
   onSelectFile(path: string, opts?: { isPreview?: boolean }): void
 }): React.JSX.Element {
-  const state = useWorkspaceTreeState(projectId)
-  const { paths, isLoading, isEmpty, error } = useDirectoryEntries(projectId, state.expandedPaths)
-  const { projects } = useWorkspace()
-  const rootAbsolutePath = projects.find((p) => p.id === projectId)?.rootPaths[0] ?? null
+  const state = useWorkspaceTreeState(workspaceRoot)
+  const { paths, isLoading, isEmpty, error } = useDirectoryEntries(
+    workspaceRoot,
+    state.expandedPaths
+  )
 
   /*
    * Codex qfo 的 `ge` effect:activeFilePath 变化时,树选中它并把祖先展开
@@ -150,10 +151,10 @@ function WorkspaceTreeRoot({
     activeFilePath != null && paths.includes(activeFilePath) ? activeFilePath : null
   useEffect(() => {
     if (activeFilePath == null) return
-    const current = getWorkspaceTreeState(projectId)
+    const current = getWorkspaceTreeState(workspaceRoot)
     if (selectTreePath(current, activeFilePath) === current) return // 已达标,不再写
-    setWorkspaceTreeState(projectId, (prev) => selectTreePath(prev, activeFilePath))
-  }, [projectId, activeFilePath])
+    setWorkspaceTreeState(workspaceRoot, (prev) => selectTreePath(prev, activeFilePath))
+  }, [workspaceRoot, activeFilePath])
 
   // Codex `fe`/`pe`:onStateChange 防抖 100ms 后 WQi 收敛写回
   const pendingRef = useRef<{ expandedPaths: string[]; scrollTop: number } | null>(null)
@@ -170,7 +171,7 @@ function WorkspaceTreeRoot({
       const pending = pendingRef.current
       if (pending != null) {
         pendingRef.current = null
-        setWorkspaceTreeState(projectId, (prev) => settleTreeState(prev, pending))
+        setWorkspaceTreeState(workspaceRoot, (prev) => settleTreeState(prev, pending))
       }
     }, STATE_SETTLE_MS)
   }
@@ -181,9 +182,13 @@ function WorkspaceTreeRoot({
     []
   )
 
-  // Codex:`K` —— onSelectFile(单 root,路径即项目相对路径)
-  const openFile = (path: string, opts?: { isPreview?: boolean }): void => {
-    onSelectFile(path, opts)
+  // Codex:`K` —— onSelectFile(树内是 root 相对路径,往上抛绝对路径)
+  /*
+   * 树内的路径是 **root 相对**(树控件的空间);往上抛的是 **绝对路径** ——
+   * Codex 的 onSelectFile 收的就是绝对路径(`l0a` 里 `Qp(root, rel)` 那一步)。
+   */
+  const openFile = (relPath: string, opts?: { isPreview?: boolean }): void => {
+    onSelectFile(joinPath(workspaceRoot, relPath), opts)
   }
 
   const query = state.searchQuery
@@ -197,23 +202,21 @@ function WorkspaceTreeRoot({
           inputId="workspace-directory-tree-search"
           searchQuery={query}
           onQueryChange={(q) =>
-            setWorkspaceTreeState(projectId, (prev) => setTreeSearchQuery(prev, q))
+            setWorkspaceTreeState(workspaceRoot, (prev) => setTreeSearchQuery(prev, q))
           }
         />
       </div>
       <div className="min-h-0 flex-1">
         {searching ? (
           <FileTreeSearchResults
-            projectId={projectId}
-            rootAbsolutePath={rootAbsolutePath}
+            workspaceRoot={workspaceRoot}
             query={query}
             onSelectFile={(p) => openFile(p, { isPreview: true })}
             onOpenFile={(p) => openFile(p, { isPreview: false })}
           />
         ) : (
           <DirectoryTree
-            projectId={projectId}
-            rootAbsolutePath={rootAbsolutePath}
+            workspaceRoot={workspaceRoot}
             paths={paths}
             isLoading={isLoading}
             isEmpty={isEmpty}
@@ -228,7 +231,7 @@ function WorkspaceTreeRoot({
               // 展开/收起即时进 ref + 防抖写回(与滚动同一条 onStateChange 通道)
               pendingRef.current = {
                 expandedPaths,
-                scrollTop: getWorkspaceTreeState(projectId).scrollTop
+                scrollTop: getWorkspaceTreeState(workspaceRoot).scrollTop
               }
             }}
             onStateChange={onTreeStateChange}
@@ -293,8 +296,7 @@ function TreeStatusMessage({ children }: { children: React.ReactNode }): React.J
 }
 
 function DirectoryTree({
-  projectId,
-  rootAbsolutePath,
+  workspaceRoot,
   paths,
   isLoading,
   isEmpty,
@@ -308,8 +310,7 @@ function DirectoryTree({
   onExpandedPathsChange,
   onStateChange
 }: {
-  projectId: string
-  rootAbsolutePath: string | null
+  workspaceRoot: string
   paths: string[]
   isLoading: boolean
   isEmpty: boolean
@@ -335,8 +336,7 @@ function DirectoryTree({
   return (
     <div className="h-full min-h-0 w-full px-2">
       <FileTreeView
-        projectId={projectId}
-        rootAbsolutePath={rootAbsolutePath}
+        workspaceRoot={workspaceRoot}
         paths={paths}
         selectedPath={selectedPath}
         initialExpandedPaths={initialExpandedPaths}
@@ -360,14 +360,12 @@ type FileTreeViewProps = React.ComponentProps<typeof FileTreeView>
 /* ==================== Yfo:搜索结果(扁平树) ==================== */
 
 function FileTreeSearchResults({
-  projectId,
-  rootAbsolutePath,
+  workspaceRoot,
   query,
   onSelectFile,
   onOpenFile
 }: {
-  projectId: string
-  rootAbsolutePath: string | null
+  workspaceRoot: string
   query: string
   onSelectFile(path: string): void
   onOpenFile(path: string): void
@@ -388,9 +386,14 @@ function FileTreeSearchResults({
 
     setIsLoading(true)
     fileService
-      .searchFiles(projectId, trimmed)
-      .then((result) => {
+      // fuzzyFileSearch 吃 roots、回绝对路径;树要 root 相对(Codex 的查询层同样在这里折算)
+      .searchFiles([workspaceRoot], trimmed)
+      .then((absolutePaths) => {
         if (cancelled) return
+        const result = absolutePaths.flatMap((absolutePath) => {
+          const relPath = relativeToRoot(absolutePath, workspaceRoot)
+          return relPath == null ? [] : [relPath]
+        })
         setLastGood({ query: trimmed, files: result })
         setFiles(result)
       })
@@ -403,7 +406,7 @@ function FileTreeSearchResults({
     return () => {
       cancelled = true
     }
-  }, [projectId, trimmed])
+  }, [workspaceRoot, trimmed])
 
   const effective = files ?? (lastGood?.query === trimmed ? lastGood.files : null)
 
@@ -421,8 +424,7 @@ function FileTreeSearchResults({
   return (
     <div className="h-full min-h-0 w-full px-2">
       <FileTreeView
-        projectId={projectId}
-        rootAbsolutePath={rootAbsolutePath}
+        workspaceRoot={workspaceRoot}
         paths={displayPaths}
         flattenEmptyDirectories
         initialExpandedPaths={expandedPaths}

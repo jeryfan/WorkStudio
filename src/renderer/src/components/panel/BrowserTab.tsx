@@ -9,9 +9,14 @@ import {
   AnnotateIcon
 } from '../icons'
 import { APP_SHELL_BUTTON_CLASS } from './appShellButtonClass'
-import { TAB_PREVIEW_PIN_EXEMPT } from './AppShellTabPanel'
 import { BrowserOptionsMenu } from './BrowserOptionsMenu'
 import { BrowserFindBar } from './BrowserFindBar'
+import { hostServices } from '../../host/appHost'
+import { postMessageFromView } from '../../host/hostMessages'
+import { ensureBrowserSurface, setBrowserSurfaceRect } from '../../host/browserSurfaces'
+import { browserConversationId } from '../../host/browserScope'
+import { useBrowserTabState } from '../../host/useBrowserSidebarState'
+import type { BrowserPageCommand } from '@shared/host/messages'
 
 /** 地址栏输入归一化：无协议补 https://，仅允许 http/https */
 function normalizeUrl(input: string): string | null {
@@ -52,21 +57,112 @@ export function BrowserTab({
   setTabState
 }: BrowserTabRenderProps): React.JSX.Element {
   const { rightPanelController } = useAppShell()
-  const url = tabState.url !== '' ? tabState.url : normalizeUrl(initialUrl) || ''
-  const [address, setAddress] = useState(url)
-  const [canBack, setCanBack] = useState(false)
-  const [canForward, setCanForward] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [findOpen, setFindOpen] = useState(false)
-  const viewRef = useRef<HTMLElement | null>(null)
-  const addressRef = useRef<HTMLInputElement | null>(null)
-  const zoomPercent = tabState.zoomPercent
+  const conversationId = browserConversationId()
 
-  // 缩放应用到 webview(Codex:host 对受控浏览器 setZoom;WS:webview.setZoomFactor)
+  /*
+   * 状态的唯一来源是宿主（Codex 同构）。
+   *
+   * url/title/loading/canGoBack/canGoForward/zoomPercent 全部来自
+   * `browser-sidebar-state`：真值在 guest 进程，而 browser_use 从 agent 侧
+   * 驱动页面时渲染层不在链路上，自己维护一份必然对不上。
+   *
+   * `tabState.url` 只剩一个用途：决定这个 tab 是"空态"还是"要挂 webview"，
+   * 并在面板重新挂载时把上次的地址交还宿主。
+   */
+  const hostState = useBrowserTabState(conversationId, tabId)
+  const mountedUrl = tabState.url !== '' ? tabState.url : normalizeUrl(initialUrl) || ''
+  const url = hostState?.url != null && hostState.url !== '' ? hostState.url : mountedUrl
+  const canBack = hostState?.canGoBack === true
+  const canForward = hostState?.canGoForward === true
+  const loading = hostState?.isLoading === true
+  const zoomPercent = hostState?.zoomPercent ?? tabState.zoomPercent
+  const browserUseActive = hostState?.browserUseActive === true
+
+  /*
+   * 地址栏是"受控但可被用户接管"的：没在编辑时显示宿主的真实 URL，
+   * 一旦用户开始输入就显示草稿，直到导航或放弃。
+   *
+   * 用 `null` 表示"没在编辑"而不是用 effect 把 url 同步进 state ——
+   * 后者是 setState-in-effect，会多一次渲染，而且宿主 URL 与草稿谁覆盖谁
+   * 取决于两个 effect 的先后，很容易写出"刚打的字被冲掉"。
+   */
+  const [addressDraft, setAddressDraft] = useState<string | null>(null)
+  const address = addressDraft ?? url
+  const [findOpen, setFindOpen] = useState(false)
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const addressRef = useRef<HTMLInputElement | null>(null)
+
+  /** 页面命令统一走宿主（Codex `browser-sidebar-command`） */
+  const runPageCommand = (command: BrowserPageCommand): void => {
+    postMessageFromView({
+      type: 'browser-sidebar-command',
+      conversationId,
+      browserTabId: tabId,
+      command
+    })
+  }
+
+  // tab 标题跟随宿主上报的网页标题（Codex 实测行为）
   useEffect(() => {
-    const view = viewRef.current as unknown as { setZoomFactor?(f: number): void } | null
-    view?.setZoomFactor?.(zoomPercent / 100)
-  }, [zoomPercent, url])
+    const title = hostState?.title
+    if (title != null && title !== '') rightPanelController.updateTab(tabId, { title })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- controller 身份稳定
+  }, [hostState?.title, tabId])
+
+  // 宿主状态回写 tabState.url，面板重新挂载后能把地址交还宿主
+  useEffect(() => {
+    if (hostState?.url != null && hostState.url !== '' && hostState.url !== tabState.url) {
+      setTabState({ ...tabState, url: hostState.url })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟宿主 url 变化
+  }, [hostState?.url])
+
+  /*
+   * 登记这个 tab 的页面（幂等）。
+   *
+   * 页面由 BrowserSurfaceLayer 持有，生命周期比本组件长：切 tab、关面板、
+   * 切会话都不该销毁它 —— browser_use 可能正在驱动它。只有 tab 真的被关掉
+   * 才 removeBrowserSurface（见 onClose）。
+   */
+  useEffect(() => {
+    ensureBrowserSurface(conversationId, tabId)
+  }, [conversationId, tabId])
+
+  /*
+   * 把锚点矩形持续报给持久层。
+   *
+   * 面板尺寸会随拖分栏、窗口 resize、tab 条变化而改变，只在挂载时量一次
+   * 会让 webview 停在旧位置上。
+   */
+  useEffect(() => {
+    const anchor = anchorRef.current
+    if (anchor == null) {
+      setBrowserSurfaceRect(conversationId, tabId, null)
+      return
+    }
+    const report = (): void => {
+      const rect = anchor.getBoundingClientRect()
+      setBrowserSurfaceRect(conversationId, tabId, {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      })
+    }
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(anchor)
+    window.addEventListener('resize', report)
+    // 布局动画也会挪锚点；低频轮询比监听所有可能的来源便宜
+    const interval = window.setInterval(report, 250)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', report)
+      window.clearInterval(interval)
+      // 面板卸载：webview 交回停靠位，但**不销毁**页面
+      setBrowserSurfaceRect(conversationId, tabId, null)
+    }
+  }, [conversationId, tabId, url])
 
   // 新 tab 自动聚焦地址栏(data-browser-sidebar-primary-focus-target="address",实测)
   useEffect(() => {
@@ -74,70 +170,14 @@ export function BrowserTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载时
   }, [])
 
-  // 挂载 webview 事件(元素 ref 方式获取 Electron WebviewTag 实例方法)
-  useEffect(() => {
-    const view = viewRef.current as unknown as {
-      addEventListener(type: string, fn: (e: { url?: string; title?: string }) => void): void
-      removeEventListener(type: string, fn: (e: { url?: string; title?: string }) => void): void
-      canGoBack(): boolean
-      canGoForward(): boolean
-      getURL(): string
-    } | null
-    if (!view) return
-
-    const syncNav = (): void => {
-      setCanBack(view.canGoBack())
-      setCanForward(view.canGoForward())
-      const current = view.getURL()
-      if (current) {
-        setAddress(current)
-        setTabState({ ...tabState, url: current })
-      }
-    }
-    const onNavigate = (): void => syncNav()
-    const onTitle = (e: { title?: string }): void => {
-      // tab 标题跟随网页标题(Codex 实测行为)
-      if (e.title) rightPanelController.updateTab(tabId, { title: e.title })
-    }
-    const onNewWindow = (e: { url?: string }): void => {
-      // 弹出窗口一律交给系统浏览器
-      if (e.url) void window.api.openExternal(e.url)
-    }
-    const onStart = (): void => setLoading(true)
-    const onStop = (): void => {
-      setLoading(false)
-      syncNav()
-    }
-
-    view.addEventListener('did-navigate', onNavigate)
-    view.addEventListener('did-navigate-in-page', onNavigate)
-    view.addEventListener('page-title-updated', onTitle)
-    view.addEventListener('new-window', onNewWindow)
-    view.addEventListener('did-start-loading', onStart)
-    view.addEventListener('did-stop-loading', onStop)
-    return () => {
-      view.removeEventListener('did-navigate', onNavigate)
-      view.removeEventListener('did-navigate-in-page', onNavigate)
-      view.removeEventListener('page-title-updated', onTitle)
-      view.removeEventListener('new-window', onNewWindow)
-      view.removeEventListener('did-start-loading', onStart)
-      view.removeEventListener('did-stop-loading', onStop)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId])
-
   const go = (input: string): void => {
     const next = normalizeUrl(input)
     if (!next) return
-    setAddress(next)
+    // 交回宿主：之后地址栏跟随真实 URL（可能被规范化成带斜杠的形式）
+    setAddressDraft(null)
+    // webview 尚未挂载时这条命令会被宿主记进状态，挂载后由宿主发起首次导航
     setTabState({ ...tabState, url: next })
-    const view = viewRef.current as unknown as { loadURL(url: string): Promise<void> } | null
-    view?.loadURL(next)?.catch(() => {})
-  }
-
-  const callView = (method: 'goBack' | 'goForward' | 'reload'): void => {
-    const view = viewRef.current as unknown as Record<string, () => void> | null
-    view?.[method]?.()
+    runPageCommand({ type: 'navigate', url: next })
   }
 
   return (
@@ -158,8 +198,8 @@ export function BrowserTab({
               <button
                 type="button"
                 aria-label="Back"
-                disabled={!canBack}
-                onClick={() => callView('goBack')}
+                disabled={!canBack || browserUseActive}
+                onClick={() => runPageCommand({ type: 'go-back' })}
                 className={APP_SHELL_BUTTON_CLASS}
               >
                 <ArrowIcon className="icon-xs" />
@@ -167,8 +207,8 @@ export function BrowserTab({
               <button
                 type="button"
                 aria-label="Next"
-                disabled={!canForward}
-                onClick={() => callView('goForward')}
+                disabled={!canForward || browserUseActive}
+                onClick={() => runPageCommand({ type: 'go-forward' })}
                 className={APP_SHELL_BUTTON_CLASS}
               >
                 <ArrowIcon className="icon-xs -scale-x-100 transform" />
@@ -176,7 +216,8 @@ export function BrowserTab({
               {/* 实测:Codex 这个 Reload 按钮无 aria-label(loading 态应切 Stop,未实现) */}
               <button
                 type="button"
-                onClick={() => callView('reload')}
+                disabled={browserUseActive}
+                onClick={() => runPageCommand({ type: 'reload' })}
                 className={APP_SHELL_BUTTON_CLASS}
               >
                 <BrowserReloadIcon className="icon-xs" />
@@ -198,7 +239,14 @@ export function BrowserTab({
                       data-browser-sidebar-address-input="true"
                       placeholder="Enter a URL"
                       value={address}
-                      onChange={(e) => setAddress(e.target.value)}
+                      /*
+                       * browser_use 接管期间让出输入：agent 正在导航时用户改地址栏
+                       * 只会和 agent 抢同一个页面。Codex 的接管态同样锁掉工具栏。
+                       */
+                      readOnly={browserUseActive}
+                      onChange={(e) => {
+                        setAddressDraft(e.target.value)
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault()
@@ -214,7 +262,7 @@ export function BrowserTab({
                     data-browser-sidebar-open-external="true"
                     aria-label="Open in external browser"
                     disabled={url === ''}
-                    onClick={() => void window.api.openExternal(address)}
+                    onClick={() => void hostServices?.chromiumBrowser.openUrl(address)}
                     className="flex h-[28px] w-7 shrink-0 items-center justify-center rounded-l-none rounded-r-[10px] text-token-description-foreground outline-none transition-[background-color] duration-basic hover:bg-token-list-hover-background disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <OpenExternalIcon className="icon-xs" />
@@ -255,18 +303,19 @@ export function BrowserTab({
                   onZoomChange={(next) => setTabState({ ...tabState, zoomPercent: next })}
                   onOpenFindInPage={() => setFindOpen(true)}
                   onCaptureScreenshot={() => {
-                    const view = viewRef.current as unknown as {
-                      capturePage?: () => Promise<{ toDataURL(): string }>
-                    } | null
-                    void view?.capturePage?.().then((image) => {
-                      const host = new URL(url).hostname.replace(/\W+/g, '-') || 'page'
-                      void window.codexBridge.browser.saveDataUrl(
-                        image.toDataURL(),
-                        `screenshot-${host}.png`
-                      )
+                    /*
+                     * 截图由宿主经 CDP 完成（Page.captureScreenshot），不是
+                     * webview.capturePage()：后者拍的是合成后的可见区域，
+                     * 面板被遮住或滚出视口时会拿到空白图。
+                     */
+                    void hostServices?.browserSidebar.captureScreenshotToFile({
+                      conversationId: browserConversationId(),
+                      browserTabId: tabId
                     })
                   }}
-                  onClearData={(kind) => void window.codexBridge.browser.clearData(kind)}
+                  onClearData={(kind) =>
+                    void hostServices?.browserSidebar.clearBrowsingData([kind])
+                  }
                 />
               </div>
             </div>
@@ -286,7 +335,12 @@ export function BrowserTab({
           {/* Find in page:find bar 覆盖在内容区顶部(Codex 的查找条由宿主叠加层渲染,
               DOM 不可取证;此处为同设计语义的推断实现) */}
           {findOpen && url !== '' && (
-            <BrowserFindBar viewRef={viewRef} onClose={() => setFindOpen(false)} />
+            <BrowserFindBar
+              conversationId={conversationId}
+              browserTabId={tabId}
+              runPageCommand={runPageCommand}
+              onClose={() => setFindOpen(false)}
+            />
           )}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
             {url === '' ? (
@@ -306,18 +360,12 @@ export function BrowserTab({
                 </div>
               </div>
             ) : (
-              // webview 专有属性经 spread 传入,绕过 react/no-unknown-property;
-              // pin 豁免:webview 里的点击不算面板交互(Codex 的页面本来就在独立进程)
-              <webview
-                ref={viewRef as React.RefObject<HTMLElement>}
-                src={url}
-                className="h-full w-full"
-                {...{
-                  [TAB_PREVIEW_PIN_EXEMPT]: 'true',
-                  partition: 'persist:browser',
-                  webpreferences: 'contextIsolation=yes, nodeIntegration=no'
-                }}
-              />
+              /*
+               * 这里只放一个**锚点**：真正的 `<webview>` 住在 BrowserSurfaceLayer
+               * 里（全程挂载），按这个矩形盖上来。原因是 webview 一旦从 DOM 摘下
+               * guest 就销毁，而页面必须活过面板。
+               */
+              <div ref={anchorRef} data-browser-surface-anchor="true" className="h-full w-full" />
             )}
           </div>
         </div>

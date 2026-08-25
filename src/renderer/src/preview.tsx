@@ -13,6 +13,8 @@ import { setTheme as publishTheme } from './chat/theme/themeStore'
 import { WorkspaceProvider } from './state/WorkspaceContext'
 import { AppShellProvider } from './state/AppShellContext'
 import type { ThreadRow } from './chat/model/rows'
+import type { ChatContent } from './chat/model/content'
+import type { ToolInvocation } from './chat/model/toolInvocation'
 
 /** 临时预览页：在浏览器里核对对话区的视觉，不进产物 */
 
@@ -69,7 +71,7 @@ const rows: ThreadRow[] = [
           state: { type: 'completed', success: true, durationMs: 2400 },
           data: {
             kind: 'terminal',
-            commandKind: 'unknown',
+            parsedCmd: { type: 'unknown' },
             command: 'npm run tokens:gen',
             commandForDisplay: 'npm run tokens:gen',
             cwd: '/Users/me/proj',
@@ -88,7 +90,7 @@ const rows: ThreadRow[] = [
           state: { type: 'completed', success: false, durationMs: 800 },
           data: {
             kind: 'terminal',
-            commandKind: 'unknown',
+            parsedCmd: { type: 'unknown' },
             command: 'npm test',
             commandForDisplay: 'npm test',
             cwd: null,
@@ -307,7 +309,7 @@ const rows: ThreadRow[] = [
           },
           data: {
             kind: 'terminal',
-            commandKind: 'unknown',
+            parsedCmd: { type: 'unknown' },
             command: 'rm -rf build',
             commandForDisplay: 'rm -rf build',
             cwd: '/Users/me/repo',
@@ -379,8 +381,127 @@ const rows: ThreadRow[] = [
     isCanceled: false,
     startedAtMs: Date.now() - 1000,
     completedAtMs: null
-  }
+  },
+
+  ...runningStateRows()
 ]
+
+/**
+ * 运行态样张 —— 每一档对应 Codex `ja` 的一个分支,外加两种行级运行形态。
+ * 真会话里这些状态各只出现几秒,靠实测抓不齐;夹具把它们同时摆出来。
+ */
+function runningStateRows(): ThreadRow[] {
+  const readCmd = (id: string, name: string, state: ToolInvocation['state']): ChatContent => ({
+    kind: 'toolInvocation',
+    invocation: {
+      id,
+      toolId: 'shell',
+      invocationMessage: `Read ${name}`,
+      pastTenseMessage: `Read ${name}`,
+      state,
+      data: {
+        kind: 'terminal',
+        parsedCmd: { type: 'read', name, path: `src/renderer/src/${name}` },
+        command: `cat src/renderer/src/${name}`,
+        commandForDisplay: `cat src/renderer/src/${name}`,
+        cwd: '/Users/me/repo',
+        output: null,
+        exitCode: null
+      }
+    }
+  })
+  const mcpCall = (id: string, tool: string): ChatContent => ({
+    kind: 'toolInvocation',
+    invocation: {
+      id,
+      toolId: `playwright/${tool}`,
+      invocationMessage: 'Browser navigate',
+      pastTenseMessage: 'Browser navigate',
+      state: { type: 'completed', success: true, durationMs: 900 },
+      data: {
+        kind: 'inputOutput',
+        source: { kind: 'mcp', server: 'playwright', connectorId: null, appName: 'Playwright' },
+        blocks: [{ type: 'text', text: 'Navigated to https://example.com', annotations: null }],
+        structuredJson: null,
+        error: null,
+        rawJson: '{}'
+      }
+    }
+  })
+  const shellCmd = (id: string, cmd: string, state: ToolInvocation['state']): ChatContent => ({
+    kind: 'toolInvocation',
+    invocation: {
+      id,
+      toolId: 'shell',
+      invocationMessage: `Running ${cmd}`,
+      pastTenseMessage: `Ran ${cmd}`,
+      state,
+      data: {
+        kind: 'terminal',
+        parsedCmd: { type: 'unknown' },
+        command: cmd,
+        commandForDisplay: cmd,
+        cwd: '/Users/me/repo',
+        output: 'npm warn using --force\n',
+        exitCode: null
+      }
+    }
+  })
+  const live = (
+    id: string,
+    label: string,
+    content: ChatContent[],
+    extra: Partial<Extract<ThreadRow, { kind: 'response' }>> = {}
+  ): ThreadRow[] => [
+    { kind: 'request', id, text: label, attachments: [], timestamp: Date.now() - 2000 },
+    {
+      kind: 'response',
+      id,
+      content,
+      thinkingFallback: null,
+      isComplete: false,
+      isCanceled: false,
+      startedAtMs: Date.now() - 2000,
+      completedAtMs: null,
+      ...extra
+    }
+  ]
+
+  return [
+    // exploring:尾部探索段里有在跑的 → 组表头播 "Reading …",底部无状态行
+    ...live('t-exploring', '运行态:exploring(探索中)', [
+      mcpCall('rs-mcp-1', 'browser_navigate'),
+      readCmd('rs-read-1', 'ChatView.tsx', { type: 'executing', progress: null })
+    ]),
+    // exploring 的第二形态:探索段已跑完、回答还没开始 → 表头仍停在最后那条
+    ...live('t-explored', '运行态:exploring(探索段已跑完,回答未开始)', [
+      readCmd('rs-read-2', 'ThreadTurn.tsx', { type: 'completed', success: true, durationMs: 120 })
+    ]),
+    // none:非探索命令在跑 → 那一行自己带流光 + 活耗时,底部无状态行
+    ...live('t-running-cmd', '运行态:none(命令在跑,行内流光 + 活耗时)', [
+      shellCmd('rs-cmd-1', 'npm run build', { type: 'executing', progress: null })
+    ]),
+    // On:旁白在流 + 命令在跑 → 底部状态行仍然出现(`pi(B)` 优先于 `on`)
+    ...live('t-commentary', '运行态:thinking(旁白流式 + 命令在跑)', [
+      shellCmd('rs-cmd-2', 'npm test', { type: 'executing', progress: null }),
+      { kind: 'markdownContent', content: '我先跑一遍测试再说结论。', phase: 'commentary' }
+    ]),
+    // kn:最末单元是组、回答还没内容 → 状态行收进组表头(显示推理标题)
+    ...live(
+      't-absorbed',
+      '运行态:thinking 被组表头吸收(kn)',
+      [mcpCall('rs-mcp-2', 'browser_navigate'), mcpCall('rs-mcp-3', 'browser_evaluate')],
+      { thinkingFallback: '核对求值规则' }
+    ),
+    // 中断:Codex 的 `Stopped {command}` 是 active 文案的一档,配停止图标
+    ...live(
+      't-stopped',
+      '运行态:被中断的命令',
+      [shellCmd('rs-cmd-3', 'npm run watch', { type: 'cancelled', reason: 'interrupted' })],
+      { isComplete: true, isCanceled: true, completedAtMs: Date.now() }
+    )
+  ]
+}
 
 function ThemeSwitcher(): React.JSX.Element {
   const { variant } = useTheme()

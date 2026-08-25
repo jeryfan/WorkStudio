@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fileService } from '../../../services'
+import { joinPath } from '../../../utils/workspacePath'
 
 /**
  * 目录条目聚合 —— Codex `a0a`(app-initial:385020)的移植:
@@ -34,24 +35,28 @@ function notify(): void {
   listeners.forEach((l) => l())
 }
 
-function cacheKey(projectId: string, dir: string): string {
-  return `${projectId}|${dir}`
+function cacheKey(workspaceRoot: string, dir: string): string {
+  return `${workspaceRoot}|${dir}`
 }
 
 /** 拉一个目录(带 stale 去重);数据落地后通知订阅方 */
-function fetchDir(projectId: string, dir: string): void {
-  const k = cacheKey(projectId, dir)
+function fetchDir(workspaceRoot: string, dir: string): void {
+  const k = cacheKey(workspaceRoot, dir)
   const existing = cache.get(k)
   if (existing && Date.now() - existing.fetchedAt < STALE_MS) return
   if (inflight.has(k)) return
   inflight.set(
     k,
     fileService
-      .listDir(projectId, dir)
+      // fs/* 只吃绝对路径;这一层负责 root 相对 ↔ 绝对的换算(Codex 同)
+      .listDir(joinPath(workspaceRoot, dir))
       .then((entries) => {
         cache.set(k, {
-          // Codex `r0a`:目录以 `/` 结尾
-          paths: entries.map((e) => (e.kind === 'dir' ? `${e.relPath}/` : e.relPath)),
+          // Codex `r0a`:目录以 `/` 结尾;路径是 **root 相对**(树控件的空间)
+          paths: entries.map((e) => {
+            const relPath = dir === '' ? e.name : `${dir}/${e.name}`
+            return e.kind === 'dir' ? `${relPath}/` : relPath
+          }),
           fetchedAt: Date.now(),
           error: null
         })
@@ -84,7 +89,7 @@ export interface DirectoryEntriesResult {
  * baseDir 是面包屑下拉的根(Codex 的 directoryPath 参数)。
  */
 export function useDirectoryEntries(
-  projectId: string,
+  workspaceRoot: string,
   expandedPaths: readonly string[],
   baseDir = ''
 ): DirectoryEntriesResult {
@@ -105,9 +110,9 @@ export function useDirectoryEntries(
   const next: string[] = []
 
   for (const dir of dirs) {
-    const entry = cache.get(cacheKey(projectId, dir))
+    const entry = cache.get(cacheKey(workspaceRoot, dir))
     if (entry == null) {
-      fetchDir(projectId, dir)
+      fetchDir(workspaceRoot, dir)
       if (dir === baseDir) isLoading = true
       continue
     }
@@ -121,7 +126,7 @@ export function useDirectoryEntries(
   }
 
   // 内容一致时复用旧数组引用(structural sharing)
-  const aggKey = `${projectId}|${baseDir}|${dirs.join(',')}`
+  const aggKey = `${workspaceRoot}|${baseDir}|${dirs.join(',')}`
   const prevPaths = aggregateCache.get(aggKey)
   const paths =
     prevPaths != null &&
@@ -130,7 +135,7 @@ export function useDirectoryEntries(
       ? prevPaths
       : (aggregateCache.set(aggKey, next), next)
 
-  const rootEntry = cache.get(cacheKey(projectId, baseDir))
+  const rootEntry = cache.get(cacheKey(workspaceRoot, baseDir))
   return {
     paths,
     isLoading: isLoading && rootEntry == null,
@@ -139,12 +144,12 @@ export function useDirectoryEntries(
   }
 }
 
-/** 项目切换/文件变更后的手动失效( Codex 侧由 host 推送失效;WS 先提供手动入口) */
-export function invalidateDirectoryCache(projectId?: string): void {
-  if (projectId == null) cache.clear()
+/** 工作区切换/文件变更后的手动失效( Codex 侧由 host 推送失效;WS 先提供手动入口) */
+export function invalidateDirectoryCache(workspaceRoot?: string): void {
+  if (workspaceRoot == null) cache.clear()
   else {
     for (const k of [...cache.keys()]) {
-      if (k.startsWith(`${projectId}|`)) cache.delete(k)
+      if (k.startsWith(`${workspaceRoot}|`)) cache.delete(k)
     }
   }
   notify()
