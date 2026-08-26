@@ -282,6 +282,7 @@ export class WindowContext {
       terminalManager: this.terminalManager,
       appUpdatesManager: this.appUpdatesManager,
       settingsStore: this.settingsStore,
+      agentConnection: this.agent.connection,
       pickDirectories: () => this.pickDirectories()
     })
     this.appHosts.set(webContents.id, host)

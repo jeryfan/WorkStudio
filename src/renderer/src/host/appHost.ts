@@ -146,6 +146,20 @@ export function whenHostServicesReady(): Promise<RemoteAppHostServices> {
   return handshake ?? initAppHost()
 }
 
+/**
+ * 启动门禁 —— Codex `appServices.startup.whenReady()`。
+ *
+ * 语义与失败时也 resolve 的理由见 `@shared/host/appHost` 的 `StartupService`。
+ * 这里刻意**只调一次并缓存**：它是 `use()` 的入参，每次渲染都新建一个 promise
+ * 会让 React 永远挂起（新 promise 永远是 pending 状态的那一帧）。
+ */
+let startupReady: Promise<void> | undefined
+
+export function whenStartupReady(): Promise<void> {
+  startupReady ??= whenHostServicesReady().then((services) => services.startup.whenReady())
+  return startupReady
+}
+
 /** 订阅主进程发来的查询失效通知 */
 export function onQueryCacheInvalidated(
   listener: (queryKey: readonly string[]) => void

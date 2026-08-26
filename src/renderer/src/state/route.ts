@@ -51,6 +51,21 @@ export function useRoutePath(): string {
 }
 
 /**
+ * 渲染层自己发起的导航（Codex 的 `useNavigate()` → `navigate(to, {replace:true})`）。
+ *
+ * 之前只有宿主能改 path（`navigate-to-route`）；登录门禁必须能自己跳
+ * （Codex 的 `<Navigate to="/login" replace/>`）。没有历史栈，所以 replace 与 push
+ * 在这里是同一件事 —— 参数不留，避免暗示一个我们没有的能力。
+ */
+export function navigate(next: string): void {
+  setPath(next)
+}
+
+export function getRoutePath(): string {
+  return path
+}
+
+/**
  * `/settings/:section/*` 的匹配（Codex `kC('/settings/:section/*')`）。
  * 不是设置路由返回 null；是设置路由但 section 不在清单里，返回默认 section。
  */

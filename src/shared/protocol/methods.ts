@@ -61,6 +61,25 @@ export const M = {
   accountRead: 'account/read',
   accountRateLimits: 'account/rateLimits/read',
   authStatus: 'getAuthStatus',
+  /**
+   * 登录三件套。
+   *
+   * 取证：Codex 桌面端的登录按钮打的是**宿主**方法（`login-with-chatgpt` /
+   * `login-with-api-key` / `logout`），宿主再转成这三个协议请求。本项目把它们放在
+   * 渲染层直接发：我们的架构里渲染层本来就直接发所有协议请求（thread/start、
+   * config/batchWrite 都是），宿主只做转发与分块。唯一需要宿主帮忙的是"用外部
+   * 浏览器打开 authUrl"，那一步走已有的 `chromiumBrowser.openUrl`。
+   *
+   * 载荷形状（`LoginAccountParams`）：
+   *   { type:'apiKey', apiKey }                → 直接写出 auth.json，无回调
+   *   { type:'chatgpt' }                       → { loginId, authUrl }，agent 自己在
+   *                                              localhost:1455 起回调服务器
+   *   { type:'chatgptDeviceCode' }             → { loginId, verificationUrl, userCode }
+   * 完成与否由通知 `account/login/completed` 告知（本表已订阅）。
+   */
+  accountLoginStart: 'account/login/start',
+  accountLoginCancel: 'account/login/cancel',
+  accountLogout: 'account/logout',
 
   // MCP 服务器与连接器(app)
   mcpServerStatusList: 'mcpServerStatus/list',

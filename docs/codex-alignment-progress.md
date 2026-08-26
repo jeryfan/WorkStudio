@@ -851,3 +851,75 @@ WS 之前在 `SessionContext` 里给目录外的模型合成 `displayName = id`,
 就显示 loader),依据是 8214 实测确实闪过 loader。
 另:动画中间帧无法在被遮挡的 Electron 窗口里采样(rAF 被节流到 0),
 上面验证的是静止值。
+
+## 2026-08-26:启动闪屏、启动门禁、未登录拦截(整条 boot 链)
+
+**范围**:把 Codex 从"窗口出现"到"应用/登录页可见"之间的整条链搬过来。
+取证来源:`reverse/webview-dump/index.html.orig`(HTML 闪屏)、
+`app-initial-Biw83Aiz.js`(`B()`/`ojl`/`vEl`/`KQc`/`JQc`/`RQc`/`uF`)、
+`login-route-Bg_dmmG_.js` + `onboarding-login-content-5xAksVqV.js`、
+`reverse/asar-main/main-DkjTIhil.js`(`setPrimaryWindowMode`/`hge`/`Fwe`)。
+
+### Codex 实测的 boot 链(本次新取证)
+
+1. **HTML 闪屏在 JS 之前画**:`index.html` 里预置 `.startup-loader`
+   (56px blossom,180ms/60ms delay 淡入 + 2200ms 流光),React 接管后整体替换。
+   变量名 `--startup-*` 与动画参数逐字。
+2. **入口序列** `app-main` 的 `B()`:`await initializeAppHostServices()` →
+   取 `appServices.startup.whenReady()` → `createRoot().render(<Suspense
+   fallback={Jir debugName=Startup}><App startupReady/></Suspense>)`;
+   `App` 第一行 `use(startupReady)`;`reach('renderer_ready')` 由一个隐藏 span
+   的 ref 触发(Suspense 外面)。
+3. **门禁链**(在 Suspense 内,自上而下):
+   `PersistedStateProvider`(等 persisted-atom-sync)→ `SettingsPreloadGate`
+   (等 `get-settings`)→ statsig(遥测,不搬)→ 路由。
+4. **登录门禁**:`KQc` 解析目标,`JQc` 发 `electron-set-window-mode` 并跳转,
+   `RQc` 守卫应用路由。未登录 → `/login`,窗口缩成 **1090×760**(v2);
+   登录后回应用,恢复原 bounds。
+5. **Codex 没有"未配置模型"门禁**:`model/list` 恒有默认项,它唯一拦人的是
+   没凭据(`getAuthStatus` 的 `authMethod == null && requiresOpenaiAuth`)。
+
+### 实现
+
+- `src/renderer/index.html`:闪屏逐字复刻(含 Codex 的 mask data URI 与
+  `-webkit-app-region: drag`),亮暗双档跟 ThemeProvider 同一套 `electron-*` 类。
+- 宿主侧 `startup` 服务:`StartupService`(主)→ `AppHostServices.startup`
+  → 渲染层 `whenStartupReady()`;边界 = agent 连接离开 `starting`(失败也 resolve,
+  让界面能画失败而不是永远转圈)。
+- `main.tsx` 按 `B()` 重写;`App` 用 `use(startupReady)`;提供者链
+  `announcer×2 → SettingsPreloadGate → AuthProvider → AppRoutes`。
+- `state/AuthContext.tsx`(`uF` 等价):并发 `getAuthStatus` + `account/read`,
+  `account/updated`/`account/login/completed` 驱动重取;兜底 `requiresAuth: true`。
+  另加 `error` 字段(Codex 没有,但我们的 agent 可能起不来)。
+- `state/onboardingTarget.ts`:`KQc` 的 `login|app|null` 三档。
+- `AppRoutes.tsx`:`JQc`+`RQc` 合并(跳转走 effect;`target==null` 时画 blossom
+  而不是 Codex 的空片段 —— 刻意偏离,理由见文件注释)。
+- 登录页三件套:`OnboardingPage`(`$al`)、`LoginRoute`(`Ut`+`Bt`,Codex appBrand
+  分支)、`LoginContent`(onboarding-login-content 的 API key 分支);
+  `state/accountLogin.ts` 直接发 `account/login/start|cancel|logout`(agent 自带
+  localhost:1455 回调服务器,实测可用),authUrl 经宿主 `chromiumBrowser.openUrl`
+  用外部浏览器打开。
+- 窗口模式:`ViewMessage` 加 `electron-set-window-mode`;`WindowManager.
+  setPrimaryWindowMode` 逐段照搬(记下原 bounds、退全屏/最大化、临时压低最小尺寸、
+  win32 近满屏最大化、app 模式恢复)。
+- 失败落地页 `AgentUnavailable`(本项目独有):agent 起不来时显示
+  `AgentBinaryError` 的 message + hint,而不是永远转圈。
+
+### 刻意省略/偏离(都写在代码注释里)
+
+- 登录页 logo 用 blossom 标记占位(Codex 是 `codex-app-ga-logo--UgmJjKM.png` 资产)。
+- Snake 彩蛋、Continue with Google/Microsoft、设备码/Copilot 登录:不搬(按钮留着
+  没反应比没有更糟;后两者在 v2 electron 登录页本来就不渲染)。
+- `PersistedStateProvider` / statsig / `welcome` / `select-workspace`:无对应能力,不猜。
+
+### 验证(dev 应用,CDP :9333)
+
+- 闪屏:reload 后 t≈40ms 抓到 `.startup-loader`,computed style 全对
+  (drag、56px、`startup-openai-blossom-*` 两条动画、220% 背景、mask 4885 字符、
+  亮色 base `rgb(0 0 0 / 0.24)`、切 dark 类后 `rgb(255 255 255 / 0.68)`)。
+- 空 CODEX_HOME 冷启:停在登录页,窗口 **1090×760**;h1/三按钮/输入框类名、
+  placeholder `sk-…`、autofocus、空值禁用 Continue 全对。
+- 提交测试 key:`auth.json` 落盘 `{"auth_mode":"apikey",...}` → 跳 `/`、
+  窗口恢复 **1200×800**、AppShell 渲染。
+- 真 `~/.codex`(已配置 deepseek provider):直接进 AppShell,无登录页闪现。
+- typecheck 干净;新文件 eslint 0 error(仓库既有的 scripts/*.mjs 告警与本改动无关)。

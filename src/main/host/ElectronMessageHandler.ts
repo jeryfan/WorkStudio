@@ -51,6 +51,15 @@ export class ElectronMessageHandler {
         return
 
       // ── 窗口 ──────────────────────────────────────────────────────
+      case 'electron-set-window-mode': {
+        // Codex `this.setPrimaryWindowMode(e, {mode, onboardingVariant})`
+        this.deps.windowManager.setPrimaryWindowMode(webContents, {
+          mode: message.mode,
+          onboardingVariant: message.onboardingVariant
+        })
+        return
+      }
+
       case 'electron-window-focus-request': {
         const window = this.deps.windowManager.getPrimaryWindow()
         if (window != null) {

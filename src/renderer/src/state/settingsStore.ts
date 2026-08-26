@@ -83,6 +83,16 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
+/**
+ * 首份快照是否已到（Codex 的 `get-settings` query `isLoading` 取反）。
+ *
+ * 只有"第一次还没回来"算未就绪：失效重取时 Codex 的 `isLoading` 也是 false，
+ * 否则每次改一项设置整个应用都会闪回加载态。
+ */
+export function useSettingsLoaded(): boolean {
+  return useSyncExternalStore(subscribe, () => snapshot != null)
+}
+
 /** Codex `B(definition)` —— 生效值 = 配置值 ?? default */
 export function useSetting<T>(definition: SettingDefinition<T>): T {
   return useSyncExternalStore(subscribe, () => readSetting(definition))

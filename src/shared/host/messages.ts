@@ -75,6 +75,19 @@ export type ViewMessage =
 
   // ── 窗口 ──
   | { type: 'electron-window-focus-request' }
+  /**
+   * 主窗口模式（Codex `electron-set-window-mode`）。
+   *
+   * 取证：登录/onboarding 目标确定之后，渲染层的路由门禁在 effect 里发这条消息，
+   * 宿主的 `setPrimaryWindowMode` 据此把主窗口改成 onboarding 尺寸（v2 是
+   * **1090×760**，v1 是 560×560），并记下原 bounds；回到 `app` 时恢复。
+   * 也就是说"未登录不进应用"在 Codex 里不只是换一个页面，**窗口本身会变小**。
+   */
+  | {
+      type: 'electron-set-window-mode'
+      mode: 'app' | 'onboarding'
+      onboardingVariant?: 'v2'
+    }
   | { type: 'electron-set-badge-count'; count: number }
   | { type: 'open-current-main-window'; stealFocus?: boolean; focusComposer?: boolean }
   | { type: 'open-in-new-window'; path: string }

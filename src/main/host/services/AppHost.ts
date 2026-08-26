@@ -39,7 +39,9 @@ import type { BrowserSidebarManager } from '../../browser/BrowserSidebarManager'
 import type { TerminalManager } from '../../terminal/TerminalManager'
 import type { AppUpdatesManager } from '../../updates/AppUpdatesManager'
 import type { SettingsStore } from '../../settings/SettingsStore'
+import type { AppServerConnection } from '../../agent/AppServerConnection'
 import { OpenInService } from './OpenInService'
+import { StartupService } from './StartupService'
 import { SettingsService } from './SettingsService'
 import { TerminalService } from './TerminalService'
 import { WorkspaceFilesService } from './WorkspaceFilesService'
@@ -385,6 +387,8 @@ export interface AppHostDependencies {
   appUpdatesManager: AppUpdatesManager
   /** 设置的真值持有者，全应用一份（落盘在 app-server config 的 `[desktop]` 表） */
   settingsStore: SettingsStore
+  /** 启动门禁的信号源 —— 见 StartupService */
+  agentConnection: AppServerConnection
   pickDirectories(): Promise<string[]>
 }
 
@@ -442,6 +446,7 @@ export class AppHost extends RpcTarget implements AppHostMain {
     this.workspaceFiles = new WorkspaceFilesService()
     this.terminal = new TerminalService(deps.terminalManager, deps.webContents)
     this.serviceTree = {
+      startup: new StartupService(deps.agentConnection),
       appInfo: new AppInfoService(),
       appUpdates: new AppUpdatesService(deps.appUpdatesManager, deps.webContents),
       terminal: this.terminal,

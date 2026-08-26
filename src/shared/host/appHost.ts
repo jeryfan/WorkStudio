@@ -228,7 +228,36 @@ export interface SettingsService {
   setSetting(key: string, value: unknown): { success: true }
 }
 
+// ── startup（Codex `appServices.startup`） ─────────────────────────────
+/**
+ * 启动门禁。
+ *
+ * 取证：Codex 的入口 `app-main-*.js` 在 `await initializeAppHostServices()` 之后
+ * 取 `appServices.startup.whenReady()`，把它作为 promise 交给 `<App startupReady>`，
+ * App 第一行就是 `use(startupReady)` —— 也就是说**宿主没就绪之前 React 一直挂起**，
+ * 屏幕上停在 `<Suspense fallback={<LoadingIndicator debugName="Startup"/>}>`，
+ * 视觉上与 HTML 闪屏是同一个 56px 流光标记，用户看不出接管的那一帧。
+ *
+ * 宿主侧的实现（主进程 chunk 的 `Fwe`）额外有一个阶段机（`reach(phase)`：
+ * host_ready → window_created → renderer_ready → first_content_visible →
+ * background_ready），用来把后台服务推迟到首帧之后。**本项目不声明 `reach`**：
+ * 我们目前没有需要按阶段延后启动的后台服务，声明一个只会记日志的方法就是死代码。
+ *
+ * 本项目的"宿主就绪"取的是 **agent 连接不再是 starting**（ready 或 failed）。
+ * 这不是随便挑的边界：`getAuthStatus` 要经 app-server 才能答，而登录门禁又必须
+ * 等它回答才能决定进应用还是进登录页。在这之前渲染任何一边都是猜。
+ */
+export interface StartupService {
+  /**
+   * agent 连接离开 `starting` 时 resolve —— **失败也 resolve**。
+   * 失败要让界面能画出失败（连接状态经 `codex-app-server-connection-state`
+   * 已经在渲染层了），一直挂起只会得到一个永远转圈的空壳。
+   */
+  whenReady(): Promise<void>
+}
+
 export interface AppHostServices {
+  startup: StartupService
   appInfo: AppInfoService
   appUpdates: AppUpdatesService
   terminal: TerminalService
