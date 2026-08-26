@@ -145,3 +145,19 @@
   min-height: 25px;
   white-space: pre;
 }
+
+/*
+ * 侧栏滚动区 footer 淡出遮罩兕底（修「滚动时内容从透明 footer 后透出」）。
+ *
+ * Codex 的 .codex-headerFadeMask 在 `@supports (animation-timeline:--scroll-fade)` 里把
+ * `--sidebar-scroll-footer-fade-distance` 覆写成 `var(--bottom-fade)`，而 --bottom-fade
+ * 由滚动时间线动画 edge-fade 驱动。Electron 里该滚动动画未正常驱动变量时，变量链在
+ * 计算期无效 → 整个 mask-image 变 none → footer（透明）后面滚过的会话标题直接透出。
+ *
+ * 这里把 footer 淡出距离重新钉成常量（与 Codex 静态值 calc(var(--spacing)*10) 相同），
+ * 使渐变恒有效、停止序恒正确；顶部渐隐仍交给滚动动画，行为不变。
+ * 放在所有 codex/*.css 之后、无 layer，保证赢过 @supports 里的覆写。
+ */
+.codex-headerFadeMask {
+  --sidebar-scroll-footer-fade-distance: calc(var(--spacing) * 10);
+}

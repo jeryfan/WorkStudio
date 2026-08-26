@@ -1,15 +1,27 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { useOverlay, type MenuId } from '../../state/OverlayContext'
-import { ChevronIcon } from '../icons'
+import { ChevronIcon, Spinner } from '../icons'
 import { SidebarCollapseRegion } from './SidebarSortableRow'
 
 /**
  * 分节标题右侧的控制按钮 —— Codex 实测 24×24。
  *
- * 注意 hover **不给背景**(enabled:hover:bg-transparent),只靠
+ * hover **不给背景**(enabled:hover:bg-transparent),只靠
  * sidebar-hover-icon-button-tint 变色:平时前景色 50% 透明,hover/focus 转实色。
  * 这是 Codex 侧栏所有图标按钮的统一手法,给背景会显得比 Codex 重。
+ *
+ * Codex 的按钮基类(`th` + size=icon)还带 `electron:[&>svg]:icon-sm` ——
+ * 那是一条**死类**(Codex 产物里没有对应 CSS 规则,实测 svg 仍渲染 16px),
+ * 而 WS 的 Tailwind 会真的生成这条规则把 svg 放大成 18px,所以这里**不写**。
+ *
+ * 两个变体(实测类集不同,别混用):
+ * - **IconButtonSm**:多 `outline-hidden cursor-interaction` 各一层 —— 分节 options
+ *   触发器(Radix trigger 的拼接痕迹)用它;
+ * - **SidebarIconButton**:素基类 + `sidebar-icon-button sidebar-hover-icon-button-tint` ——
+ *   Add new project / New chat 用它。
  */
+const ICON_BTN_BASE =
+  'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 flex rounded-full electron:rounded-md enabled:hover:bg-transparent data-[state=open]:bg-transparent hover:text-token-foreground border-transparent electron:p-1 flex items-center justify-center p-0.5'
+
 export function IconButtonSm({
   className = '',
   children,
@@ -18,13 +30,32 @@ export function IconButtonSm({
   return (
     <button
       type="button"
-      className={`no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 flex rounded-full electron:rounded-md enabled:hover:bg-transparent data-[state=open]:bg-transparent hover:text-token-foreground border-transparent electron:p-1 flex items-center justify-center p-0.5 outline-hidden cursor-interaction sidebar-icon-button sidebar-hover-icon-button-tint ${className}`}
+      className={`${ICON_BTN_BASE} outline-hidden cursor-interaction sidebar-icon-button sidebar-hover-icon-button-tint ${className}`}
       {...rest}
     >
       {children}
     </button>
   )
 }
+
+export function SidebarIconButton({
+  className = '',
+  children,
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement>): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`${ICON_BTN_BASE} sidebar-icon-button sidebar-hover-icon-button-tint ${className}`}
+      {...rest}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** 分节折叠后的聚合状态(Codex `collapsedStatusState` → `b8`) */
+export type SectionCollapsedStatus = 'loading' | 'unread'
 
 interface SectionHeaderProps {
   title: string
@@ -33,15 +64,20 @@ interface SectionHeaderProps {
   /** hover 时淡入的右侧控制按钮组 */
   controls?: ReactNode
   /**
-   * 由本区控制按钮打开的菜单 id。
-   * 该菜单打开期间保持控制按钮组可见（鼠标已在菜单上，:hover 会丢失）。
+   * 折叠态下标题右侧的聚合状态点(Codex `titleTrailing`):
+   * 分节折叠且里面有进行/未读的会话时显示;展开时不渲染。
    */
-  menuId?: MenuId
+  collapsedStatus?: SectionCollapsedStatus | null
   /**
    * 这一节自身可否被拖动重排。
    *
-   * 实测:Projects 与 Recents 的 toggle 带 `aria-roledescription="sortable"`,
-   * **Pinned 的没有** —— Pinned 固定在最上,不参与分节排序。
+   * 实测:Projects 与 Recents 的 toggle 带 `aria-roledescription="sortable"`
+   * + `aria-describedby="DndDescribedBy-0"`,**Pinned 的没有** —— Pinned
+   * 固定在最上,不参与分节排序。
+   *
+   * 光标的实测差异也在这一档:可排序的 toggle 是 `cursor-default`,
+   * 不可排序的(Pinned)是 `cursor-interaction`(桌面端两者都解析成箭头,
+   * 但类名要忠实)。
    */
   sortable?: boolean
 }
@@ -51,7 +87,6 @@ interface SectionHeaderProps {
  *
  * 几处以实测为准、别改回直觉写法:
  *
- * - toggle 是 **cursor-default**,不是 pointer。整行可点但不给"可点"的光标暗示。
  * - chevron 14×14(icon-2xs),**默认 opacity-0**,靠 group-hover/section-toggle 与
  *   group-focus-visible/section-toggle 显现;展开 rotate-0、折叠 -rotate-90,
  *   过渡 transform 0.15s cubic-bezier(0.4,0,0.2,1)。
@@ -64,12 +99,9 @@ export function SectionHeader({
   collapsed,
   onToggle,
   controls,
-  menuId,
+  collapsedStatus,
   sortable = false
 }: SectionHeaderProps): React.JSX.Element {
-  const { menu } = useOverlay()
-  const controlsOpen = menuId !== undefined && menu?.id === menuId
-
   return (
     <div className="group/nav-section-title flex items-center justify-between gap-2 pe-0.5 ps-2">
       <div className="min-w-0 flex-1 text-base font-medium text-token-input-placeholder-foreground opacity-75">
@@ -82,16 +114,20 @@ export function SectionHeader({
             data-app-action-sidebar-section-toggle=""
             /*
              * 分节标题本身是可排序项(实测 Projects / Recents 的 toggle 带
-             * role="button" + aria-roledescription="sortable" + tabindex="0")。
+             * role="button" + aria-roledescription="sortable" + tabindex="0"
+             * + aria-describedby="DndDescribedBy-0")。
              * 这里只补 aria 契约;真正接进 DnD 上下文时把 sortable 的
              * listeners 透传到这个按钮上即可,DOM 形态不需要再动。
              */
             role={sortable ? 'button' : undefined}
             aria-roledescription={sortable ? 'sortable' : undefined}
             aria-disabled={sortable ? 'false' : undefined}
+            aria-describedby={sortable ? 'DndDescribedBy-0' : undefined}
             tabIndex={sortable ? 0 : undefined}
             onClick={onToggle}
-            className="group/section-toggle flex min-w-0 flex-1 items-center gap-1 rounded-md py-0.5 pe-1 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 cursor-default"
+            className={`group/section-toggle flex min-w-0 flex-1 items-center gap-1 rounded-md py-0.5 pe-1 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+              sortable ? 'cursor-default' : 'cursor-interaction'
+            }`}
           >
             <span className="flex min-w-0 items-center gap-1">
               <span className="min-w-0 truncate">{title}</span>
@@ -105,20 +141,38 @@ export function SectionHeader({
           </button>
         </div>
       </div>
-      {controls && (
+      {(controls || (collapsed && collapsedStatus != null)) && (
         <div className="flex shrink-0 items-center gap-1">
-          {/*
-           * Codex 的显隐条件里有 has-[[data-state=open]] —— 菜单打开时鼠标已经移到
-           * 菜单上,:hover 会丢,靠这个选择器把按钮组钉住,不需要把菜单状态回传到 React。
-           * 另外 Codex 这层**没有 transition**:淡入淡出是瞬时的,加过渡会比 Codex 慢半拍。
-           */}
-          <div
-            className={`shrink-0 pointer-events-none opacity-0 group-focus-within/nav-section-title:pointer-events-auto group-focus-within/nav-section-title:opacity-100 group-hover/nav-section-title:pointer-events-auto group-hover/nav-section-title:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100${
-              controlsOpen ? ' pointer-events-auto opacity-100' : ''
-            }`}
-          >
-            <div className="flex items-center gap-1">{controls}</div>
-          </div>
+          {controls && (
+            /*
+             * Codex 的显隐条件里有 has-[[data-state=open]] —— 菜单打开时鼠标已经移到
+             * 菜单上,:hover 会丢,靠这个选择器把按钮组钉住,不需要把菜单状态回传到 React
+             * (Radix trigger 会把 data-state=open 写到触发按钮上,正好命中)。
+             * 另外 Codex 这层**没有 transition**:淡入淡出是瞬时的,加过渡会比 Codex 慢半拍。
+             */
+            <div className="shrink-0 pointer-events-none opacity-0 group-focus-within/nav-section-title:pointer-events-auto group-focus-within/nav-section-title:opacity-100 group-hover/nav-section-title:pointer-events-auto group-hover/nav-section-title:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100">
+              <div className="flex items-center gap-1">{controls}</div>
+            </div>
+          )}
+          {/* 折叠态的聚合状态点 —— Codex `titleTrailing`(`div.shrink-0 > b8`) */}
+          {collapsed && collapsedStatus != null && (
+            <div className="shrink-0">
+              {collapsedStatus === 'loading' ? (
+                <div className="relative flex size-5 shrink-0 items-center justify-center text-token-foreground/70">
+                  <Spinner className="icon-xs shrink-0" animationDurationMs={2000} />
+                </div>
+              ) : (
+                <div className="relative flex size-5 shrink-0 items-center justify-center text-token-description-foreground">
+                  <span className="icon-xs relative scale-50">
+                    <span
+                      className="absolute inset-0 rounded-full"
+                      style={{ backgroundColor: 'var(--vscode-textLink-foreground)' }}
+                    />
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -154,7 +208,6 @@ export function SidebarSection({
     >
       <div className="flex flex-col">
         {header}
-        {/* D8:折叠是**带动画**的(高度 + 透明度),稳态内联样式与 Codex 一致 */}
         <SidebarCollapseRegion open={!collapsed}>{children}</SidebarCollapseRegion>
       </div>
     </section>

@@ -234,6 +234,8 @@ export interface TooltipProps {
   tooltipContent?: ReactNode
   /** 只在这些情形下才开 —— 默认 always */
   openWhen?: TooltipOpenWhen
+  /** 快捷键标签 —— Codex 的 `Lh` 在内容右侧渲染一个 kbd(`Nh`) */
+  shortcut?: string
   variant?: TooltipVariant
   color?: 'default' | 'inverse'
   side?: TooltipSide
@@ -266,6 +268,18 @@ export interface TooltipProps {
 
 function placementOf(side: TooltipSide, align?: TooltipAlign): Placement {
   return align == null || align === 'center' ? side : (`${side}-${align}` as Placement)
+}
+
+/**
+ * Codex 的 `Nh` —— tooltip / 菜单里的快捷键 kbd。
+ * `!` 前缀全是压全局 kbd 样式的(Codex 全站的 kbd 默认有边框和阴影)。
+ */
+export function Kbd({ children }: { children: ReactNode }): React.JSX.Element {
+  return (
+    <kbd className="inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none">
+      {children}
+    </kbd>
+  )
 }
 
 function sideOf(placement: Placement): TooltipSide {
@@ -356,6 +370,7 @@ function TooltipRoot({
   delayOpen = false,
   delayDuration,
   getDelayDuration,
+  shortcut,
   disableHoverOpen = false,
   disablePadding = false,
   open: controlledOpen,
@@ -744,6 +759,8 @@ function TooltipRoot({
             >
               {tooltipContent}
             </div>
+            {/* Codex 的快捷键 kbd(与内容同级,不是内容的子元素) */}
+            {shortcut != null && <Kbd>{shortcut}</Kbd>}
           </div>
         </TooltipContent>
       )}

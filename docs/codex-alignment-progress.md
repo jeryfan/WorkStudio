@@ -120,6 +120,46 @@ DndContext 上移到 MainContentSurface(右/底共用)。
 - **槽位注册的 children 必须是稳定引用**(模块级常量),否则 registerSlot → setState →
   重渲染 → 再注册的死循环(Codex 靠 React Compiler memo cache 钉住,WS 手工钉)。
 
+**2026-08-25 第四轮(侧栏全层级对齐 + 菜单 Radix 化)**:对侧栏逐层与运行中 Codex
+(CDP :9250)对比后修正:
+- **菜单全部换成 Radix DropdownMenu**(Codex 原生就是 Radix,证据 `data-radix-menu-content`/
+  `aria-labelledby`/radix id)。删掉自绘 `DropdownMenu`/`menuDefs`/`OverlayContext.menu` 通道。
+  新增 `menu/CodexMenu.tsx`(外壳/项/单选项/标签/分隔线,类逐字实测)。
+- **分节 options 菜单**改为 Codex 实测的两个单选组:「Organize sidebar」(By project/In one list)+
+  「Sort chats by」(Priority/Last updated/Manual order),按分节存 `projectSortMode`/`chatSortMode`。
+- **organize=list 平铺模式**:Projects 分节消失、导航区多一个「Projects」行、全部未置顶会话进 Recents。
+- **状态槽语义按 Codex `b8` 重做**:进行中=spinner(`$m`,2000ms、挂载负 delay 错相)、
+  未读=蓝点、报错=**行首**错误图标(`sA`)。原先「运行中显示蓝点」是错的。
+- **未读跟踪**:`thread/status/changed` active→idle/systemError 且非当前打开 → 标未读;
+  `ChatRuntimeProvider` 在 activeChatId 变化时 `noteActiveChat` 清除。持久化。
+- **折叠动画**改回 Codex `Qj`:300ms + ease [0.19,1,0.22,1],`overflow:visible` 走 transitionEnd。
+- **header 发丝线 + 3 个 fade token 是滚动驱动**(实测 scrollTop>0 才出现):未滚动 1px/1px/0px,
+  滚动后 var(--spacing)/calc(var(--spacing)*4)/var(--spacing)。`thread-active` 改为「当前打开」而非「运行中」。
+- **DndDescribedBy/DndLiveRegion 移入 nav 内**(Codex 位置);分节折叠/项目展开持久化。
+- 图标按实测替换:Pull requests(分支图→PR 图)、Add project(folder-plus→加号)、
+  Edit project 用齿轮、新增 Full changelog/Help 救生圈/错误圆环图标;Pin/Unpin 的位移从内联 style 改 `translate-x-px` 类。
+- 悬浮卡片:项目卡标题用 `GUc`(区别于会话卡 `WNc`)、Pin/Unpin 常驻、「N tasks」用 nbsp;
+  会话卡仅项目内会话弹(无项目不弹,与 Codex `disableHoverCard` 一致)。
+- 按钮变体拆分:options 触发器用带 `outline-hidden` 的 `IconButtonSm`,Add/New chat/行内按钮用素 `SidebarIconButton`。
+- 已验证:滚动发丝线、各菜单开关/键盘导航、Search⌘K 与 New chat⌘N tooltip、折叠 300ms、
+  平铺模式切换、项目/会话悬浮卡、长标题跑马灯。typecheck + eslint 干净,无运行时错误。
+- **未移植(标注)**:help 菜单的 Keyboard shortcuts(Codex 弹快捷键总览层,WS 无此浮层)、
+  Show pet(宠物功能)、Create permanent worktree(worktree 能力)、项目卡 marker 外观选择弹层、
+  help 菜单的远端更新日志条目。侧栏会话右键菜单未确认(本机 headless 无法取证),未实现。
+
+**2026-08-25 补:修「滚动时会话标题从透明 footer 后透出」**:
+- 现象:侧栏滚到中/下部,会话标题在 footer(透明)后面直接可见;Codex 则在 footer 顶缘淡出。
+- 根因:`.codex-headerFadeMask` 的 `mask-image` 依赖 `--sidebar-scroll-footer-fade-distance:var(--bottom-fade)`,
+  而 `--bottom-fade` 由滚动时间线动画 `edge-fade`(`animation-timeline:scroll(self y)`)驱动;
+  Electron 里该滚动动画未正常驱动变量 → 变量链计算期无效 → 整个 `mask-image` 变 `none` → 遮罩失效。
+  (对照实验:内联 mask 能淡出、类 mask 计算为 none。)
+- 修复:手写 `main.css`(在所有 codex/*.css 之后、无 layer)把 `--sidebar-scroll-footer-fade-distance`
+  钉成常量 `calc(var(--spacing)*10)`,去掉对滚动动画变量的依赖,渐变恒有效;顶部渐隐仍交给滚动动画。
+  已验证 0/0.3/0.6/1 各滚动位置遮罩均生效、footer 下方干净。
+- 关于「Codex 滚动有 loading」:不是 WS 响应快,而是 **Codex 侧栏分页(infinite scroll)**——滚近底部拉下一页并显示
+  加载 spinner 行;WS 一次性加载单页(≤200)不消费 `nextCursor`,无滚动加载触发,故无 loading。属数据流差异,未实现。
+
+
 ## 关键陷阱(踩过的)
 
 1. **`@theme` 会被提进 layer,无层级规则恒压它** —— `app-theme.css` 必须剔除 `@theme` 已有的键,

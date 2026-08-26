@@ -1,17 +1,32 @@
+import { useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { Project } from '../../services/workspace/types'
 import { useOverlay } from '../../state/OverlayContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
 import { useWorkspace } from '../../state/WorkspaceContext'
-import { DotsIcon, NewChatIcon, OpenFolderIcon } from '../icons'
+import {
+  ArchiveTasksIcon,
+  DotsIcon,
+  NewChatIcon,
+  OpenFolderIcon,
+  PinProjectIcon,
+  RemoveIcon,
+  RevealIcon,
+  SettingsIcon,
+  UnpinIcon,
+  WorktreeIcon
+} from '../icons'
 import { cx } from '../../utils/cx'
-import { IconButtonSm } from './SectionHeader'
+import { SidebarIconButton } from './SectionHeader'
 import { SidebarThreadRow } from './SidebarThreadRow'
 import { ProjectHoverCard } from './ProjectHoverCard'
 import { Tooltip } from '../tooltip/Tooltip'
+import { CodexMenuContent, CodexMenuItem, type CodexMenuItemDef } from '../menu/CodexMenu'
 import { ProjectIconDropZone, SidebarSortableScope, SidebarThreadContainer } from './SidebarDnd'
 import { useSidebarSortable, type SidebarContainerId } from './sidebarDndModel'
 import { SidebarCollapseRegion, SidebarRowList, SidebarThreadDragItem } from './SidebarSortableRow'
 import { threadItemKey } from '@shared/workspace/types'
+import { hostServices } from '../../host/appHost'
 
 /**
  * 项目组 —— 逐层对齐 Codex 实测:
@@ -22,7 +37,7 @@ import { threadItemKey } from '@shared/workspace/types'
  * ├ span.contents[data-state]                        ← 悬浮卡片触发器(Tooltip 的组件分支)
  * │ └ div[data-app-action-sidebar-project-row]…      ← 项目行本体
  * └ div.overflow-hidden[style=…]                     ← 展开动画层(折叠时整块不渲染)
- *   └ div.pb-2.pt-0.5
+ *   └ div.pt-0.5.pb-2
  *     └ div[data-app-action-sidebar-project-list-id][data-app-action-sidebar-project-show-all]
  *       └ div.isolate.flex.flex-col.[contain:layout]
  *         └ div.flex.flex-col[role="list"][aria-label="Scheduled tasks in X"][tabindex="-1"]
@@ -40,20 +55,92 @@ import { threadItemKey } from '@shared/workspace/types'
  * - 新建会话那格的 `min-w-6` 是**无条件**的(D14):静息时就占 24px,
  *   不是 hover 才撑开。加 transition 会比 Codex 慢半拍,Codex 这里没有过渡。
  * - 整行**没有 `w-full`**(D15):它是 flex 行的子项,靠 `justify-between` 撑开。
+ * - **项目行没有任何状态指示**:会话在跑不会在项目行上叠圆点/转圈
+ *   (实测:子会话正在跑的项目行尾只有 ⋯ 与 +,展开与折叠两种状态下都是)。
  */
 export function SidebarProjectRow({ project }: { project: Project }): React.JSX.Element {
-  const { projectExpanded, toggleProject, chatsOfProject, selectProject, selection } =
-    useWorkspace()
-  const { menu, openMenu } = useOverlay()
+  const {
+    projectExpanded,
+    toggleProject,
+    chatsOfProject,
+    selectProject,
+    selection,
+    pinnedProjects,
+    setProjectPinned,
+    removeProject,
+    archiveChat
+  } = useWorkspace()
+  const { setCreateProjectOpen } = useOverlay()
   const { closeChat } = useChatRuntime()
   const expanded = projectExpanded[project.id] ?? true
   const chats = chatsOfProject(project.id)
-  // 该项目下有会话在跑时，项目行给一个进行态指示
-  const busy = chats.some((c) => c.status.type === 'active')
-  // 该项目菜单打开期间，保持行的悬浮外观（鼠标已在菜单上，:hover 会丢失）
-  const actionsOpen = menu?.id === 'project-actions' && menu.projectId === project.id
+  // 项目菜单的本地开关态 —— Radix 模式:开着时行保持悬浮外观、悬浮卡片不再弹
+  const [menuOpen, setMenuOpen] = useState(false)
   const isCurrent = selection.type === 'project' && selection.projectId === project.id
   const threadContainerId: SidebarContainerId = `project:${project.id}`
+  const pinned = pinnedProjects.some((p) => p.id === project.id)
+
+  /*
+   * Project actions 菜单项 —— 六项,文案与图标逐字实测(CDP 打开真实菜单读取):
+   * Pin ⇄ Unpin project / Reveal in Finder / Create permanent worktree /
+   * Edit project / Archive chats / Remove
+   *
+   * 每项的图标类:`icon-xs shrink-0 opacity-75 group-focus:opacity-100
+   * group-hover:opacity-100`(hover/focus 才转实色)。
+   */
+  const items: CodexMenuItemDef[] = [
+    {
+      id: 'pin-project',
+      label: pinned ? 'Unpin project' : 'Pin project',
+      icon: <PinIconForMenu pinned={pinned} />,
+      onSelect: () => void setProjectPinned(project.id, !pinned)
+    },
+    {
+      id: 'reveal',
+      label: 'Reveal in Finder',
+      icon: (
+        <RevealIcon className="icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100" />
+      ),
+      onSelect: () => {
+        const path = project.rootPaths[0]
+        if (path != null) void hostServices?.openIn.open({ path, target: 'fileManager' })
+      }
+    },
+    {
+      id: 'worktree',
+      label: 'Create permanent worktree',
+      icon: (
+        <WorktreeIcon className="icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100" />
+      )
+      /* WS 还没有 worktree 能力 —— 项照 Codex 渲染,行为待 worktree 落地 */
+    },
+    {
+      id: 'edit-project',
+      label: 'Edit project',
+      icon: (
+        <SettingsIcon className="icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100" />
+      ),
+      onSelect: () => setCreateProjectOpen(true)
+    },
+    {
+      id: 'archive-chats',
+      label: 'Archive chats',
+      icon: (
+        <ArchiveTasksIcon className="icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100" />
+      ),
+      onSelect: () => {
+        for (const chat of chatsOfProject(project.id)) void archiveChat(chat.id)
+      }
+    },
+    {
+      id: 'remove',
+      label: 'Remove',
+      icon: (
+        <RemoveIcon className="icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100" />
+      ),
+      onSelect: () => void removeProject(project.id)
+    }
+  ]
 
   return (
     <div
@@ -72,19 +159,17 @@ export function SidebarProjectRow({ project }: { project: Project }): React.JSX.
         align="start"
         sideOffset={2}
         /* 菜单打开时不再弹卡片:菜单有全屏遮罩,卡片会被压在下面 */
-        disabled={actionsOpen}
+        disabled={menuOpen}
         tooltipContent={<ProjectHoverCard project={project} />}
       >
         <ProjectRowButton
           project={project}
-          busy={busy}
           expanded={expanded}
           isCurrent={isCurrent}
-          actionsOpen={actionsOpen}
+          menuOpen={menuOpen}
           onToggle={() => toggleProject(project.id)}
-          onOpenMenu={(anchor) =>
-            openMenu({ id: 'project-actions', anchor, projectId: project.id })
-          }
+          onOpenChange={setMenuOpen}
+          menuItems={items}
           onSelect={() => void selectProject({ type: 'project', projectId: project.id })}
           onStartChat={() => {
             // 从项目发起的新会话默认落在该项目里：先切选中项，再回到首页
@@ -95,7 +180,7 @@ export function SidebarProjectRow({ project }: { project: Project }): React.JSX.
       </Tooltip>
 
       <SidebarCollapseRegion open={expanded}>
-        <div className="pb-2 pt-0.5">
+        <div className="pt-0.5 pb-2">
           {/*
            * `-show-all` 是 Codex 的「Show more」机制:会话多到一定数量时先截断,
            * 这个属性记录当前是否展开全部。WS 暂不截断,恒为 false —— 属性留着,
@@ -108,20 +193,18 @@ export function SidebarProjectRow({ project }: { project: Project }): React.JSX.
             <SidebarThreadContainer
               containerId={threadContainerId}
               projectId={project.id}
-              className="relative isolate flex flex-col [contain:layout]"
+              className="isolate flex flex-col [contain:layout]"
             >
               {chats.length === 0 ? (
-                <div className="px-2 py-1 text-sm text-token-text-tertiary">No chats</div>
+                /* Codex 的项目空态:`px-8 py-1 text-base` + 描述色 + opacity-50 */
+                <div className="px-8 py-1 text-base text-token-description-foreground opacity-50">
+                  No chats
+                </div>
               ) : (
                 <SidebarRowList ariaLabel={`Scheduled tasks in ${project.name}`}>
                   <SidebarSortableScope items={chats.map((c) => threadItemKey(c.id))}>
-                    {chats.map((c, i) => (
-                      <ProjectThreadItem
-                        key={c.id}
-                        chatId={c.id}
-                        containerId={threadContainerId}
-                        isLast={i === chats.length - 1}
-                      >
+                    {chats.map((c) => (
+                      <ProjectThreadItem key={c.id} chatId={c.id} containerId={threadContainerId}>
                         <SidebarThreadRow chat={c} isGrouped />
                       </ProjectThreadItem>
                     ))}
@@ -140,13 +223,11 @@ export function SidebarProjectRow({ project }: { project: Project }): React.JSX.
 function ProjectThreadItem({
   chatId,
   containerId,
-  children,
-  isLast
+  children
 }: {
   chatId: string
   containerId: SidebarContainerId
   children: React.ReactNode
-  isLast: boolean
 }): React.JSX.Element {
   const sortable = useSidebarSortable(threadItemKey(chatId), {
     kind: 'sidebar-item',
@@ -157,7 +238,6 @@ function ProjectThreadItem({
   })
   return (
     <SidebarThreadDragItem
-      isLast={isLast}
       dragging={sortable.isDragging}
       attributes={sortable.attributes}
       listeners={sortable.listeners}
@@ -169,6 +249,12 @@ function ProjectThreadItem({
   )
 }
 
+/** 菜单里的项目置顶图标(置顶态切 Unpin) */
+function PinIconForMenu({ pinned }: { pinned: boolean }): React.JSX.Element {
+  const cls = 'icon-xs shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100'
+  return pinned ? <UnpinIcon className={cls} /> : <PinProjectIcon className={cls} />
+}
+
 /**
  * 项目行本体。
  *
@@ -177,26 +263,31 @@ function ProjectThreadItem({
  * Codex 的项目行外面正是 `span.contents[data-state="closed"]`,所以这里必须
  * 是组件;直接把 `<div data-app-action-sidebar-project-row>` 塞给 Tooltip
  * 会少掉那一层。
+ *
+ * 菜单是 **Radix DropdownMenu**,触发器是那个
+ * `div.outline-hidden.cursor-interaction.pe-0.5[type=button]`(Radix Trigger
+ * asChild 会把 type/id/aria-haspopup/aria-expanded/data-state 全合到 div 上 ——
+ * Codex 的 DOM 就是这样来的)。
  */
 function ProjectRowButton({
   project,
-  busy,
   expanded,
   isCurrent,
-  actionsOpen,
+  menuOpen,
+  menuItems,
   onToggle,
-  onOpenMenu,
+  onOpenChange,
   onSelect,
   onStartChat,
   ...triggerProps
 }: {
   project: Project
-  busy: boolean
   expanded: boolean
   isCurrent: boolean
-  actionsOpen: boolean
+  menuOpen: boolean
+  menuItems: CodexMenuItemDef[]
   onToggle(): void
-  onOpenMenu(anchor: DOMRect): void
+  onOpenChange(open: boolean): void
   onSelect(): void
   onStartChat(): void
 }): React.JSX.Element {
@@ -217,6 +308,8 @@ function ProjectRowButton({
        */
       onClick={onToggle}
       onKeyDown={(e) => {
+        /* Codex:只有落在行本身的 Enter/Space 才切折叠,子按钮的不算 */
+        if (e.currentTarget !== e.target) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onToggle()
@@ -224,7 +317,7 @@ function ProjectRowButton({
       }}
       className={cx(
         'sidebar-item group/folder-row group relative flex h-[var(--height-token-row)] cursor-interaction items-center justify-between overflow-hidden text-sm text-token-foreground hover:bg-token-list-hover-background focus-visible:outline focus-visible:outline-offset-2',
-        (isCurrent || actionsOpen) && 'bg-token-list-hover-background'
+        (isCurrent || menuOpen) && 'bg-token-list-hover-background'
       )}
       {...triggerProps}
     >
@@ -247,50 +340,50 @@ function ProjectRowButton({
       </div>
 
       <div className="flex max-w-[50%] min-w-0 gap-1">
-        {/* 静态圆点,不加 animate-pulse —— 与会话行一致(Codex 的状态点无动画) */}
-        {busy && (
-          <span
-            aria-label={`Running in ${project.name}`}
-            className="me-0.5 size-2 shrink-0 rounded-full group-hover/folder-row:hidden"
-            style={{ backgroundColor: 'var(--vscode-textLink-foreground)' }}
-          />
-        )}
         <div
           className={cx(
             'w-0 overflow-hidden opacity-0 focus-within:w-auto focus-within:overflow-visible focus-within:opacity-100 group-hover/folder-row:w-auto group-hover/folder-row:overflow-visible group-hover/folder-row:opacity-100',
-            actionsOpen && 'w-auto overflow-visible opacity-100'
+            menuOpen && 'w-auto overflow-visible opacity-100'
           )}
         >
-          {/* Codex 在按钮外面还有一层菜单触发器包装(D15),aria 状态挂在它上面 */}
-          <div
-            role="button"
-            aria-haspopup="menu"
-            aria-expanded={actionsOpen}
-            data-state={actionsOpen ? 'open' : 'closed'}
-            className="cursor-interaction pe-0.5 outline-hidden"
-          >
-            <IconButtonSm
-              aria-label={`Project actions for ${project.name}`}
-              aria-haspopup="menu"
-              aria-expanded={actionsOpen}
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenMenu(e.currentTarget.getBoundingClientRect())
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <DotsIcon className="icon-xs" />
-            </IconButtonSm>
-          </div>
+          {/*
+           * Codex 的触发器是 `div[type=button]`(Radix Trigger asChild 的产物),
+           * 不是 role=button —— 别补 role。
+           * 受控开关:内层按钮 onClick 驱动(它的 pointerdown 被吞掉防拖拽起手,
+           * 所以不指望 Radix 自己的 pointerdown 通道)。
+           */}
+          <DropdownMenu.Root open={menuOpen} onOpenChange={onOpenChange}>
+            <DropdownMenu.Trigger asChild>
+              <div className="outline-hidden cursor-interaction pe-0.5">
+                <SidebarIconButton
+                  aria-label={`Project actions for ${project.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenChange(!menuOpen)
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <DotsIcon className="icon-xs" />
+                </SidebarIconButton>
+              </div>
+            </DropdownMenu.Trigger>
+            <CodexMenuContent align="start" className="min-w-[160px]">
+              {menuItems.map((item) => (
+                <CodexMenuItem key={item.id} item={item} />
+              ))}
+            </CodexMenuContent>
+          </DropdownMenu.Root>
         </div>
         <div className="me-0.5 grid h-6 max-w-48 min-w-6 shrink grid-cols-1 items-center group-hover/folder-row:w-6">
           <span
             className={cx(
               'col-start-1 row-start-1 inline-flex justify-self-end opacity-0 group-hover/folder-row:opacity-100',
-              actionsOpen && 'opacity-100'
+              menuOpen && 'opacity-100'
             )}
           >
-            <IconButtonSm
+            <SidebarIconButton
               aria-label={`Start new chat in ${project.name}`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -299,7 +392,7 @@ function ProjectRowButton({
               onPointerDown={(e) => e.stopPropagation()}
             >
               <NewChatIcon className="icon-xs" />
-            </IconButtonSm>
+            </SidebarIconButton>
           </span>
         </div>
       </div>

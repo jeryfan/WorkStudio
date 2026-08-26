@@ -10,6 +10,7 @@ import {
   type ReactNode
 } from 'react'
 import { rpc } from '../rpc/client'
+import { useWorkspace } from './WorkspaceContext'
 import {
   adoptPendingTurn,
   clearReconnecting,
@@ -895,6 +896,16 @@ const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 export function ChatRuntimeProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const core = useChatRuntimeCore(activeChatId)
+
+  /*
+   * 未读清除 —— Codex 的 hasUnreadTurn 在查看后清除。
+   * WorkspaceProvider 在 ChatRuntimeProvider **外面**,拿不到 activeChatId,
+   * 所以反过来由这里同步:打开(或关闭)会话时回写未读判定源。
+   */
+  const { noteActiveChat } = useWorkspace()
+  useEffect(() => {
+    noteActiveChat(activeChatId)
+  }, [activeChatId, noteActiveChat])
 
   /*
    * 打开/关闭会话都是一次**导航**，所以要顺手离开设置路由 —— 否则进了

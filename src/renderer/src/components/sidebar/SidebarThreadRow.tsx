@@ -1,13 +1,14 @@
 import type { ChatSummary } from '../../services/chat/types'
 import { useWorkspace } from '../../state/WorkspaceContext'
 import { useChatRuntime } from '../../state/ChatRuntimeContext'
-import { ArchiveIcon, PinIcon, UnpinIcon } from '../icons'
+import { ArchiveIcon, ErrorCircleIcon, PinIcon, Spinner, UnpinIcon } from '../icons'
 import { useMarquee } from '../../utils/useMarquee'
 import { CODEX_CLASS } from '../../assets/codex/class-map'
 import { cx } from '../../utils/cx'
 import { Tooltip } from '../tooltip/Tooltip'
 import { hoverCardOpensImmediately } from '../tooltip/hoverCardDelay'
 import { ThreadHoverCard } from './ThreadHoverCard'
+import type { ComponentProps } from 'react'
 
 interface SidebarThreadRowProps {
   chat: ChatSummary
@@ -23,14 +24,27 @@ interface SidebarThreadRowProps {
   isGrouped?: boolean
 }
 
-/** 悬浮操作按钮 —— Codex 实测 20×20,hover 不给背景、只变色(sidebar-hover-icon-button-tint) */
+/**
+ * 悬浮操作按钮 —— Codex 实测 20×20,hover 不给背景、只变色。
+ * 类集 = `th` 基类 + size=icon 变体(所以 flex / items-center 各出现两次,
+ * 是拼接痕迹,照抄)+ `!h-5 !w-5 !p-0 [&>svg]:!h-4 [&>svg]:!w-4` 覆写 +
+ * sidebar-hover-icon-button-tint。
+ */
 const ACTION_BTN =
-  'no-drag cursor-interaction flex items-center justify-center gap-1 whitespace-nowrap select-none ' +
-  'rounded-full border border-transparent p-0.5 focus:outline-none ' +
-  'enabled:hover:bg-transparent hover:text-token-foreground data-[state=open]:bg-transparent ' +
-  'disabled:cursor-not-allowed disabled:opacity-40 ' +
-  'electron:rounded-md electron:p-1 ' +
+  'no-drag cursor-interaction items-center gap-1 border whitespace-nowrap select-none ' +
+  'focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 flex rounded-full ' +
+  'electron:rounded-md enabled:hover:bg-transparent data-[state=open]:bg-transparent ' +
+  'hover:text-token-foreground border-transparent electron:p-1 flex items-center justify-center p-0.5 ' +
   '!h-5 !w-5 !p-0 [&>svg]:!h-4 [&>svg]:!w-4 sidebar-hover-icon-button-tint'
+
+/**
+ * 悬浮操作按钮 —— 必须是**组件**而不是裸 button:Tooltip 对组件 children 会
+ * 包一层 `span.contents[data-state]`,对 DOM 标签则走 cloneElement。
+ * Codex 实测这里每个按钮外面都有那层 `span.contents[data-state="closed"]`。
+ */
+function ThreadRowActionButton(props: ComponentProps<'button'>): React.JSX.Element {
+  return <button type="button" {...props} />
+}
 
 /** 尾部留白宽度 —— Codex 的 `n*20 + (n-1)*8 + 4`(图标 20、间隙 8、右侧 4) */
 function trailingRailWidth(iconCount: number): number {
@@ -42,21 +56,28 @@ function trailingRailWidth(iconCount: number): number {
  *
  * 四个子元素,顺序不能变:
  *   1. div.contents[data-hover-card-open-immediately]  悬浮操作(两个 20×20 按钮)
- *   2. 状态槽(仅非空闲)   absolute end-0,group-hover:hidden —— hover 时让位给操作
+ *   2. 状态槽(仅非空闲行)   absolute end-0,group-hover:hidden —— hover 时让位给操作
  *   3. 内容行              标题(跑马灯)+ 操作预留位 + 尾部留白
  *
- * 几处容易做错的地方,都以实测为准:
+ * 状态槽的语义(Codex `b8`,与直觉相反、以 bundle 与实测为准):
+ * - **进行中 → spinner**(`$m`:icon-xs、2000ms、挂载时刻的负 delay 错相),
+ *   不是圆点。
+ * - **未读 → 蓝色静态圆点**(无动画),8×8,内联 background-color。
+ * - **报错 → 前导槽的错误图标**(行首,icon-xs + text-token-error-foreground),
+ *   不占状态槽。
+ * - 都没有 → 状态槽整个不渲染。
  *
- * - **状态点是静态圆点,没有动画**。8×8,内联 background-color,外面套两层定位盒
- *   (span 20×20 → div size-5 → span icon-xs scale-50)。
+ * 其余实测细节:
  * - **状态槽带 group-hover:hidden**,所以它和操作按钮虽然都在 end-0 也不会打架。
  * - **标题是跑马灯不是截断**:hover 时滚动,四层结构
  *   viewport → clipViewport → track → content,滚完停在末尾(stopAtEnd)。
  * - `data-app-action-sidebar-thread-id` 带 host 前缀(`local:<uuid>`),
  *   与 `-host-id` 一起给出「哪台机器上的哪个会话」;拖拽的 draggable id 用的
  *   也是这个 `local:<uuid>`(实测 aria-live 播报)。
+ * - `data-app-action-sidebar-thread-active` = **当前打开的会话**(Codex 的
+ *   isActive),且命中时行尾追加静态 `bg-token-list-hover-background`;
+ *   它不是「正在跑」——正在跑走状态槽。
  * - 尾部留白宽度是**算出来**的而不是常量:图标数 → `n*20+(n-1)*8+4`。
- *   Codex 的置顶行有 2 个尾部图标 → 52px;WS 只有状态点 → 24px。
  * - 悬浮操作那层外面必须有 `div.contents[data-hover-card-open-immediately]` ——
  *   它不是装饰:Tooltip 的 `getDelayDuration` 靠 `closest()` 命中它把 700ms
  *   延迟改成 0,鼠标已经精确落在小图标上时不该再等。
@@ -76,35 +97,25 @@ function trailingRailWidth(iconCount: number): number {
  * `W = s ?? H?.label ?? null` 退化成 `H?.label`,`H = Po(w8o, threadKey)`
  * 就是该会话的项目组。没有项目 → label 为 null → 卡片关闭。
  * (`Ee` 是"远端项目且连接断开"的特例,本地会话恒 false。)
- *
- * 实测复核过两遍:hover Recents 与 Pinned 里的会话,body 下不出现
- * `[role=tooltip]`;把项目展开后 hover 它下面的会话,卡片出现(224×86)。
- * 所以行的层级关系也是两级 —— 项目下的会话嵌在项目组里,无项目的会话
- * 与项目行同级,两者的悬浮行为因此天然不同。
  */
 export function SidebarThreadRow({
   chat,
   isGrouped = false
 }: SidebarThreadRowProps): React.JSX.Element {
-  const { setChatPinned, archiveChat } = useWorkspace()
+  const { setChatPinned, archiveChat, unreadChatIds } = useWorkspace()
   const { openChat, activeChatId } = useChatRuntime()
   const { id, title, pinned, status } = chat
   const { ref: setMarqueeNode, state: marquee } = useMarquee(title)
 
   const running = status.type === 'active'
   const errored = status.type === 'systemError'
-  const awaitingApproval =
-    status.type === 'active' && status.activeFlags.some((f) => String(f).includes('pproval'))
-  const busy = running || errored
+  const unread = unreadChatIds.has(id)
+  // Codex 的 isActive = 当前打开 —— 与是否正在跑无关
+  const isActive = activeChatId === id
+  // 状态槽(spinner / 未读点);报错的图标在前导槽,不占这里
+  const statusSlot: 'loading' | 'unread' | null = running ? 'loading' : unread ? 'unread' : null
 
-  // Codex 只观测到运行态用 textLink 色;报错/待审批是本项目自有的状态,沿用语义色
-  const dotColor = errored
-    ? 'var(--color-token-editor-error-foreground, #ba2623)'
-    : awaitingApproval
-      ? 'var(--color-accent-orange, #c2570b)'
-      : 'var(--vscode-textLink-foreground)'
-
-  const railWidth = trailingRailWidth(busy ? 1 : 0)
+  const railWidth = trailingRailWidth(statusSlot != null ? 1 : 0)
   /* 见组件注释:无项目归属的会话没有悬浮卡片(Codex 的 disableHoverCard 分支) */
   const hoverCardDisabled = chat.projectId == null
 
@@ -131,10 +142,15 @@ export function SidebarThreadRow({
         data-app-action-sidebar-thread-title={title}
         data-app-action-sidebar-thread-kind="local"
         data-app-action-sidebar-thread-pinned={pinned ? 'true' : 'false'}
-        data-app-action-sidebar-thread-active={running ? 'true' : 'false'}
-        data-app-action-sidebar-thread-selected={activeChatId === id ? 'true' : 'false'}
+        data-app-action-sidebar-thread-active={isActive ? 'true' : 'false'}
+        data-app-action-sidebar-thread-selected={isActive ? 'true' : 'false'}
         onClick={() => openChat(id)}
         onKeyDown={(e) => {
+          /*
+           * Codex 的键盘守卫:只有事件落在**行本身**才算数 —— 子按钮上的
+           * Enter/Space 冒泡上来不该触发行(否则焦点在 Pin 上按空格会连会话一起打开)。
+           */
+          if (e.currentTarget !== e.target) return
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
             openChat(id)
@@ -143,23 +159,22 @@ export function SidebarThreadRow({
         /*
          * 类名顺序与 Codex 实测一致。光标由 `cursor-interaction` 决定 ——
          * 桌面端解析成 **default(箭头)**,置顶与否都一样。
-         * 这里原先有个 `style={pinned ? {cursor:'grab'} : undefined}`,内联样式压过了
-         * cursor-interaction,置顶会话就变成小手,和项目行不一致 —— Codex 没有这个。
          * 拖拽手感靠外层 sortable 包装的 `cursor-grab` 给(实测 Codex 也是挂在
          * 包装层上而不是行上)。
          *
-         * 行高亮不需要在卡片打开时手动补:hover 卡片时指针虽然离开了行,但
-         * `data-state="delayed-open"` 由 Tooltip 落在行上,样式挂它就行 ——
-         * 这也是 Codex 的做法(行类名里没有任何 JS 拼接的高亮态)。
+         * isActive(当前打开)时 Codex 在行尾**追加静态** `bg-token-list-hover-background`
+         * —— 选中态因此不依赖 data 选择器的单一通道。
          */
-        className="group relative cursor-interaction text-sm hover:bg-token-list-hover-background focus-visible:outline-offset-[-2px] data-[app-action-sidebar-thread-selected=true]:bg-token-list-hover-background data-[state=delayed-open]:bg-token-list-hover-background py-row-y h-[var(--height-token-row)] sidebar-item pe-row-y ps-[var(--padding-row-cell-x,var(--padding-row-x))]"
+        className={cx(
+          'group relative cursor-interaction text-sm hover:bg-token-list-hover-background focus-visible:outline-offset-[-2px] data-[app-action-sidebar-thread-selected=true]:bg-token-list-hover-background py-row-y h-[var(--height-token-row)] sidebar-item pe-row-y ps-[var(--padding-row-cell-x,var(--padding-row-x))]',
+          isActive && 'bg-token-list-hover-background'
+        )}
       >
         {/* 1. 悬浮操作 */}
         <div className="contents" data-hover-card-open-immediately="true">
-          <div className="absolute end-0 top-0 z-10 flex h-full w-[52px] items-center justify-end gap-2 me-0.5 pe-0.5 opacity-0 group-hover:opacity-100 [&:has(:focus-visible)]:opacity-100 group-data-[title-aligned-trailing-rail=true]:items-start group-data-[title-aligned-trailing-rail=true]:me-0 group-data-[title-aligned-trailing-rail=true]:pe-row-y group-data-[title-aligned-trailing-rail=true]:pt-1.5">
+          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 [&:has(:focus-visible)]:opacity-100 absolute end-0 top-0 z-10 flex h-full items-center justify-end gap-2 pe-0.5 group-data-[title-aligned-trailing-rail=true]:items-start group-data-[title-aligned-trailing-rail=true]:pe-row-y group-data-[title-aligned-trailing-rail=true]:pt-1.5 me-0.5 group-data-[title-aligned-trailing-rail=true]:me-0 w-[52px]">
             <Tooltip tooltipContent={pinned ? 'Unpin chat' : 'Pin chat'}>
-              <button
-                type="button"
+              <ThreadRowActionButton
                 aria-label={pinned ? 'Unpin chat' : 'Pin chat'}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -169,12 +184,11 @@ export function SidebarThreadRow({
                 onPointerDown={(e) => e.stopPropagation()}
                 className={ACTION_BTN}
               >
-                {pinned ? <UnpinIcon className="translate-x-px" /> : <PinIcon />}
-              </button>
+                {pinned ? <UnpinIcon /> : <PinIcon />}
+              </ThreadRowActionButton>
             </Tooltip>
             <Tooltip tooltipContent="Archive chat">
-              <button
-                type="button"
+              <ThreadRowActionButton
                 aria-label="Archive chat"
                 onClick={(e) => {
                   e.stopPropagation()
@@ -184,29 +198,33 @@ export function SidebarThreadRow({
                 className={ACTION_BTN}
               >
                 <ArchiveIcon />
-              </button>
+              </ThreadRowActionButton>
             </Tooltip>
           </div>
         </div>
 
-        {/* 2. 状态槽 —— 仅非空闲时渲染 */}
-        {busy && (
+        {/* 2. 状态槽 —— 进行中 spinner / 未读蓝点,其余不渲染 */}
+        {statusSlot != null && (
           <div
             data-hover-card-open-immediately="true"
-            className="absolute end-0 top-0 z-10 flex h-full min-w-[52px] shrink-0 items-center justify-end gap-2 pe-1 group-hover:hidden group-has-[:focus-visible]:hidden group-data-[title-aligned-trailing-rail=true]:relative group-data-[title-aligned-trailing-rail=true]:h-5 group-data-[title-aligned-trailing-rail=true]:min-w-0 group-data-[title-aligned-trailing-rail=true]:pe-0"
-            aria-label={
-              errored ? 'Stopped with an error' : awaitingApproval ? 'Waiting for you' : 'Running'
-            }
+            className="flex shrink-0 items-center justify-end absolute end-0 top-0 z-10 flex h-full min-w-[52px] items-center justify-end gap-2 pe-1 group-data-[title-aligned-trailing-rail=true]:relative group-data-[title-aligned-trailing-rail=true]:h-5 group-data-[title-aligned-trailing-rail=true]:min-w-0 group-data-[title-aligned-trailing-rail=true]:pe-0 group-hover:hidden group-has-[:focus-visible]:hidden"
+            aria-label={statusSlot === 'loading' ? 'Running' : 'Unread'}
           >
             <span className="flex h-5 min-w-5 items-center justify-center">
-              <div className="relative flex size-5 shrink-0 items-center justify-center text-token-description-foreground">
-                <span className="icon-xs relative scale-50">
-                  <span
-                    className="absolute inset-0 rounded-full"
-                    style={{ backgroundColor: dotColor }}
-                  />
-                </span>
-              </div>
+              {statusSlot === 'loading' ? (
+                <div className="relative flex size-5 shrink-0 items-center justify-center text-token-foreground/70">
+                  <Spinner className="icon-xs shrink-0" animationDurationMs={2000} />
+                </div>
+              ) : (
+                <div className="relative flex size-5 shrink-0 items-center justify-center text-token-description-foreground">
+                  <span className="icon-xs relative scale-50">
+                    <span
+                      className="absolute inset-0 rounded-full"
+                      style={{ backgroundColor: 'var(--vscode-textLink-foreground)' }}
+                    />
+                  </span>
+                </div>
+              )}
             </span>
           </div>
         )}
@@ -215,13 +233,20 @@ export function SidebarThreadRow({
         <div className="flex h-full w-full items-center text-sm leading-4">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             {/*
-             * 前导槽 —— 分组行专有,空的也要留(见 isGrouped 的注释)。
-             * 内层那个 relative 容器是给「静息图标 / hover 图标」互换用的,
-             * 本项目暂时两者都没有,但层级照 Codex 留着。
+             * 前导槽 —— 分组行无条件渲染(占位缩进),非分组行**有错才渲染**
+             * (Codex:错误图标在行首,icon-xs + text-token-error-foreground)。
              */}
-            {isGrouped && (
+            {(isGrouped || errored) && (
               <div className="flex w-4 shrink-0 items-center justify-center">
-                <div className="relative flex items-center justify-center" />
+                <div className="relative flex items-center justify-center">
+                  {errored && (
+                    <span className="flex items-center justify-center">
+                      <div className="relative flex size-5 shrink-0 items-center justify-center text-token-description-foreground">
+                        <ErrorCircleIcon className="icon-xs shrink-0 text-token-error-foreground" />
+                      </div>
+                    </span>
+                  )}
+                </div>
               </div>
             )}
             <div

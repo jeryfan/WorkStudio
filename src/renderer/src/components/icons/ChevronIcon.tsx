@@ -1,6 +1,9 @@
 import type { IconProps } from './types'
 
-export function ChevronIcon({ className }: IconProps): React.JSX.Element {
+export function ChevronIcon({
+  className,
+  'aria-hidden': ariaHidden
+}: IconProps): React.JSX.Element {
   return (
     <svg
       width="20"
@@ -9,6 +12,7 @@ export function ChevronIcon({ className }: IconProps): React.JSX.Element {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden={ariaHidden}
     >
       <path
         d="M15.2793 7.71101C15.539 7.45131 15.961 7.45131 16.2207 7.71101C16.4804 7.97071 16.4804 8.39272 16.2207 8.65242L10.4707 14.4024C10.211 14.6621 9.78902 14.6621 9.52932 14.4024L3.77932 8.65242L3.69436 8.54792C3.52385 8.28979 3.55205 7.93828 3.77932 7.71101C4.00659 7.48374 4.3581 7.45554 4.61623 7.62605L4.72073 7.71101L10 12.9903L15.2793 7.71101Z"
