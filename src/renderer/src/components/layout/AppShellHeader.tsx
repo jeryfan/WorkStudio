@@ -1,6 +1,8 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useCallback, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { motion, useMotionTemplate } from 'framer-motion'
 import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
 import { useSidePanelTabActions } from '../panel/useSidePanelTabActions'
+import { cx } from '../../utils/cx'
 import { ArrowIcon, BottomPanelIcon, SidebarHideIcon, SidePanelIcon } from '../icons'
 
 /**
@@ -31,7 +33,7 @@ function HdrButton({
 }
 
 /**
- * 槽内容 —— 左右两侧各渲染**两遍**:一份不可见的测量副本 + 一份真实的。
+ * 槽内容 —— 左右两侧各渲染**两遍**:一份不可见的测量副本 + 一份真实的(Codex `cJr`)。
  *
  * Codex 这么做是因为槽是 `[container-type:inline-size]` 容器:中间的
  * context-menu-surface 要靠容器查询知道两侧占了多宽才能算自己的可用宽度,
@@ -40,81 +42,108 @@ function HdrButton({
  *
  * 副本必须带 `[&_*]:![view-transition-name:none]` —— 否则视图过渡时
  * 同名元素出现两份,过渡直接失效。
+ *
+ * padding 只在槽内**有 entry 时**才加(Codex `!!e.length && a`),且:
+ *   start 槽 → `ps-[max(var(--spacing-token-safe-header-left),0.5rem)]`
+ *   start 槽里有 align=end 的 entry,或 end 槽 → 再加 `pe-2`
  */
 function HeaderSlot({
   side,
+  hasEndAlignedEntry = false,
   children
 }: {
   side: 'start' | 'end'
+  /** Codex `e.some(({align}) => align === 'end')` —— 决定 start 槽是否补 pe-2 */
+  hasEndAlignedEntry?: boolean
   children: ReactNode
 }): React.JSX.Element {
-  const pad = side === 'start' ? 'ps-[max(var(--spacing-token-safe-header-left),0.5rem)]' : 'pe-2'
+  const pad = cx(
+    side === 'start' && 'ps-[max(var(--spacing-token-safe-header-left),0.5rem)]',
+    ((side === 'start' && hasEndAlignedEntry) || side === 'end') && 'pe-2'
+  )
   /*
-   * 测量副本 → 真实槽宽(Codex `upsertHeaderSlotElement`)。
+   * 两个宽度,两种来源 —— Codex `cJr` 逐字:
    *
-   * 真实槽是 `shrink-0` + `[container-type:inline-size]`:容器查询要求它的宽度
-   * **不能由内容决定**,所以它自己不会被内容撑开 —— 不给宽度时宽度就只剩 padding。
-   * 实测(1200 视口):右槽 `pe-2` → 宽 8px,里面两个 28px 按钮溢出到
-   * x=1192 / 1226,而视口只到 1200,于是“右上角的图标从来没出现过”。
+   *     style: { width: slotWidth, minWidth: `${fitWidth}px` }
+   *     // start: slotWidth = leftPanelAnimatedWidth
+   *     // end:   slotWidth = rightPanelAnimatedWidth
+   *     // fitWidth = 不可见副本量出来的内容自然宽
    *
-   * Codex 的做法就是先量一遍(bundle 里 `headerLeftWidth` / `headerRightWidth`),
-   * 把不可见副本的宽度写回真实槽,**同时发布到 AppShell store** ——
-   * 右面板 strip 的 header 让位 spacer 和全宽时的左侧占位都读这个值。
-   * 副本必须带 `[&_*]:![view-transition-name:none]`,否则视图过渡时同名元素出现两份。
+   * `width` **是面板宽度**,不是内容宽度:header 是 `fixed inset-x-0` 横跨整窗,
+   * 两端槽各预留一个面板的宽度,中段(标题 + 三点菜单)才落在两个面板之间的
+   * 净跨度里。8214 实测(窗口 1200、侧栏 358.99):
+   *     侧栏开 → `width: 358.99px; min-width: 180px`,标题 x=373
+   *     侧栏关 → `width: 0px; min-width: 214px`,标题 x=222
+   *     右面板开 489 → end 槽 `width: 489.01px; min-width: 70px`
+   *
+   * 之前这里把**测量宽写进了 width**、且没有 minWidth,于是槽只有 ~180px 宽,
+   * 标题从 x≈188 开始 —— 正好压进 340px 的侧栏里。这就是「标题从侧边栏开始」。
+   *
+   * `min-width` 的作用是反向保底:侧栏折叠(width:0)时槽仍要容下自己的按钮。
    */
-  const { setHeaderSlotWidth } = useAppShell()
-  const measureRef = useRef<HTMLDivElement | null>(null)
+  const {
+    headerLeftWidth,
+    headerRightWidth,
+    leftPanelAnimatedWidth,
+    rightPanelAnimatedWidth,
+    rightPanelWidthMode
+  } = useAppShell()
+  const fitWidth = side === 'start' ? headerLeftWidth : headerRightWidth
+  /*
+   * Codex `kJr`:**full-width 模式下 rightPanelAnimatedWidth 恒为 0** ——
+   * 面板占满主区时 header 右槽不再让位(让位改由 tab strip 自己的 spacer 承担)。
+   */
+  const slotWidth =
+    side === 'start'
+      ? leftPanelAnimatedWidth
+      : rightPanelWidthMode === 'full'
+        ? 0
+        : rightPanelAnimatedWidth
+  const minWidth = useMotionTemplate`${fitWidth}px`
 
-  useEffect(() => {
-    const el = measureRef.current
-    if (el == null) return
-    const apply = (): void => setHeaderSlotWidth(side, el.getBoundingClientRect().width)
-    apply()
-    const ro = new ResizeObserver(apply)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [side, setHeaderSlotWidth])
+  /*
+   * 测量副本 → fitWidth(Codex `Rj` 的 resize-observer callback ref,`t.set(width)`)。
+   * 直接写 MotionValue,不过 React:这个值每帧都可能变(字体加载、按钮增减),
+   * 走 state 会白白重渲染整棵 shell。
+   */
+  const measureRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (el == null) return
+      fitWidth.set(el.getBoundingClientRect().width)
+      const ro = new ResizeObserver(() => fitWidth.set(el.getBoundingClientRect().width))
+      ro.observe(el)
+      return () => ro.disconnect()
+    },
+    [fitWidth]
+  )
 
   return (
     <>
       <div
         ref={measureRef}
         aria-hidden="true"
-        className={`invisible pointer-events-none fixed top-0 left-0 min-w-max [&_*]:![view-transition-name:none] ${pad}`}
+        className={cx(
+          'invisible pointer-events-none fixed top-0 left-0 min-w-max [&_*]:![view-transition-name:none]',
+          pad
+        )}
       >
         <div className="inline-flex h-full items-center gap-1.5 no-drag pointer-events-auto w-auto">
           {children}
         </div>
       </div>
-      {/* 宽度 = start 槽:headerLeftWidth / end 槽:headerRightWidth,从 AppShell store 读回 */}
-      <HeaderSlotReal side={side} pad={pad}>
-        {children}
-      </HeaderSlotReal>
+      <motion.div
+        data-test-id="header-shell-slot"
+        className={cx(
+          'pointer-events-none relative h-full shrink-0 [container-type:inline-size]',
+          pad
+        )}
+        style={{ width: slotWidth, minWidth }}
+      >
+        <div className="inline-flex h-full items-center gap-1.5 pointer-events-none w-full">
+          {children}
+        </div>
+      </motion.div>
     </>
-  )
-}
-
-function HeaderSlotReal({
-  side,
-  pad,
-  children
-}: {
-  side: 'start' | 'end'
-  pad: string
-  children: ReactNode
-}): React.JSX.Element {
-  const { headerLeftWidth, headerRightWidth } = useAppShell()
-  const width = side === 'start' ? headerLeftWidth : headerRightWidth
-  return (
-    <div
-      data-test-id="header-shell-slot"
-      className={`pointer-events-none relative h-full shrink-0 [container-type:inline-size] ${pad}`}
-      style={width === 0 ? undefined : { width: `${width}px` }}
-    >
-      <div className="inline-flex h-full items-center gap-1.5 pointer-events-none w-full">
-        {children}
-      </div>
-    </div>
   )
 }
 
@@ -238,15 +267,23 @@ export function AppShellHeader(): React.JSX.Element {
  */
 function HeaderContextSurface(): React.JSX.Element {
   const headerNode = useAppShellSlot('header')
-  const { headerActions } = useAppShell()
+  const { headerActions, rightPanelWidthMode } = useAppShell()
   const start = headerActions.filter((a) => a.align === 'start')
   const end = headerActions.filter((a) => a.align === 'end')
+  /*
+   * Codex `m = J($E)`(右面板 full-width):中段整块 `aria-hidden` + `invisible` ——
+   * 面板占满主区时标题不可见也不该被读屏器念到,但结构留着(宽度参与布局)。
+   */
+  const hidden = rightPanelWidthMode === 'full'
 
   return (
     <div
-      aria-hidden="false"
+      aria-hidden={hidden}
       data-testid="app-shell-header-context-menu-surface"
-      className="pointer-events-none relative ms-2 flex h-full min-w-0 flex-1 isolate items-center gap-1.5 overflow-hidden [contain:layout_paint] pe-1.5"
+      className={cx(
+        'pointer-events-none relative ms-2 flex h-full min-w-0 flex-1 isolate items-center gap-1.5 overflow-hidden [contain:layout_paint] pe-1.5',
+        hidden && 'invisible'
+      )}
     >
       {headerNode != null && (
         <div className="pointer-events-none w-full min-w-0 flex-1 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_select]:pointer-events-auto [&_textarea]:pointer-events-auto">

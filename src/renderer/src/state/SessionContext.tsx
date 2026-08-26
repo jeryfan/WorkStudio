@@ -65,6 +65,13 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null)
 
+/**
+ * 目录外模型的展示名 —— Codex 的 `composer.mode.local.model.custom`
+ * (defaultMessage `Custom`,description "Custom model from config")。
+ * 本项目没有 i18n 层,取 defaultMessage。
+ */
+const CUSTOM_MODEL_LABEL = 'Custom'
+
 export function SessionProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [models, setModels] = useState<ModelOption[]>([])
   const [followUpQueueMode, setFollowUpQueueMode] = useState<'queue' | 'steer'>('queue')
@@ -135,9 +142,20 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
 
   const value = useMemo<SessionContextValue>(() => {
     /*
-     * 目录里找不到当前 model id 时也要显示它 —— config 里可能配了一个
-     * model/list 没返回的模型名（自定义 provider 常见）。Codex 同样是
-     * "以选择为准"，picker 显示原始 id，而不是回落到目录第一项装作没事。
+     * 目录里找不到当前 model id 时**仍以选择为准**（不回落到目录第一项装作没事），
+     * 但展示名走 Codex 的固定回落串 `Custom`：
+     *
+     *     o = oe?.displayName ?? intl.formatMessage({
+     *           id: `composer.mode.local.model.custom`, defaultMessage: `Custom`,
+     *           description: `Custom model from config` })
+     *
+     * 自定义 provider（config 里 `model_provider = "custom"`）下 `model/list` 返回
+     * 的目录里没有这个 id，Codex 的 pill 就显示 `Custom`——8214 实测:config 是
+     * `model = "deepseek-v4-flash"` 时 pill 是 `Custom High`，而菜单行的
+     * `aria-label` 仍是 `Model deepseek-v4-flash`（原始 id 只进无障碍名，不进可见文本）。
+     *
+     * 之前这里把 id 直接当 displayName，于是界面上出现 `gpt-5.5` / `deepseek-v4-flash`
+     * 这种裸 slug —— 那不是 Codex 的行为。
      */
     const known = models.find((m) => m.id === selection.model) ?? null
     const model =
@@ -146,7 +164,7 @@ export function SessionProvider({ children }: { children: ReactNode }): React.JS
         ? null
         : {
             id: selection.model,
-            displayName: selection.model,
+            displayName: CUSTOM_MODEL_LABEL,
             efforts: [],
             defaultEffort: selection.effort ?? '',
             isDefault: false

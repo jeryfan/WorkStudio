@@ -20,11 +20,18 @@ import { TIMELINE_SCROLL_ATTR } from './preserveViewportPosition'
  *           └ div.flex.min-h-full.shrink-0.flex-col.justify-start
  *             ├ div.mx-auto.w-full.max-w-(--thread-content-max-width).px-toolbar
  *             │     .relative.flex.flex-1.shrink-0.flex-col.pb-8 [data-mcp-app-portal-target]
- *             │ └ div…gap-3 [data-thread-find-target="conversation"]     ← 消息流
+ *             │ └ children                                        ← 由调用方给
  *             └ div.sticky.bottom-0.z-10.mt-auto.w-full.pb-4 [data-thread-scroll-footer]
  *               ├ div.pointer-events-none.absolute.inset-x-0.bottom-0.z-0…pt-4   ← 底部渐隐
  *               └ div.relative.z-10.flex.flex-col.mx-auto…px-toolbar [data-pip-obstacle]
  *                 └ Composer
+ *
+ * **portal target 里放什么不归这一层管。** Codex 的 `ThreadScrollLayout` 只渲染
+ * 这个外壳(`children: t`),`div[data-thread-find-target="conversation"]` 那层
+ * 归 `LocalConversationThread`(本项目的 ChatView)—— 因为加载态要**替换掉**
+ * 整个消息流容器,把 loader 直接挂成 portal target 的子元素(`fillParent`,
+ * `absolute inset-0` 居中)。消息流容器焊死在这里的话 loader 就只能塞进流里,
+ * 变成顶部的一行文字。
  *
  * **Codex 不做窗口化虚拟滚动。** 整个消息流一次性渲染,靠三层机制扛性能:
  * - 外层 `[content-visibility:auto]` 让浏览器跳过视口外的布局与绘制
@@ -56,7 +63,10 @@ export function ThreadScrollContainer({
   children,
   footer
 }: {
-  /** 消息流(渲染进 data-thread-find-target="conversation") */
+  /**
+   * portal target 的内容。thread 路由传的是「消息流容器」或「加载指示器」二选一
+   * (Codex `LocalConversationThread` 的返回值)——**不要**在这一层包消息流容器。
+   */
   children: ReactNode
   /** 输入区 —— Codex 放在 sticky 底槽里,是消息流的兄弟 */
   footer?: ReactNode
@@ -83,12 +93,7 @@ export function ThreadScrollContainer({
                     data-mcp-app-portal-target="true"
                     className="mx-auto w-full max-w-(--thread-content-max-width) px-toolbar relative flex flex-1 shrink-0 flex-col pb-8"
                   >
-                    <div
-                      data-thread-find-target="conversation"
-                      className="relative flex flex-col gap-3 electron:[--color-token-description-foreground:color-mix(in_srgb,var(--color-token-foreground)_70%,transparent)]"
-                    >
-                      {children}
-                    </div>
+                    {children}
                   </div>
                   <div
                     data-thread-scroll-footer="true"

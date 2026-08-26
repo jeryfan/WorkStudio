@@ -95,7 +95,6 @@ function Shell(): React.JSX.Element {
     rightPanelWidth,
     setRightPanelWidth,
     commitRightPanelWidth,
-    rightPanelOpen,
     bottomPanelOpen,
     rightPanelWidthMode,
     bottomPanelHeight,
@@ -186,7 +185,6 @@ function Shell(): React.JSX.Element {
           rightPanelFullWidth={rightPanelWidthMode === 'full'}
           rightPanel={
             <RightPanel
-              isOpen={rightPanelOpen}
               width={rightPanelWidth}
               onResize={setRightPanelWidth}
               onResizeEnd={(finalWidth) => {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useChatRuntime } from '../state/ChatRuntimeContext'
 import { Composer } from '../components/composer/Composer'
+import { LoadingIndicator } from '../components/loading/LoadingIndicator'
 import { latestTodos, turnsToRows } from './adapter/entryToContent'
 import { ChatActionsProvider } from './ChatActionsContext'
 import { ThreadScrollContainer } from './ThreadScrollContainer'
@@ -30,6 +31,16 @@ import { ThreadHeaderRegistration } from '../components/layout/ThreadHeaderSlot'
  *
  * adapter 仍然产出 request/response 两种行(那层是协议投影,与渲染无关),
  * 这里按 id 把相邻的 request+response 合成一个 turn。
+ *
+ * **加载态是「替换整个消息流」而不是「流里插一行」**(Codex `Bk` 的返回值):
+ *
+ *     return (!hasConversation && !isResuming) || (isResuming && !hasRenderableTurns)
+ *       ? <LoadingIndicator fillParent debugName="LocalConversationThread.state" />
+ *       : <>…消息流…</>
+ *
+ * 所以 `div[data-thread-find-target="conversation"]` 那层归本组件,不归
+ * ThreadScrollContainer —— loader 要直接挂成 portal target 的子元素才能
+ * `absolute inset-0` 居中(见 ThreadScrollContainer 的说明)。
  */
 export function ChatView(): React.JSX.Element {
   const {
@@ -110,62 +121,75 @@ export function ChatView(): React.JSX.Element {
           </>
         }
       >
-        {readOnly && readOnlyReason && (
-          <div className="rounded-lg bg-token-editor-warning-foreground/10 px-3 py-2 text-sm text-token-editor-warning-foreground">
-            {readOnlyReason}
+        {/*
+         * Codex `Bk` 的加载分支。它的完整条件是
+         *   (!hasConversation && !isResuming) || (!statsigGate && isResuming && !hasRenderableTurns)
+         * 第一个析取项在本项目里恒为假:切会话时 resetView() 与 setLoading(true) 在
+         * 同一个 effect 里提交,不存在「既没有会话又没在 resume」的中间帧。
+         * 所以这里只留第二项 —— 与 8214 实测一致(点会话后 loader 闪约 300ms)。
+         */}
+        {loading && turnGroups.length === 0 ? (
+          <LoadingIndicator fillParent debugName="LocalConversationThread.state" />
+        ) : (
+          <div
+            data-thread-find-target="conversation"
+            className="relative flex flex-col gap-3 electron:[--color-token-description-foreground:color-mix(in_srgb,var(--color-token-foreground)_70%,transparent)]"
+          >
+            {readOnly && readOnlyReason && (
+              <div className="rounded-lg bg-token-editor-warning-foreground/10 px-3 py-2 text-sm text-token-editor-warning-foreground">
+                {readOnlyReason}
+              </div>
+            )}
+            {turnGroups.map((group) => {
+              const req = group.request?.kind === 'request' ? group.request : undefined
+              const res = group.response?.kind === 'response' ? group.response : undefined
+              /*
+               * Edit message 的显隐门(Codex `onEditUserMessage` 的 undefined 分支):
+               * 最新一轮 + 轮次不在跑 + 会话可写。
+               */
+              const canEdit =
+                req != null &&
+                group.key === lastRequestKey &&
+                !readOnly &&
+                (res == null || res.isComplete)
+              return (
+                <ThreadTurn key={group.key} turnKey={group.key}>
+                  {req && (
+                    <ThreadUserMessage
+                      unitKey={group.key}
+                      sentTime={formatUserMessageTime(req.timestamp)}
+                      actions={
+                        <UserMessageActions
+                          text={req.text}
+                          onEdit={canEdit ? () => setEditingTurnKey(group.key) : undefined}
+                        />
+                      }
+                      editing={
+                        editingTurnKey === group.key ? (
+                          <UserMessageEditForm
+                            initialText={req.text}
+                            onCancel={() => setEditingTurnKey(null)}
+                            onSubmit={(text) => {
+                              setEditingTurnKey(null)
+                              void editUserMessage(group.key, text).catch(() => {})
+                            }}
+                          />
+                        ) : undefined
+                      }
+                    >
+                      <MarkdownPart
+                        content={{ kind: 'markdownContent', content: req.text, phase: null }}
+                        textStyle="user-message"
+                      />
+                    </ThreadUserMessage>
+                  )}
+                  {req && res && <ThreadTurnGap />}
+                  {res && <ThreadTurnBody row={res} isLastResponse={res.id === lastResponseId} />}
+                </ThreadTurn>
+              )
+            })}
           </div>
         )}
-        {turnGroups.length === 0 && loading && (
-          <div className="text-sm text-token-description-foreground">Loading…</div>
-        )}
-        {turnGroups.map((group) => {
-          const req = group.request?.kind === 'request' ? group.request : undefined
-          const res = group.response?.kind === 'response' ? group.response : undefined
-          /*
-           * Edit message 的显隐门(Codex `onEditUserMessage` 的 undefined 分支):
-           * 最新一轮 + 轮次不在跑 + 会话可写。
-           */
-          const canEdit =
-            req != null &&
-            group.key === lastRequestKey &&
-            !readOnly &&
-            (res == null || res.isComplete)
-          return (
-            <ThreadTurn key={group.key} turnKey={group.key}>
-              {req && (
-                <ThreadUserMessage
-                  unitKey={group.key}
-                  sentTime={formatUserMessageTime(req.timestamp)}
-                  actions={
-                    <UserMessageActions
-                      text={req.text}
-                      onEdit={canEdit ? () => setEditingTurnKey(group.key) : undefined}
-                    />
-                  }
-                  editing={
-                    editingTurnKey === group.key ? (
-                      <UserMessageEditForm
-                        initialText={req.text}
-                        onCancel={() => setEditingTurnKey(null)}
-                        onSubmit={(text) => {
-                          setEditingTurnKey(null)
-                          void editUserMessage(group.key, text).catch(() => {})
-                        }}
-                      />
-                    ) : undefined
-                  }
-                >
-                  <MarkdownPart
-                    content={{ kind: 'markdownContent', content: req.text, phase: null }}
-                    textStyle="user-message"
-                  />
-                </ThreadUserMessage>
-              )}
-              {req && res && <ThreadTurnGap />}
-              {res && <ThreadTurnBody row={res} isLastResponse={res.id === lastResponseId} />}
-            </ThreadTurn>
-          )
-        })}
       </ThreadScrollContainer>
     </ChatActionsProvider>
   )

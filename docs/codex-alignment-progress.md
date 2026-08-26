@@ -691,3 +691,163 @@ WS 现在:`openFilesTab({line, endLine})` → 描述符 props → `CodePane reve
 - `fs/watch` 通路本身另做过一次裸探针(watch /tmp 文件 → 追加 → 收到
   `{watchId, changedPaths:[…]}`),确认协议侧可用后才动手写这一层。
 - typecheck(node + web)干净;eslint src 0 error。
+
+## 2026-08-26:加载态、header 槽让位、目录外模型名
+
+三处都是「结构对了但真值来源接错」的类型,取证基线:8214 运行时 + `app-initial` / `local-conversation-thread` / `thread-scroll-layout` 三个 chunk。
+
+### 1. header 两端槽:`width` 是**面板宽度**,不是内容宽度
+
+Codex `cJr`(app-initial:6604632 起)逐字:
+
+```js
+style: { width: slotWidth, minWidth: `${fitWidth}px` }
+// start: slotWidth = leftPanelAnimatedWidth
+// end:   slotWidth = rightPanelAnimatedWidth   （kJr:full-width 时恒 0）
+// fitWidth = 不可见测量副本的自然宽（headerLeftWidth / headerRightWidth）
+```
+
+header 是 `fixed inset-x-0` 横跨整窗,两端槽各预留**一个面板的宽度**,中段
+(标题 + 三点菜单)才落在两个面板之间的净跨度里。`min-width` 是反向保底:
+面板折叠(`width:0`)时槽仍要容下自己的按钮。
+
+8214 实测(窗口 1200、侧栏 358.99):
+
+| 状态 | start 槽 | end 槽 | 标题 x |
+|---|---|---|---|
+| 侧栏开 | `width: 358.99px; min-width: 180px` | `width: 0px; min-width: 70px` | 373 |
+| 侧栏关 | `width: 0px; min-width: 214px` | 同上 | 222 |
+| 右面板开 489 | 不变 | `width: 489.01px; min-width: 70px` | — |
+
+WS 此前把**测量宽写进了 `width`** 且没有 `minWidth`,槽只有 ~180px,标题从
+x≈188 起 —— 压进 340px 的侧栏里。这就是「会话标题和三点菜单从侧边栏开始」。
+
+改动:
+- `AppShellContext` 新增 `headerLeftWidth` / `headerRightWidth` /
+  `leftPanelWidth` / `leftPanelAnimatedWidth` / `rightPanelAnimatedWidth` /
+  `rightPanelProgress` / `rightPanelMounted`,全部是 **MotionValue**
+  (对齐 Codex app shell 根 `AYr` 持有的那一组);删掉 `setHeaderSlotWidth`
+  —— 测量副本的 ResizeObserver 直接 `.set()`,不过 React。
+- 新增 `utils/usePanelReveal.ts`(Codex `UPr` + spring 常量 `WE`):
+  0..1 progress 上弹簧,`animatedSize = clamp01(progress) × size`。
+  **不是给宽度上弹簧** —— 拖拽中 progress 恒 1,宽度 1:1 跟手;
+  弹簧挂在宽度上时面板边缘与 header 让位槽都会落在指针后面几帧。
+  折叠时 `size` 仍取折叠前的宽度(`sidebarOpen ? sidebarWidth : lastSidebarWidth`,
+  对齐 Codex 的 `I` —— 折叠只翻 `oD` 布尔而不写宽度),否则关闭动画会瞬间跳完。
+- `LeftPanelFrame` / `RightPanel` 不再各自持有 MotionValue,改读 store;
+  `RightPanel` 的 `isOpen` prop 删除(Codex `EJr` 同样读全局状态)。
+- 顺手补齐 `cJr` 的三处细节:padding 类只在槽内有 entry 时加、start 槽有
+  `align: end` 的 entry 时才补 `pe-2`、中段的 `aria-hidden` + `invisible`
+  由右面板 full-width 驱动(`J($E)`)而不是写死 `"false"`。
+- `RightPanelTabs` 两个 spacer 改 `motion.div` 消费同一份 MotionValue。
+  Codex 的模板是 `` ap`max(0px, calc(${s}px)` ``(少一个右括号,Chrome 在 EOF
+  处自动闭合数学函数并折叠常量,实测序列化成 `width: calc(70px)`);WS 把括号
+  补齐,计算结果等价。
+
+### 2. 加载态:blossom 流光,不是一行 `Loading…`
+
+Codex `LocalConversationThread`(`local-conversation-thread` chunk)的返回值:
+
+```js
+vt = isResuming && !hasRenderableTurns && !(projectionMode && entries.some(e => !rc(e)))
+return (!hasConversation && !isResuming) || (!gate416252813 && vt)
+  ? <Loading fillParent debugName="LocalConversationThread.state" />
+  : hasSubagentParent && !hasRenderableTurns
+    ? <Loading fillParent debugName="LocalConversationThread.subagentTurns" />
+    : <>…会话流…</>
+```
+
+loader 本体 `Jir` + `Uir`(app-initial:5721743 / 5723249),实测 DOM:
+
+```
+div.flex.items-center.justify-center.absolute.inset-0.bg-transparent   ← fillParent
+└ div.flex.flex-col.items-center.gap-2
+  └ div._Root_174ad_11.size-14 [aria-hidden]
+    ├ svg.Base                              ← 21×21 OpenAI blossom,实色底
+    └ div._Overlay_174ad_48 [mask-image=同一个 svg 的 data URI]
+```
+
+`_Overlay` 是 112° 高光渐变 + `2.2s cubic-bezier(.4,0,.2,1) infinite` 的
+`_shimmer_174ad_1`(background-position 140% → -105%),reduced-motion 下停掉。
+
+新增:`components/icons/BlossomIcon.tsx`(Codex `Jh`)、
+`components/icons/blossomMask.ts`(Codex `Pir` + `$k`,遮罩要 URL 不能要 React
+元素,所以同一个标记必须存两份,连缩进换行都照原样 —— DOM 里的 `%0A%20%20` 就是它们)、
+`components/loading/BlossomShimmer.tsx`(`Uir`)、
+`components/loading/LoadingIndicator.tsx`(`Jir`,overlay / fillParent / 裸三档)。
+
+**结构纠正**:`div[data-thread-find-target="conversation"]` 的归属。Codex 的
+`ThreadScrollLayout`(`thread-scroll-layout` chunk)只渲染 `[data-mcp-app-portal-target]`
+外壳并把 `children` 直接放进去,消息流容器归 `LocalConversationThread`;
+加载时 loader **替换**整个消息流容器、成为 portal target 的直接子元素,才能
+`absolute inset-0` 居中。WS 之前把消息流容器焊在 `ThreadScrollContainer` 里,
+loader 只能塞进流里变成顶部一行字。现在容器移到 `ChatView`(含 readOnly 提示),
+`ThreadScrollContainer` 只留外壳;`preview.tsx` 同步。
+`SideChatLoadingTab` 换成同一个组件同一档 —— Codex 的
+`LocalConversationSideChatLoadingTab.pending` 就是 `<Loading fillParent/>`。
+
+**顺带修掉一个 token 层缺陷**:`extract-codex-tokens.mjs` 的 `ownDecls` 会丢掉
+所有空值声明(否则 Tailwind 解析 `@theme` 报 "Invalid custom property"),
+连 `--lightningcss-light/-dark` 这对 light-dark() polyfill 一起丢了。
+Codex 把它们定义在 `.electron-light` / `.electron-dark`(app-DuLjgNkx.css),
+而 blossom 的底色与高光全靠这对变量选支:
+
+```css
+--openai-blossom-shimmer-base:
+  var(--lightningcss-light, color-mix(… 24%, transparent))
+  var(--lightningcss-dark,  color-mix(… 68%, transparent));
+```
+
+少了它们两个 `var()` 都取不到值 → 整条声明失效 → 底色变成**不透明**前景色、
+扫光渐变 computed 成 `none`(实测)。现在提取器把这一对写回 `semantic.css`
+的两个主题块首行(普通 CSS 规则,不过 Tailwind 的 token 解析器)。
+
+### 3. 目录外模型显示 `Custom`,不是原始 slug
+
+Codex `XVs`(app-initial:15844140 附近):
+
+```js
+oe = models.find((m) => m.model === selectedModel)
+label = oe?.displayName ?? intl.formatMessage({
+  id: `composer.mode.local.model.custom`, defaultMessage: `Custom` })
+```
+
+WS 之前在 `SessionContext` 里给目录外的模型合成 `displayName = id`,于是界面上
+出现 `gpt-5.5` / `deepseek-v4-flash` 这种裸 slug。现在按上面的链走:
+命中目录 → 用目录的 `displayName`;不命中 → `Custom`。
+`aria-label` 仍是 `Model <原始 id>`(与 Codex 一致:原始 id 只进无障碍名)。
+
+顺带回答「输入框默认模型为什么是 gpt-5.5」:**不是写死的**,`src/` 下 `gpt-5` 零命中。
+它来自 `~/.codex/config.toml` 顶层 `model`,经 `loadConfigDefault()` → `config/read`
+→ `resolveSelection(null)`(首页无线程时直接用 config 默认)。换成 deepseek 后
+同一条链读出 `deepseek-v4-flash`。
+
+> 一处需要留意的取证陷阱:8214 那个实例的模型子菜单是**空的**,所以它把
+> `deepseek-v4-flash` 显示成 `Custom`;WS 的 `model/list` 能返回
+> `model_catalog_json` 里的两个 deepseek 条目,所以显示 `DeepSeek V4 Flash`。
+> **两边走的是同一条代码路径,差异只来自数据。** 8214 是第三方 codex-web 宿主,
+> 它的 host 侧模型目录接线不完整,不能当成官方 Codex 的行为。
+
+### 验证(运行中的 dev 应用,CDP :9333 + preview :5199)
+
+- 会话切换:MutationObserver 抓到三态 —— `conv` → `loader`(t+221ms,
+  wrap = `flex items-center justify-center absolute inset-0 bg-transparent`)→
+  `conv`(t+329ms)。位置与类名与 8214 实测帧一致。
+- header 槽连续四次侧栏开关:`width` 与 aside 宽度逐次同步
+  (`0px`↔`340px`,`min-width: 180px` 恒定),标题 x 在 194 ↔ 354 之间切换。
+- 右面板:关 → `width: 0px`;开 → `width: 435.793px`;Expand panel(full-width)
+  → **`width: 0px`** 且中段 `aria-hidden="true"` + `invisible`(Codex `kJr` 的规则);
+  tab strip 的 header spacer 序列化成 `width: calc(70px)`,与 8214 逐字相同。
+- blossom 流光(preview:5199,明暗各一遍):light `color-mix(in srgb, #1a1c1f 24%, transparent)`、
+  dark `color-mix(in srgb, #ffffff 68%, transparent)`;Overlay 的
+  `background-image` 解析出完整 112° 渐变,`animation-name = _shimmer_174ad_1`,
+  `2.2s cubic-bezier(0.4, 0, 0.2, 1)`;Root 56×56。
+- 模型 pill:`DeepSeek V4 FlashExtra High`(config 是 `deepseek-v4-flash` + `xhigh`)。
+- typecheck(node + web)干净;改动文件 eslint 0 error
+  (`extract-codex-tokens.mjs` 那 13 条 prettier warning 是改动前就有的,已比对确认)。
+
+**未取证项**:statsig 门 `416252813` 在本机的取值未拿到。它为真时 resuming 期间
+不显示 loader、直接渐进渲染。WS 按**关**的分支实现(即 `isResuming && 无可渲染 turn`
+就显示 loader),依据是 8214 实测确实闪过 loader。
+另:动画中间帧无法在被遮挡的 Electron 窗口里采样(rAF 被节流到 0),
+上面验证的是静止值。

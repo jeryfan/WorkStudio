@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './assets/main.css'
 import { ThreadScrollContainer } from './chat/ThreadScrollContainer'
+import { LoadingIndicator } from './components/loading/LoadingIndicator'
 import { ThreadTurn, ThreadTurnGap, ThreadUserMessage } from './chat/ThreadTurn'
 import { MarkdownPart } from './chat/parts/MarkdownPart'
 import { TodoListPart } from './chat/parts/TodoListPart'
@@ -622,7 +623,8 @@ function Preview(): React.JSX.Element {
                 }
               >
                 {empty ? (
-                  <div className="text-sm text-token-description-foreground">Loading…</div>
+                  /* 与 ChatView 同一个加载态(Codex `Jir` fillParent) */
+                  <LoadingIndicator fillParent debugName="Preview.state" />
                 ) : (
                   /*
                    * 把 request / response 两行合成一个 turn —— 与 ChatView 一致。
@@ -632,30 +634,35 @@ function Preview(): React.JSX.Element {
                    * 更要紧的是结构也不对:Codex 的一个 turn 里必须同时有用户消息
                    * 与回复,分成两个 turn 就测不到段间隔与三段式。
                    */
-                  TURN_GROUPS.map((g) => (
-                    <ThreadTurn key={g.key} turnKey={g.key}>
-                      {g.request && (
-                        <>
-                          <ThreadUserMessage unitKey={g.key}>
-                            <MarkdownPart
-                              content={{
-                                kind: 'markdownContent',
-                                content: g.request.text,
-                                phase: null
-                              }}
-                            />
-                          </ThreadUserMessage>
-                          <ThreadTurnGap />
-                        </>
-                      )}
-                      {g.response && (
-                        <ThreadTurnBody
-                          row={g.response}
-                          isLastResponse={g.key === TURN_GROUPS[TURN_GROUPS.length - 1]?.key}
-                        />
-                      )}
-                    </ThreadTurn>
-                  ))
+                  <div
+                    data-thread-find-target="conversation"
+                    className="relative flex flex-col gap-3 electron:[--color-token-description-foreground:color-mix(in_srgb,var(--color-token-foreground)_70%,transparent)]"
+                  >
+                    {TURN_GROUPS.map((g) => (
+                      <ThreadTurn key={g.key} turnKey={g.key}>
+                        {g.request && (
+                          <>
+                            <ThreadUserMessage unitKey={g.key}>
+                              <MarkdownPart
+                                content={{
+                                  kind: 'markdownContent',
+                                  content: g.request.text,
+                                  phase: null
+                                }}
+                              />
+                            </ThreadUserMessage>
+                            <ThreadTurnGap />
+                          </>
+                        )}
+                        {g.response && (
+                          <ThreadTurnBody
+                            row={g.response}
+                            isLastResponse={g.key === TURN_GROUPS[TURN_GROUPS.length - 1]?.key}
+                          />
+                        )}
+                      </ThreadTurn>
+                    ))}
+                  </div>
                 )}
               </ThreadScrollContainer>
             </div>

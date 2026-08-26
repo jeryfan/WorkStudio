@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { animate, motion, useMotionValue, useTransform, useReducedMotion } from 'framer-motion'
+import type { ReactNode } from 'react'
+import { motion } from 'framer-motion'
 import { ResizeHandle } from './ResizeHandle'
 import { usePanelResize } from '../../utils/usePanelResize'
 import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
@@ -10,7 +10,8 @@ import { RightPanelTabs } from '../panel/RightPanelTabs'
  *
  * **常驻挂载**:Codex 的 EJr 由 shell 无条件渲染(keyed `right-panel:${threadId}`),
  * 面板关闭时不卸载整个组件,而是内部 `!isMounted && !isVisible ? null` ——
- * 关闭动画播完才真正返回 null。所以本组件必须**始终被渲染**,开关走 isOpen prop。
+ * 关闭动画播完才真正返回 null。所以本组件必须**始终被渲染**,开关状态从 AppShell
+ * store 读(`rightPanelMounted`),不走 prop —— Codex 的 EJr 同样是读全局状态。
  *
  * 开合动画(`UPr` + `WE`):一个 0..1 的 progress motion value,开=animate 到 1、
  * 关=到 0,弹簧 `{type:'spring', duration:0.5, bounce:0.1}`(WE,170205);
@@ -30,54 +31,35 @@ import { RightPanelTabs } from '../panel/RightPanelTabs'
  * full-width 模式(widthMode === 'full'):**投影、手柄、border-l 全部撤掉**。
  */
 export function RightPanel({
-  isOpen,
   width,
   onResize,
   onResizeEnd,
   children
 }: {
-  isOpen: boolean
   width: number
   onResize(desired: number): void
   /** 收手时回传最后一次目标宽度(Codex Tkr onResizeEnd(e)) */
   onResizeEnd?(finalWidth: number): void
   children?: ReactNode
 }): React.JSX.Element | null {
-  const { rightPanelController, rightPanelWidthMode } = useAppShell()
+  /*
+   * progress / animatedWidth / isMounted 三件都在 AppShell store 里
+   * (Codex 的 progress 是全局 motion value `hWn`,animatedWidth 由 `kJr` 算)——
+   * header 的右槽要读同一份 `rightPanelAnimatedWidth` 给标题让位,
+   * 组件私有一份的话面板展开时标题不会跟着收。
+   */
+  const {
+    rightPanelController,
+    rightPanelWidthMode,
+    rightPanelProgress,
+    rightPanelAnimatedWidth,
+    rightPanelMounted
+  } = useAppShell()
   const outlet = useAppShellSlot('rightPanelOutlet')
   const isFullWidth = rightPanelWidthMode === 'full'
   const resize = usePanelResize({ edge: 'left', size: width, onResize, onResizeEnd })
 
-  const reducedMotion = useReducedMotion() === true
-  /** Codex `hWn` —— 开合动画的 0..1 motion value */
-  const progress = useMotionValue(isOpen ? 1 : 0)
-  const animatedWidth = useTransform(progress, (p) => Math.max(0, Math.min(1, p)) * width)
-  /*
-   * Codex `UPr` 的 isMounted 语义:isVisible || progress.get() > 0 —— **渲染期**计算,
-   * 动画播完(progress 收到 0)时强制重渲染一次让它归零卸载(UPr 里就是
-   * listen('animationComplete') 后 setState 强制重渲染)。
-   */
-  const [, forceRender] = useState(0)
-  useEffect(() => {
-    const controls = reducedMotion
-      ? null
-      : animate(progress, isOpen ? 1 : 0, { type: 'spring', duration: 0.5, bounce: 0.1 })
-    if (reducedMotion) progress.set(isOpen ? 1 : 0)
-    const stop = progress.on('animationComplete', () => forceRender((x) => x + 1))
-    // reduced-motion 下 set() 不触发 animationComplete,用 change 兑底
-    const stopChange = progress.on('change', (v) => {
-      if (!isOpen && v <= 0) forceRender((x) => x + 1)
-    })
-    return () => {
-      controls?.stop()
-      stop()
-      stopChange()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- progress 是稳定的 motion value
-  }, [isOpen, reducedMotion])
-
-  const isMounted = isOpen || progress.get() > 0
-  if (!isMounted) return null
+  if (!rightPanelMounted) return null
 
   const activeTab = rightPanelController.activeTab
 
@@ -85,7 +67,7 @@ export function RightPanel({
     <motion.aside
       data-app-shell-focus-area="right-panel"
       className="relative z-[41] h-full min-h-0 min-w-0 shrink-0 overflow-visible ltr:ms-auto rtl:me-auto"
-      style={{ opacity: progress, width: animatedWidth }}
+      style={{ opacity: rightPanelProgress, width: rightPanelAnimatedWidth }}
       transition={{ type: 'spring', duration: 0.5, bounce: 0.1 }}
     >
       {!isFullWidth && (

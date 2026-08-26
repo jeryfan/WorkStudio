@@ -423,10 +423,25 @@ fs.writeFileSync(
 // 不改名、不改选择器: Codex 升级后重跑提取器应该是直接替换,而不是
 // 替换 + 修补映射层。差异吸收在 ThemeProvider 里(它给 <html> 挂 electron-light /
 // electron-dark),那是 WorkStudio 自己的代码,是唯一该做适配的地方。
+//
+// `--lightningcss-light/-dark` 这一对必须手动补回:ownDecls 把空值声明一律丢掉
+// (否则 Tailwind 解析 @theme 时报 "Invalid custom property, expected a value"),
+// 但 Codex 的组件 CSS 里有一批颜色是用它们做 light-dark() polyfill 的,例如
+//     ._Root_174ad_11 { --openai-blossom-shimmer-base:
+//         var(--lightningcss-light, color-mix(… 24%, transparent))
+//         var(--lightningcss-dark,  color-mix(… 68%, transparent)) }
+// 少了这一对,两个 var() 都取不到值 → 整条声明失效 → 加载态的 blossom 流光
+// 底色变成不透明前景色、扫光渐变直接变 `none`(实测)。
+// 值取自 Codex 的 `.electron-light` / `.electron-dark`(app-DuLjgNkx.css):
+// 空串表示"这一支不生效",`initial` 是 guaranteed-invalid → var() 落到回退值。
+// 这里是普通 CSS 规则而不是 @theme,空值不过 Tailwind 的 token 解析器。
+const LIGHTNINGCSS_LIGHT = '  --lightningcss-light: initial;\n  --lightningcss-dark: ;'
+const LIGHTNINGCSS_DARK = '  --lightningcss-light: ;\n  --lightningcss-dark: initial;'
 fs.writeFileSync(
   path.join(OUT, 'semantic.css'),
   banner('Codex 语义主题层', '明/暗各一套 —— 原语 → 语义,依赖链的第 2 层') +
-    `.electron-light {\n${fmt(light)}\n}\n\n.electron-dark {\n${fmt(dark)}\n}\n`
+    `.electron-light {\n${LIGHTNINGCSS_LIGHT}\n${fmt(light)}\n}\n\n` +
+    `.electron-dark {\n${LIGHTNINGCSS_DARK}\n${fmt(dark)}\n}\n`
 )
 
 // app-theme.css —— .app-theme: 698 个 --vscode-*,全部从语义层合成

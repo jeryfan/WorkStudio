@@ -1,3 +1,4 @@
+import { motion, useMotionTemplate } from 'framer-motion'
 import { useAppShell, useAppShellSlot } from '../../state/AppShellContext'
 import { runCommand } from '../../state/commands'
 import { ExpandPanelIcon, RestorePanelIcon } from '../icons'
@@ -29,6 +30,12 @@ export function RightPanelTabs(): React.JSX.Element {
   const afterListSticky = useAppShellSlot('rightPanelTabListAfterSticky')
   const beforeList = useAppShellSlot('rightPanelTabListBefore')
   const emptyState = useAppShellSlot('rightPanelTabsEmptyState')
+  /*
+   * Codex `uDr`:`c = ap`max(0px, calc(${headerRightWidth}px)`` —— 产物里那个
+   * 模板少了一个右括号,Chrome 在 EOF 处自动闭合数学函数并把常量折叠掉,
+   * 实测序列化出来就是 `width: calc(70px)`。这里把括号补齐(计算结果等价)。
+   */
+  const headerSpacerWidth = useMotionTemplate`max(0px, calc(${headerRightWidth}px))`
 
   return (
     <AppShellTabs
@@ -37,7 +44,7 @@ export function RightPanelTabs(): React.JSX.Element {
       beforeList={
         <>
           {rightPanelWidthMode === 'full' && !sidebarOpen && (
-            <div
+            <motion.div
               aria-hidden="true"
               className="pointer-events-none h-full shrink-0"
               style={{ width: headerLeftWidth }}
@@ -52,11 +59,11 @@ export function RightPanelTabs(): React.JSX.Element {
         <>
           {afterList}
           <ExpandPanelButton />
-          <div
+          <motion.div
             aria-hidden="true"
             data-testid="right-panel-tab-bar-header-spacer"
             className="pointer-events-none flex h-full shrink-0 items-center"
-            style={{ width: `calc(${headerRightWidth}px)` }}
+            style={{ width: headerSpacerWidth }}
           />
         </>
       }

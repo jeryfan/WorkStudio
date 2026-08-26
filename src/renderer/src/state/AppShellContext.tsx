@@ -10,6 +10,8 @@ import {
   useState,
   type ReactNode
 } from 'react'
+import { useMotionValue, type MotionValue } from 'framer-motion'
+import { usePanelReveal } from '../utils/usePanelReveal'
 import type { AppContextMenuItem } from '../components/menu/AppContextMenu'
 
 /**
@@ -418,10 +420,34 @@ interface AppShellContextValue {
   setBottomPanelHeight(desired: number): void
   /** 拖拽结束:持久化高度(Codex `zPr`) */
   commitBottomPanelHeight(): void
-  /** header 左右槽的实测宽(Codex `headerLeftWidth`/`headerRightWidth`),AppShellHeader 量了写进来 */
-  headerLeftWidth: number
-  headerRightWidth: number
-  setHeaderSlotWidth(side: 'start' | 'end', width: number): void
+  /**
+   * header 左右槽的**内容自然宽**(Codex `headerLeftWidth`/`headerRightWidth`,
+   * 都是 MotionValue)。AppShellHeader 的不可见测量副本量出来直接 `.set()`,
+   * 不过 React —— 它每帧都可能变(字体加载、按钮增减),走 state 会白白重渲染整棵树。
+   *
+   * 消费方:header 槽的 `min-width`、右面板 tab strip 两端的 header 让位 spacer。
+   */
+  headerLeftWidth: MotionValue<number>
+  headerRightWidth: MotionValue<number>
+  /**
+   * 两个面板的**动画宽度**(Codex `leftPanelAnimatedWidth`/`rightPanelAnimatedWidth`)。
+   * = clamp01(开合 progress) × 目标宽度,折叠时为 0。
+   *
+   * 这两个值是 header 槽 `width` 的唯一来源 —— Codex 的 header 是 `fixed inset-x-0`
+   * 横跨整窗,靠两端槽各自预留一个面板的宽度,中段(标题 + 三点菜单)才落在
+   * 两个面板之间的净跨度里。少了这一步标题就从侧栏上方开始。
+   */
+  leftPanelAnimatedWidth: MotionValue<number>
+  rightPanelAnimatedWidth: MotionValue<number>
+  /**
+   * 侧栏宽度的原始 MotionValue(Codex `leftPanelWidth`)。
+   * 拖拽中由 LeftPanelFrame 直写,不过 React;收手才提交一次 state。
+   */
+  leftPanelWidth: MotionValue<number>
+  /** 右面板开合 progress(Codex `hWn`):aside 的 opacity 直接用它 */
+  rightPanelProgress: MotionValue<number>
+  /** 右面板是否仍需挂载(关闭动画播完才 false,Codex `UPr` 的 isMounted) */
+  rightPanelMounted: boolean
   rightPanelController: AppShellTabPanelController
   bottomPanelController: AppShellTabPanelController
   /** Codex `dD`:文件树全局开合(持久化) */
@@ -497,11 +523,42 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
         ? rightPanelRatioToWidth(rightPanelRatio, mainContentWidth, rightPanelWidthMode)
         : defaultRightPanelWidth(mainContentWidth, shellSize.h)
 
-  // header 槽实测宽(Codex 的 headerLeftWidth/headerRightWidth)
-  const [headerSlotWidths, setHeaderSlotWidths] = useState({ start: 0, end: 0 })
-  const setHeaderSlotWidth = useCallback((side: 'start' | 'end', width: number): void => {
-    setHeaderSlotWidths((prev) => (prev[side] === width ? prev : { ...prev, [side]: width }))
-  }, [])
+  // header 槽实测宽(Codex 的 headerLeftWidth/headerRightWidth —— MotionValue,不进 state)
+  const headerLeftWidth = useMotionValue(0)
+  const headerRightWidth = useMotionValue(0)
+
+  /*
+   * 面板几何的 MotionValue 层 —— 对齐 Codex app shell 根(`AYr`)持有的那几个值:
+   *
+   *   I  = leftPanelWidth            原始宽度(拖拽中直写)
+   *   B  = leftPanelAnimatedWidth    = UPr({size: I, isVisible}).animatedSize
+   *   oe = rightPanelAnimatedWidth   = kJr(...) 里的 clamp01(progress) × width
+   *
+   * **折叠时 size 必须仍是折叠前的宽度**:`sidebarWidth` 折叠即变 0,直接喂给
+   * usePanelReveal 会让关闭动画瞬间跳完(progress 还在 1,size 已经 0)。
+   * 所以这里用 `sidebarOpen ? sidebarWidth : lastSidebarWidth` —— 与 Codex 的
+   * `I`(持久化宽度,折叠只翻 `oD` 布尔而不写宽度)语义一致。
+   */
+  const sidebarVisibleWidth = sidebarOpen ? sidebarWidth : lastSidebarWidth
+  const leftPanelWidth = useMotionValue(sidebarVisibleWidth)
+  const rightPanelWidthMV = useMotionValue(rightPanelWidth)
+  useEffect(() => {
+    // 拖拽期间 state 不变,所以这个 effect 不会把手动写进去的值冲掉
+    leftPanelWidth.set(sidebarVisibleWidth)
+  }, [sidebarVisibleWidth, leftPanelWidth])
+  useEffect(() => {
+    rightPanelWidthMV.set(rightPanelWidth)
+  }, [rightPanelWidth, rightPanelWidthMV])
+
+  const { animatedSize: leftPanelAnimatedWidth } = usePanelReveal({
+    size: leftPanelWidth,
+    isVisible: sidebarOpen
+  })
+  const {
+    progress: rightPanelProgress,
+    animatedSize: rightPanelAnimatedWidth,
+    isMounted: rightPanelMounted
+  } = usePanelReveal({ size: rightPanelWidthMV, isVisible: rightPanelOpen })
 
   // 底部面板高度:持久化像素 > 默认 280;clamp 随窗口高度走(Codex LPr 的 r = mainContentHeight)
   const [bottomPanelHeight, setBottomPanelHeightState] = useState(() =>
@@ -979,9 +1036,13 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       bottomPanelHeight,
       setBottomPanelHeight,
       commitBottomPanelHeight,
-      headerLeftWidth: headerSlotWidths.start,
-      headerRightWidth: headerSlotWidths.end,
-      setHeaderSlotWidth,
+      headerLeftWidth,
+      headerRightWidth,
+      leftPanelAnimatedWidth,
+      rightPanelAnimatedWidth,
+      leftPanelWidth,
+      rightPanelProgress,
+      rightPanelMounted,
       rightPanelController,
       bottomPanelController,
       fileTreeOpen,
@@ -1014,8 +1075,13 @@ export function AppShellProvider({ children }: { children: ReactNode }): React.J
       bottomPanelHeight,
       setBottomPanelHeight,
       commitBottomPanelHeight,
-      headerSlotWidths,
-      setHeaderSlotWidth,
+      headerLeftWidth,
+      headerRightWidth,
+      leftPanelAnimatedWidth,
+      rightPanelAnimatedWidth,
+      leftPanelWidth,
+      rightPanelProgress,
+      rightPanelMounted,
       rightPanelController,
       bottomPanelController,
       fileTreeOpen,

@@ -5,6 +5,8 @@
    ========================================================================== */
 
 .electron-light {
+  --lightningcss-light: initial;
+  --lightningcss-dark: ;
   --color-accent-blue: var(--blue-300);
   --color-accent-green: var(--green-500);
   --color-accent-orange: var(--orange-500);
@@ -91,6 +93,8 @@
 }
 
 .electron-dark {
+  --lightningcss-light: ;
+  --lightningcss-dark: initial;
   --color-accent-blue: var(--blue-300);
   --color-accent-green: var(--green-300);
   --color-accent-orange: var(--orange-400);

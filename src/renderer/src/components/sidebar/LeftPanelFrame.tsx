@@ -1,11 +1,12 @@
-import { useEffect, type ReactNode } from 'react'
-import { motion, useMotionValue, useSpring } from 'framer-motion'
+import { type ReactNode } from 'react'
+import { motion } from 'framer-motion'
 import { ResizeHandle } from '../layout/ResizeHandle'
 import { usePanelResize } from '../../utils/usePanelResize'
 import {
-  SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  useAppShell
 } from '../../state/AppShellContext'
 
 /**
@@ -27,6 +28,11 @@ import {
  *
  * 把宽度动画与拖拽放在外壳里也是 Codex 的分工：aside 的 width 由 MotionValue
  * 驱动，拖拽中直写 DOM 不过 React；收手才提交一次 state。
+ *
+ * **两个 MotionValue 都住在 AppShell store 里**(Codex `AYr` 持有 `leftPanelWidth`
+ * 与 `leftPanelAnimatedWidth`),不是本组件私有的 —— header 的左槽要用同一份
+ * `leftPanelAnimatedWidth` 给标题让位(见 AppShellHeader 的 HeaderSlot)。
+ * 各持一份的话拖动侧栏时标题不会跟着走。
  */
 export function LeftPanelFrame({
   width,
@@ -38,16 +44,11 @@ export function LeftPanelFrame({
   onResize(desired: number): void
   children: ReactNode
 }): React.JSX.Element {
-  const widthMV = useMotionValue(width)
-  const animatedWidth = useSpring(widthMV, { stiffness: 420, damping: 45 })
-  // 非拖拽来源(开关、窗口变化)同步进 MotionValue,spring 顺带播开/关动画
-  useEffect(() => {
-    widthMV.set(width)
-  }, [width, widthMV])
+  const { leftPanelWidth, leftPanelAnimatedWidth } = useAppShell()
   const resize = usePanelResize({
     edge: 'right',
     size: width,
-    onResize: (desired) => widthMV.set(Math.min(Math.max(desired, 0), SIDEBAR_MAX_WIDTH)),
+    onResize: (desired) => leftPanelWidth.set(Math.min(Math.max(desired, 0), SIDEBAR_MAX_WIDTH)),
     onResizeEnd: (final) => onResize(final < SIDEBAR_MIN_WIDTH ? 0 : final)
   })
 
@@ -60,7 +61,7 @@ export function LeftPanelFrame({
        * 折叠态 width:0 + overflow 由子层的 max-w-full.overflow-hidden 裁掉。
        */
       className="app-shell-left-panel pointer-events-auto relative flex overflow-visible browser:bg-token-main-surface-primary"
-      style={{ paddingTop: 'var(--height-toolbar)', width: animatedWidth }}
+      style={{ paddingTop: 'var(--height-toolbar)', width: leftPanelAnimatedWidth }}
     >
       {/* Codex 在这层写内联 min-width/width/opacity —— 折叠动画期间靠它裁剪,
           min-width 和 width 同值是为了不让内容把它挤宽 */}
